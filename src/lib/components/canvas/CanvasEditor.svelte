@@ -36,7 +36,16 @@
     }
 
     if (canvas.canvasWidth !== width || canvas.canvasHeight !== height) {
+      // Snapshot the current mask so the user's work survives the resize.
+      // The mask will be re-hydrated onto the fresh mask layer by CanvasStage.
+      const maskSnapshot = canvas.snapshotInpaintMask();
       canvas.initCanvas(width, height);
+      if (maskSnapshot) {
+        canvas.pendingMaskRestoreUrl = maskSnapshot;
+      }
+      // Bump the source version so any in-flight inpaint result with the
+      // old dimensions is rejected when it arrives.
+      canvas.inpaintSourceVersion += 1;
     }
   });
 

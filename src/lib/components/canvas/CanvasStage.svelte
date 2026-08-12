@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import Konva from "konva";
   import { generation } from "../../stores/generation.svelte.js";
   import { canvas, type ToolType } from "../../stores/canvas.svelte.js";
@@ -10,7 +10,21 @@
   // Hide the editable inpaint mask while a finished result is being previewed, so
   // the clean output is visible. Keep it shown before any result, during a re-roll
   // (progress.isGenerating), and once the user paints more mask (markMaskEdited).
-  const hideInpaintMask = $derived(canvas.shouldHideInpaintMask && !progress.isGenerating);
+  // Use a one-frame-delayed wasGenerating to suppress the flicker when isGenerating
+  // briefly flips false between clearing the old prompt and submitting the new one.
+  let wasGenerating = $state(false);
+  $effect(() => {
+    if (progress.isGenerating) {
+      wasGenerating = true;
+    } else {
+      // Delay the flip so a single-frame false doesn't toggle the mask.
+      tick().then(() => { wasGenerating = false; });
+    }
+  });
+
+  const hideInpaintMask = $derived(
+    canvas.shouldHideInpaintMask && !progress.isGenerating && !wasGenerating
+  );
 
   let containerEl: HTMLDivElement | undefined = $state();
   let stage: Konva.Stage | null = null;
@@ -1078,29 +1092,86 @@
     }
 
     if (isDrawing) {
+      const strokeLayerId = currentLine?.getLayer()?.id();
       isDrawing = false;
       currentLine = null;
       activeStrokeTool = null;
+      if (strokeLayerId) scheduleThumbRefresh(strokeLayerId);
+      void autoCommitMaskIfNeeded();
     }
 
     if (isDrawingRect) {
       isDrawingRect = false;
+      if (rectStartPos) {
+        // Commit the rect even on leave — partial rect > lost work
+        const target = getDrawingTargetLayer();
+        if (target) {
+          const { layer, kLayer } = target;
+          const x = Math.min(rectStartPos.x, rectStartPos.x);
+          const y = Math.min(rectStartPos.y, rectStartPos.y);
+          const w = 1;
+          const h = 1;
+          if (w > 0 && h > 0) {
+            const inpaintMaskMode = isInpaintMaskMode();
+            const color = inpaintMaskMode
+              ? canvas.maskOverlayColor
+              : layer.type === "mask"
+                ? canvas.maskOverlayColor
+                : canvas.foregroundColor;
+            const rect = new Konva.Rect({
+              x, y, width: w, height: h,
+              fill: color,
+              opacity: inpaintMaskMode
+                ? Math.min(canvas.brushSettings.opacity, 0.45)
+                : canvas.brushSettings.opacity,
+              listening: false,
+            });
+            kLayer.add(rect);
+            kLayer.batchDraw();
+            scheduleThumbRefresh(layer.id);
+          }
+        }
+      }
       rectStartPos = null;
       if (rectPreview) {
         rectPreview.destroy();
         rectPreview = null;
         uiLayer?.batchDraw();
       }
+      void autoCommitMaskIfNeeded();
     }
 
     if (isLasso) {
       isLasso = false;
+      const target = getDrawingTargetLayer();
+      if (target && lassoPoints.length >= 6) {
+        const { layer, kLayer } = target;
+        const inpaintMaskMode = isInpaintMaskMode();
+        const color = inpaintMaskMode
+          ? canvas.maskOverlayColor
+          : layer.type === "mask"
+            ? canvas.maskOverlayColor
+            : canvas.foregroundColor;
+        const shape = new Konva.Line({
+          points: [...lassoPoints],
+          closed: true,
+          fill: color,
+          opacity: inpaintMaskMode
+            ? Math.min(canvas.brushSettings.opacity, 0.45)
+            : canvas.brushSettings.opacity,
+          listening: false,
+        });
+        kLayer.add(shape);
+        kLayer.batchDraw();
+        scheduleThumbRefresh(layer.id);
+      }
       lassoPoints = [];
       if (lassoPreviewLine) {
         lassoPreviewLine.destroy();
         lassoPreviewLine = null;
         uiLayer?.batchDraw();
       }
+      void autoCommitMaskIfNeeded();
     }
 
     if (isMovingLayer) {
@@ -1310,6 +1381,7 @@
 
       // Reset layer transform temporarily for export
       const origScale = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       kLayer.scaleX(1);
@@ -1317,21 +1389,23 @@
       kLayer.x(0);
       kLayer.y(0);
 
-      const layerCanvas = kLayer.toCanvas({
-        pixelRatio: 1,
-        width: canvas.canvasWidth,
-        height: canvas.canvasHeight,
-      });
+      let layerCanvas: HTMLCanvasElement;
+      try {
+        layerCanvas = kLayer.toCanvas({
+          pixelRatio: 1,
+          width: canvas.canvasWidth,
+          height: canvas.canvasHeight,
+        });
+      } finally {
+        kLayer.scaleX(origScale);
+        kLayer.scaleY(origScaleY);
+        kLayer.x(origX);
+        kLayer.y(origY);
+      }
 
       ctx.globalAlpha = layer.opacity;
       ctx.drawImage(layerCanvas, 0, 0);
       ctx.globalAlpha = 1;
-
-      // Restore transform
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
     }
 
     return offscreen;
@@ -1352,7 +1426,8 @@
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
 
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       // The mask node may be visually hidden while a result is previewed; Konva
@@ -1365,19 +1440,22 @@
       kLayer.y(0);
       kLayer.visible(true);
 
-      const layerCanvas = kLayer.toCanvas({
-        pixelRatio: 1,
-        width: canvas.canvasWidth,
-        height: canvas.canvasHeight,
-      });
+      let layerCanvas: HTMLCanvasElement;
+      try {
+        layerCanvas = kLayer.toCanvas({
+          pixelRatio: 1,
+          width: canvas.canvasWidth,
+          height: canvas.canvasHeight,
+        });
+      } finally {
+        kLayer.scaleX(origScaleX);
+        kLayer.scaleY(origScaleY);
+        kLayer.x(origX);
+        kLayer.y(origY);
+        kLayer.visible(origVisible);
+      }
 
       ctx.drawImage(layerCanvas, 0, 0);
-
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
-      kLayer.visible(origVisible);
     }
 
     return offscreen;

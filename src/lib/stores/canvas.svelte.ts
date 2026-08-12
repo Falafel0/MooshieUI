@@ -61,6 +61,8 @@ function genLayerId(): string {
   return `layer_${++nextLayerId}`;
 }
 
+const MAX_INPAINT_HISTORY = 64;
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -141,6 +143,10 @@ class CanvasStore {
     deltaX: 0,
     deltaY: 0,
   });
+
+  // In-flight mask sync promise — awaited by syncToGeneration so a fast
+  // Generate click never sends a stale mask before auto-commit finishes.
+  private _maskSyncInFlight: Promise<boolean> | null = null;
 
   // Reference to the Konva stage (set by CanvasStage)
   private _stageRef: any = null;
@@ -274,6 +280,8 @@ class CanvasStore {
       this.originalInpaintWidth = null;
       this.originalInpaintHeight = null;
       this.referenceImageUrl = null;
+      // Keep generation.inputImage — callers pass null to reset canvas state,
+      // not to wipe the generation input that was set elsewhere.
       return;
     }
 
@@ -301,8 +309,10 @@ class CanvasStore {
     // back to it, and so the same mask can be re-hydrated onto the incoming
     // result (letting "Generate" re-roll the same region without repainting).
     const outgoingMask = this.snapshotInpaintMask();
+    // Cap history at MAX_INPAINT_HISTORY entries so iterative inpaint
+    // sessions don't grow unbounded memory (matches canvasHistory's limit).
     this.inpaintBaseHistory = [
-      ...this.inpaintBaseHistory,
+      ...this.inpaintBaseHistory.slice(-(MAX_INPAINT_HISTORY - 1)),
       {
         previewUrl: this.preparedInpaintPreviewUrl ?? this.referenceImageUrl,
         uploadedInputName: generation.inputImage,
@@ -362,8 +372,10 @@ class CanvasStore {
     }
 
     const outgoingMask = this.snapshotInpaintMask();
+    // Cap history at MAX_INPAINT_HISTORY entries so iterative inpaint
+    // sessions don't grow unbounded memory (matches canvasHistory's limit).
     this.inpaintBaseHistory = [
-      ...this.inpaintBaseHistory,
+      ...this.inpaintBaseHistory.slice(-(MAX_INPAINT_HISTORY - 1)),
       {
         previewUrl: this.preparedInpaintPreviewUrl ?? this.referenceImageUrl,
         uploadedInputName: generation.inputImage,
@@ -392,9 +404,12 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
 
-    // Fresh mask on the new base.
-    this.persistedMaskPreviewUrl = null;
-    this.clearMask();
+    // Fresh mask on the new base. Only clear Konva children if the stage is
+    // mounted; if the canvas panel is closed, the next initCanvas call will
+    // rebuild layers from scratch anyway.
+    if (this._stageRef) {
+      this.clearMask();
+    }
     this.initCanvas(generation.width, generation.height);
   }
 
@@ -430,6 +445,9 @@ class CanvasStore {
     this.clearPreparedInpaintOverride();
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
+    // Discard any mask restore queued by a previous base swap so the
+    // restored original canvas doesn't get a stale mask overlay.
+    this.pendingMaskRestoreUrl = null;
     generation.inputImage = this.originalInpaintInputImageName;
     generation.width = this.originalInpaintWidth;
     generation.height = this.originalInpaintHeight;
@@ -447,6 +465,9 @@ class CanvasStore {
     this.originalInpaintWidth = null;
     this.originalInpaintHeight = null;
     this.referenceImageUrl = null;
+    // Reset draw mode so the user doesn't accidentally paint on a stale mask
+    // layer after switching images.
+    this.inpaintDrawMode = "regular";
   }
 
   private clearInpaintBaseHistory() {
@@ -530,6 +551,9 @@ class CanvasStore {
 
   stageImage(url: string, options?: { owned?: boolean }) {
     if (!url) return;
+    // Skip duplicates — the same image dragged/pasted twice shouldn't create
+    // duplicate staging entries that can't be individually dismissed.
+    if (this.stagingImages.some((e) => e.url === url)) return;
     this.stagingImages = [
       ...this.stagingImages,
       {
@@ -642,13 +666,19 @@ class CanvasStore {
 
       // The viewport is applied as a layer transform; reset it so the snapshot
       // captures canvas-space pixels, then restore it.
-      const origScale = layer.scaleX();
+      const origScaleX = layer.scaleX();
+      const origScaleY = layer.scaleY();
       const origX = layer.x();
       const origY = layer.y();
+      // Force the layer visible so Konva renders its pixels into toCanvas — a
+      // hidden layer produces an empty frame, silently dropping the mask from
+      // the snapshot (and from undo history).
+      const origVisible = layer.visible();
       layer.scaleX(1);
       layer.scaleY(1);
       layer.x(0);
       layer.y(0);
+      layer.visible(true);
       try {
         const layerCanvas = layer.toCanvas({
           pixelRatio: 1,
@@ -660,10 +690,11 @@ class CanvasStore {
       } catch (error) {
         console.error("Failed to snapshot inpaint mask:", error);
       } finally {
-        layer.scaleX(origScale);
-        layer.scaleY(origScale);
+        layer.scaleX(origScaleX);
+        layer.scaleY(origScaleY);
         layer.x(origX);
         layer.y(origY);
+        layer.visible(origVisible);
       }
     }
 
@@ -738,6 +769,8 @@ class CanvasStore {
     maskLayer.batchDraw?.();
 
     this.activeLayerId = maskLayerMeta.id;
+    // Drawing mode stays "regular" visually but the active layer is now the
+    // mask — subsequent strokes write to mask automatically without toggling.
     return true;
   }
 
@@ -917,6 +950,9 @@ class CanvasStore {
     this.layers = [];
     this.activeLayerId = null;
     this.layerThumbnails = {};
+    // The old persisted mask is tied to the previous layers; clear it so the
+    // fresh mask layer below doesn't show a ghost overlay from a prior base.
+    this.persistedMaskPreviewUrl = null;
 
     this.addLayer("raster", locale.t("canvas.layer.background"));
     this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
@@ -939,6 +975,11 @@ class CanvasStore {
   }
 
   async syncMaskToGeneration(maskCanvas: HTMLCanvasElement | null, uploadToComfy: boolean = true): Promise<boolean> {
+    this._maskSyncInFlight = this._syncMaskToGenerationImpl(maskCanvas, uploadToComfy);
+    return this._maskSyncInFlight;
+  }
+
+  private async _syncMaskToGenerationImpl(maskCanvas: HTMLCanvasElement | null, uploadToComfy: boolean): Promise<boolean> {
     if (!maskCanvas) {
       generation.maskImage = null;
       this.persistedMaskPreviewUrl = null;
@@ -973,7 +1014,9 @@ class CanvasStore {
     const imgData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
     const pixels = imgData.data;
     for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i + 3] > 0 && (pixels[i] > 64 || pixels[i + 1] > 64 || pixels[i + 2] > 64)) {
+      // Lower the threshold from 64 to 16 so dark semi-transparent strokes
+      // (e.g. low-opacity brush on a dark background) aren't dropped.
+      if (pixels[i + 3] > 0 && (pixels[i] > 16 || pixels[i + 1] > 16 || pixels[i + 2] > 16)) {
         pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
         pixels[i + 3] = 255;
       } else {
@@ -983,9 +1026,10 @@ class CanvasStore {
     }
     exportCtx.putImageData(imgData, 0, 0);
 
-    // Persist/update uploaded mask preview only when we actually sync to ComfyUI.
+    // Persist/update uploaded mask preview even when not uploading to ComfyUI,
+    // so auto-commits keep the visual overlay in sync with the actual mask.
+    this.persistedMaskPreviewUrl = exportCanvas.toDataURL("image/png");
     if (uploadToComfy) {
-      this.persistedMaskPreviewUrl = exportCanvas.toDataURL("image/png");
       const result = await this.exportLayerAsImage(exportCanvas, "canvas_mask.png");
       generation.maskImage = result.name;
     }
@@ -1005,13 +1049,11 @@ class CanvasStore {
     let hasRaster = false;
     let hasMask = false;
 
-    // In inpainting mode, keep the currently selected input image as the baseline.
-    // This makes denoise behave as expected: only the masked area is reworked.
+    // In inpainting mode, raster drawn by the user takes priority over the
+    // session original input — the user may have painted touch-ups that need
+    // to be sent as the new baseline for this generation.
     if (isInpainting) {
-      if (generation.inputImage) {
-        hasRaster = true;
-      } else if (rasterCanvas) {
-        // Last resort only: if no source image exists, fall back to painted raster.
+      if (rasterCanvas) {
         const ctx = rasterCanvas.getContext("2d")!;
         const data = ctx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height).data;
         for (let i = 3; i < data.length; i += 4) {
@@ -1021,6 +1063,9 @@ class CanvasStore {
           const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
           generation.inputImage = result.name;
         }
+      }
+      if (!hasRaster && generation.inputImage) {
+        hasRaster = true;
       }
     } else {
       // Non-inpaint modes use raster if present, otherwise staged image fallback.
@@ -1048,11 +1093,25 @@ class CanvasStore {
       }
     }
 
+    // Wait for any in-flight auto-commit of the mask so we never snapshot
+    // a stale/intermediate mask state.
+    if (this._maskSyncInFlight) {
+      try {
+        await this._maskSyncInFlight;
+      } catch {
+        // auto-commit failure is non-fatal; proceed with current mask state
+      }
+      this._maskSyncInFlight = null;
+    }
+
     // Export mask
     hasMask = await this.syncMaskToGeneration(maskCanvas, true);
 
     // Keep the user-selected mode when using canvas flow for image editing modes.
-    if (generation.mode === "inpainting") {
+    // Only auto-detect mode when the current mode is txt2img (the default).
+    if (generation.mode !== "txt2img" && generation.mode !== "inpainting" && generation.mode !== "img2img") {
+      // video, image_edit, or any future mode — don't override
+    } else if (generation.mode === "inpainting") {
       generation.mode = "inpainting";
     } else if (generation.mode === "img2img") {
       generation.mode = "img2img";
