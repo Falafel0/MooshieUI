@@ -524,6 +524,7 @@ const ru: Record<string, string> = {
   "generation.dimensions.width": "Ш",
   "generation.dimensions.height": "В",
   "generation.dimensions.swap": "Поменять Ш/В",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Только соотношение — задаёт форму изображения, а не размер в пикселях.",
   "generation.dimensions.reset": "Сбросить до {res}",
   "generation.dimensions.recommended": "Рекомендуется для {model}: {res}",

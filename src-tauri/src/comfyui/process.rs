@@ -710,7 +710,14 @@ pub async fn start_comfyui_process(state: &AppState) -> Result<StartResult, AppE
     }
 
     #[cfg(target_os = "windows")]
-    let python_path = format!("{}/Scripts/python.exe", config.venv_path);
+    let python_path = {
+        let scripts_python = format!("{}/Scripts/python.exe", config.venv_path);
+        if std::path::Path::new(&scripts_python).exists() {
+            scripts_python
+        } else {
+            format!("{}/python.exe", config.venv_path)
+        }
+    };
     #[cfg(not(target_os = "windows"))]
     let python_path = format!("{}/bin/python", config.venv_path);
     let main_path = format!("{}/main.py", config.comfyui_path);
@@ -1537,7 +1544,14 @@ pub async fn start_worker_process(
     }
 
     #[cfg(target_os = "windows")]
-    let python_path = format!("{}/Scripts/python.exe", config.venv_path);
+    let python_path = {
+        let scripts_python = format!("{}/Scripts/python.exe", config.venv_path);
+        if std::path::Path::new(&scripts_python).exists() {
+            scripts_python
+        } else {
+            format!("{}/python.exe", config.venv_path)
+        }
+    };
     #[cfg(not(target_os = "windows"))]
     let python_path = format!("{}/bin/python", config.venv_path);
     let main_path = format!("{}/main.py", config.comfyui_path);

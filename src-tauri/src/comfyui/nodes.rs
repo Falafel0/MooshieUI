@@ -169,6 +169,8 @@ const REQUIRED_MOOSHIE_NODE_CLASSES: &[&str] = &[
     "MooshieSmartGuidance",
     "MooshieCheckpointLoaderPath",
     "MooshieDiffusionLoaderPath",
+    "MooshieImageCropByMask",
+    "MooshieImageUncrop",
     "NanoSaurLoader",
     "ApplyTiledDiffusion",
 ];

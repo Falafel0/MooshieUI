@@ -524,6 +524,7 @@ const pt: Record<string, string> = {
   "generation.dimensions.width": "L",
   "generation.dimensions.height": "A",
   "generation.dimensions.swap": "Trocar L/A",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Apenas proporção — define a forma da imagem, não o tamanho em pixels.",
   "generation.dimensions.reset": "Redefinir para {res}",
   "generation.dimensions.recommended": "Recomendado para {model}: {res}",

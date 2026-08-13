@@ -545,6 +545,7 @@ const de: Record<string, string> = {
   "generation.dimensions.width": "Breite",
   "generation.dimensions.height": "Höhe",
   "generation.dimensions.swap": "Breite/Höhe tauschen",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Nur Verhältnis — bestimmt die Bildform, nicht die Pixelgröße.",
   "generation.dimensions.reset": "Auf {res} zurücksetzen",
   "generation.dimensions.recommended": "Empfohlen für {model}: {res}",

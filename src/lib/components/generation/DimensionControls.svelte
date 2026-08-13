@@ -1,5 +1,6 @@
 <script lang="ts">
   import { generation } from "../../stores/generation.svelte.js";
+  import { canvas } from "../../stores/canvas.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import InfoTip from "../ui/InfoTip.svelte";
   import type { ModelFamily } from "../../utils/modelFamily.js";
@@ -311,6 +312,9 @@
       </button>
     </div>
     <p class="text-[10px] text-neutral-500 mt-1">{locale.t('generation.dimensions.ratio_hint')}</p>
+    {#if canvas.isCanvasMode}
+      <p class="text-[10px] text-amber-400/80 mt-1">{locale.t('generation.dimensions.canvas_active_hint')}</p>
+    {/if}
     {/if}
   </div>
 

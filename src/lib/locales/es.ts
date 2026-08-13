@@ -568,6 +568,7 @@ const es: Record<string, string> = {
   "generation.dimensions.width": "A",
   "generation.dimensions.height": "Al",
   "generation.dimensions.swap": "Intercambiar A/Al",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Solo proporción — define la forma de la imagen, no su tamaño en píxeles.",
   "generation.dimensions.reset": "Restablecer a {res}",
   "generation.dimensions.recommended": "Recomendado para {model}: {res}",

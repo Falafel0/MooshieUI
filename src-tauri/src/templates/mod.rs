@@ -501,7 +501,13 @@ pub fn build_workflow(
 
     let mut result = match params.mode.as_str() {
         "img2img" => img2img::build(params, seed),
-        "inpainting" => inpainting::build(params, seed),
+        "inpainting" => {
+            if params.inpaint_area == "mask_only" {
+                inpainting::build_crop_upscale(params, seed)
+            } else {
+                inpainting::build(params, seed)
+            }
+        }
         "image_edit" => image_edit::build(params, seed),
         _ => txt2img::build(params, seed),
     };

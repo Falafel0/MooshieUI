@@ -524,6 +524,7 @@ const zh: Record<string, string> = {
   "generation.dimensions.width": "宽度",
   "generation.dimensions.height": "高度",
   "generation.dimensions.swap": "交换宽高",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "仅为比例 — 决定图像形状，而非像素尺寸。",
   "generation.dimensions.reset": "重置为 {res}",
   "generation.dimensions.recommended": "{model} 推荐：{res}",

@@ -602,6 +602,7 @@ const pl: Record<string, string> = {
   "generation.dimensions.width": "S",
   "generation.dimensions.height": "W",
   "generation.dimensions.swap": "Zamień S/W",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Tylko proporcje — ustawia kształt obrazu, a nie rozmiar w pikselach.",
   "generation.dimensions.reset": "Resetuj do {res}",
   "generation.dimensions.recommended": "Zalecane dla {model}: {res}",

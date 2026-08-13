@@ -524,6 +524,7 @@ const ko: Record<string, string> = {
   "generation.dimensions.width": "너비",
   "generation.dimensions.height": "높이",
   "generation.dimensions.swap": "가로/세로 전환",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "비율 전용 — 이미지의 형태를 결정하며 픽셀 크기가 아닙니다.",
   "generation.dimensions.reset": "{res}(으)로 초기화",
   "generation.dimensions.recommended": "{model} 권장: {res}",
