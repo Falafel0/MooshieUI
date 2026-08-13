@@ -1,0 +1,127 @@
+name: Upstream Sync (auto-merge clean only)
+
+# Periodically merges the upstream repo (Mooshieblob1/MooshieUI) main into this
+# fork's main. Merges apply ONLY when the merge is conflict-free; a conflicting
+# merge is rolled back and reported as a de-duplicated issue (never a broken
+# branch, never nightly spam) so this fork's own changes are never clobbered.
+
+on:
+  schedule:
+    # Daily at 04:17 UTC — off-peak, after most upstream CI/releases settle.
+    - cron: "17 4 * * *"
+  workflow_dispatch: # manual "Run workflow" button
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    name: Merge upstream/main into fork/main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          # Depth 0 so `git merge` has full history for a clean 3-way merge.
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "upstream-sync[bot]"
+          git config user.email "upstream-sync[bot]@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/Mooshieblob1/MooshieUI.git
+          git fetch upstream main
+          echo "FORK_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_HEAD=$(git rev-parse upstream/main)" >> "$GITHUB_ENV"
+
+      - name: Detect whether upstream is ahead
+        id: detect
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "upstream is already fully merged; nothing to do."
+            echo "AHEAD=false" >> "$GITHUB_ENV"
+          else
+            echo "AHEAD=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Attempt clean merge
+        if: env.AHEAD == 'true'
+        id: merge
+        run: |
+          # Send the merge to a side ref first so the working tree is untouched
+          # if it is dirty; only commit+push when it merges cleanly.
+          if git merge --no-commit --no-ff upstream/main > /tmp/merge.log 2>&1; then
+            git commit -m "chore: sync upstream/main ($UPSTREAM_HEAD)"
+            git push origin main
+            echo "MERGED=true" >> "$GITHUB_ENV"
+          else
+            echo "MERGED=false" >> "$GITHUB_ENV"
+            git merge --abort
+            echo "--- merge log (head) ---"
+            head -40 /tmp/merge.log
+          fi
+
+      - name: File de-duplicated issue for conflicting merge
+        if: env.MERGED == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const upstream = process.env.UPSTREAM_HEAD;
+            const title = `Upstream sync blocked: merge conflict on \`${upstream}\``;
+            const body =
+              `Automatic upstream sync detected a **conflict** and was rolled back; ` +
+              `this fork's own changes were left untouched. ` +
+              `Upstream head: \`${upstream}\`\n\n` +
+              `Resolve manually:\n\n` +
+              "```bash\n" +
+              `git fetch upstream main\n` +
+              `git checkout -b sync/upstream-conflict\n` +
+              `git merge upstream/main   # resolve conflicts, then:\n` +
+              `git push origin sync/upstream-conflict\n` +
+              "```\n\n" +
+              `This issue is kept open until the next clean sync resolves it. ` +
+              `It will be closed automatically once \`upstream/main\` merges cleanly.`;
+
+            // De-duplicate: don't open a new issue if one is already open with the same title.
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", per_page: 100,
+            });
+            const existing = open.find((i) => i.title === title && !i.pull_request);
+            if (existing) {
+              console.log(`Already filed as #${existing.number}; skipping.`);
+              return;
+            }
+            await github.rest.issues.create({ owner, repo, title, body });
+
+      - name: Close stale conflict issues after a clean sync
+        if: env.MERGED == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", per_page: 100,
+            });
+            const prefix = `Upstream sync blocked: merge conflict on \``;
+            for (const i of open) {
+              if (i.title.startsWith(prefix) && !i.pull_request) {
+                await github.rest.issues.update({
+                  owner, repo, issue_number: i.number,
+                  state: "closed",
+                  state_reason: "completed",
+                });
+                console.log(`Closed stale conflict issue #${i.number}`);
+              }
+            }
