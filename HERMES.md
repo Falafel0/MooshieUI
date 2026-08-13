@@ -93,6 +93,11 @@ cargo clippy --manifest-path src-tauri/Cargo.toml                       # Rust l
 
 ## Quick Reference: What to Load
 
+> **Fork-aware agents (Falafel0/MooshieUI):** start with
+> [`.hermes/FORK-GUIDE.md`](.hermes/FORK-GUIDE.md) — it has the fork's remotes,
+> portable-ComfyUI setup, updater/signing details, i18n trap, and how to extend.
+> Load it BEFORE the skills below if you plan to build/commit to this fork.
+
 | Task | Load |
 |------|------|
 | Commit/push changes | `skill_view('push')` |
