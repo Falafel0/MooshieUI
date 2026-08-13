@@ -9,8 +9,8 @@
 ## 1. Что это за репозиторий
 
 - **Форк** `https://github.com/Falafel0/MooshieUI` от `upstream = Mooshieblob1/MooshieUI`.
-- Локальный клон: `C:\Users\FSD\mooshie\MooshieUI` (Windows, bash/MSYS).
-- **Публичный** репозиторий. Код форка открыт — не клади секреты/ключи в репо.
+- Локальный клон: `<локальная папка>/mooshie/MooshieUI` (Windows, bash/MSYS).
+- **Публичный** репозиторий. Код форка открыт — не клади секреты/ключи в репо, и **не пиши локальные абсолютные пути / имена пользователя / пароли в любые коммиты** (эти данные утекают в публичную историю).
 
 ### Remotes (критично)
 
@@ -93,7 +93,7 @@ node scripts/check-i18n-parity.mjs              # i18n паритет
 ```bash
 hermes verify --json --skip-start            # build + test фазы
 ```
-Замечание: `hermes verify` использует pnpm по пути `C:\Users\FSD\AppData\Local\pnpm\bin\...`.
+Замечание: `hermes verify` использует pnpm по пути `<AppDataLocal>\pnpm\bin\...` (конкретно `C:\Users\<user>\AppData\Local\pnpm\bin\...`).
 Если тул не находит pnpm — shim там починен (копия рабочего пакета). Если снова сломался — см. §7.
 
 ---
@@ -117,13 +117,19 @@ hermes verify --json --skip-start            # build + test фазы
 
 ### D. Сборка сетапщика (setup.exe)
 ```bash
-cd ~/mooshie/MooshieUI
+cd <repo-local>
 npm run build
-TAURI_SIGNING_PRIVATE_KEY=$(cat .sign/mooshie-updater.key) \
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="mooshie-fork-falafel" \
+# ЧИТАЙ ключ и пароль из .sign/ (gitignored), НЕ выводи в логи/команды
+TAURI_SIGNING_PRIVATE_KEY="$(cat .sign/mooshie-updater.key)" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat .sign/key-password.txt)" \
 npx tauri build
 # результат: target/release/bundle/nsis/MooshieUI_<ver>_x64-setup.exe + .sig
 ```
+**Секреты build:**
+- `TAURI_SIGNING_PRIVATE_KEY` = содержимое `.sign/mooshie-updater.key`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = содержимое `.sign/key-password.txt`
+- Никогда не вставляй эти значения в команды/логи/коммиты напрямую — читай из файла через `$(cat ...)`.
+
 Сохранять подписанные `.sig` — они нужны для latest.json. Копия: `~/mooshie/dist/`.
 
 ### E. Релиз (обновления для юзеров)
@@ -153,10 +159,10 @@ npx tauri build
 
 | Симптом | Причина / фикс |
 |---------|----------------|
-| `hermes verify` не находит pnpm | Убедись, что `C:\Users\FSD\AppData\Local\pnpm\bin\node_modules\pnpm\` существует (копия рабочего пакета из `Roaming\npm`). Иначе пересоздай. |
+| `hermes verify` не находит pnpm | Убедись, что `<AppDataLocal>\pnpm\bin\node_modules\pnpm\` существует (копия рабочего пакета из `Roaming\npm`). Иначе пересоздай. |
 | Port 1420 занят | Убей except node: `powershell -Command "Stop-Process -Id <pid> -Force"` |
 | `comfyui-desktop.exe` эксклюзив (os error 5) | `Get-Process comfyui-desktop \| Stop-Process -Force` |
-| ComfyUI не поднимается | `C:\Temp\comfyui-desktop-worker0-stderr.log`; проверить пакеты в `python_embeded` |
+| ComfyUI не поднимается | рабочий лог: `%TEMP%\comfyui-desktop-worker0-stderr.log`; проверить пакеты в `python_embeded` |
 | Grayscale-краш encode | фикс уже есть (`if img_np.ndim==2: stack`). Не откатывать |
 | `check-i18n-parity` FAILED | добавить ключи во все 12 локалей (§4.2) |
 
