@@ -1,0 +1,18 @@
+# Verification Evidence — MooshieUI Inpaint Fixes
+# 2026-08-12
+
+Frontend:
+  npm run build     → ✓ built (0 errors)
+  npm run check:i18n → i18n parity OK (12 locales × 2623 keys)
+
+Backend:
+  cargo check       → Finished (0 errors, 6 pre-existing warnings unchanged)
+  cargo test        → 198 passed, 0 failed, 1 ignored
+
+Changed files:
+  src/lib/stores/canvas.svelte.ts
+  src/lib/components/canvas/CanvasStage.svelte
+  src/lib/components/canvas/CanvasEditor.svelte
+  src/lib/components/generation/GenerationPage.svelte
+  src-tauri/src/comfyui/process.rs
+  src-tauri/src/templates/inpainting.rs

@@ -536,6 +536,7 @@ const fr: Record<string, string> = {
   "generation.dimensions.width": "L",
   "generation.dimensions.height": "H",
   "generation.dimensions.swap": "Inverser L/H",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Ratio uniquement — définit la forme de l'image, pas sa taille en pixels.",
   "generation.dimensions.reset": "Réinitialiser à {res}",
   "generation.dimensions.recommended": "Recommandé pour {model} : {res}",

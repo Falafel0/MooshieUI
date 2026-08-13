@@ -35,8 +35,12 @@
       return;
     }
 
-    if (canvas.canvasWidth !== width || canvas.canvasHeight !== height) {
-      canvas.initCanvas(width, height);
+    // In mask_only mode, dimensions apply only to the cropped mask area —
+    // the canvas keeps the original image size.
+    if (generation.mode !== "inpainting" || generation.inpaintArea !== "mask_only") {
+      if (canvas.canvasWidth !== width || canvas.canvasHeight !== height) {
+        canvas.initCanvas(width, height);
+      }
     }
   });
 

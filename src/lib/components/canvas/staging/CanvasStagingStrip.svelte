@@ -27,7 +27,8 @@
       generation.inputImage = response.name;
       generation.mode = "inpainting";
       progress.setLastOutputForMode("inpainting", null);
-      canvas.clearMask();
+      // Don't clear the mask here — setPreparedInpaintOverride / setInpaintOriginalSource
+      // below will snapshot the current mask into undo history before swapping bases.
       canvas.clearStaging();
       if (canvas.hasResettableInpaintSource) {
         canvas.setPreparedInpaintOverride({

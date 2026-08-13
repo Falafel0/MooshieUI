@@ -536,6 +536,7 @@ const ja: Record<string, string> = {
   "generation.dimensions.width": "幅",
   "generation.dimensions.height": "高さ",
   "generation.dimensions.swap": "幅と高さを入れ替え",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "比率のみ — 画像の形状を決めるもので、ピクセルサイズではありません。",
   "generation.dimensions.reset": "{res}にリセット",
   "generation.dimensions.recommended": "{model}の推奨: {res}",

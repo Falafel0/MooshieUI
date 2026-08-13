@@ -146,7 +146,6 @@
       const prepared = await prepareOutputImageForEditMode(image, mode);
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
       generation.inputImage = response.name;
-      canvas.clearMask();
       generation.mode = mode;
       generation.upscaleEnabled = false;
       if (mode === "inpainting" && prepared.normalized) {
