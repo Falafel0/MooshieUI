@@ -607,6 +607,7 @@ const en: Record<string, string> = {
   "generation.dimensions.reset": "Reset to {res}",
   "generation.dimensions.recommended": "Recommended for {model}: {res}",
   "generation.dimensions.result": "Result",
+  "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.swap_panels": "Swap left/right panels",
   "generation.settings.title": "Generation Settings",
 
