@@ -38,6 +38,9 @@ Thumbs.db
 # Tauri
 src-tauri/gen/
 
+# Tauri updater signing keys (private key must never be committed)
+.sign/
+
 # Model files (downloaded at runtime)
 *.safetensors
 *.ckpt
