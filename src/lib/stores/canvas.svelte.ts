@@ -77,6 +77,38 @@ function loadImageDataUrl(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// Feather a white-on-black mask's luminance (red channel) with a separable box
+// blur so the inpaint result's alpha edge is a soft gradient instead of a hard
+// binary cut (which leaves a visible seam). The mask is white(255)=keep /
+// black(0)=transparent; only the red channel carries the luminance.
+function featherMaskLuminance(data: Uint8ClampedArray, width: number, height: number, radius: number) {
+  if (radius <= 0 || width <= 0 || height <= 0) return;
+  const src = new Float32Array(width * height);
+  for (let i = 0; i < src.length; i++) src[i] = data[i << 2];
+  const tmp = new Float32Array(src.length);
+  // Horizontal box blur
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+      let sum = 0;
+      for (let xx = x0; xx <= x1; xx++) sum += src[row + xx];
+      tmp[row + x] = sum / (x1 - x0 + 1);
+    }
+  }
+  // Vertical box blur, writing the feathered luminance back to the red channel.
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const y0 = Math.max(0, y - radius);
+      const y1 = Math.min(height - 1, y + radius);
+      let sum = 0;
+      for (let yy = y0; yy <= y1; yy++) sum += tmp[yy * width + x];
+      data[(y * width + x) << 2] = sum / (y1 - y0 + 1);
+    }
+  }
+}
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -528,6 +560,9 @@ class CanvasStore {
           if (mctx) {
             mctx.drawImage(maskImg, 0, 0, w, h);
             const maskData = mctx.getImageData(0, 0, w, h);
+            // Feather the mask edge so the result alpha is a soft gradient, not a
+            // hard binary cut (otherwise the inpainted region shows a visible seam).
+            featherMaskLuminance(maskData.data, w, h, 4);
             const outData = ctx.getImageData(0, 0, w, h);
             // Mask is white-on-black: white (255) = keep, black (0) = transparent.
             for (let i = 0; i < maskData.data.length; i += 4) {
