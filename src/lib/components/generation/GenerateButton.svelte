@@ -322,7 +322,11 @@
         const params = generation.toParams();
         params.denoise = step.denoise;
         if (step.prompt?.trim()) {
-          params.positive_prompt = step.prompt;
+          if (step.promptAddToBase && params.positive_prompt?.trim()) {
+            params.positive_prompt = `${params.positive_prompt}, ${step.prompt}`;
+          } else {
+            params.positive_prompt = step.prompt;
+          }
         }
         await submitGeneration(params);
       } else if (useRegionalInpaintChain && configuredRegions > 0) {

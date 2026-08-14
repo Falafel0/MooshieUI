@@ -1542,6 +1542,7 @@ const ja: Record<string, string> = {
   "canvas.duplicate": "レイヤーを複製",
   "canvas.mask_denoise": "ノイズ除去",
   "canvas.mask_prompt": "プロンプト",
+  "canvas.mask_prompt_add_to_base": "ベースプロンプトに追加",
   "canvas.send_to_mask": "マスクへ送る",
   "canvas.send_to_mask_title": "ストロークをマスクレイヤーへ移動",
   "canvas.delete_layer": "レイヤーを削除",

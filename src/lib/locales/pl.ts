@@ -1778,6 +1778,7 @@ const pl: Record<string, string> = {
   "canvas.duplicate": "Duplikuj warstwę",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Dodaj do promptu bazowego",
   "canvas.send_to_mask": "Wyślij do maski",
   "canvas.send_to_mask_title": "Przenieś pociągnięcia na warstwę maski",
   "canvas.delete_layer": "Usuń warstwę",

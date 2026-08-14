@@ -1517,6 +1517,7 @@ const ru: Record<string, string> = {
   "canvas.duplicate": "Дублировать слой",
   "canvas.mask_denoise": "Сила (denoise)",
   "canvas.mask_prompt": "Промпт",
+  "canvas.mask_prompt_add_to_base": "Добавить к базовому промпту",
   "canvas.send_to_mask": "В маску",
   "canvas.send_to_mask_title": "Перенести штрихи в слой маски",
   "canvas.delete_layer": "Удалить слой",

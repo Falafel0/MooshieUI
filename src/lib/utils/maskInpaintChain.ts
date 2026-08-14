@@ -14,6 +14,7 @@ export interface MaskInpaintStep {
   maskBytes: number[];
   denoise: number;
   prompt: string;
+  promptAddToBase?: boolean;
 }
 
 export interface MaskInpaintChainContext {
@@ -73,7 +74,16 @@ export async function runMaskInpaintChain(
       `canvas_mask_layer_${i}_${Date.now()}.png`,
     );
 
-    const prompt = step.prompt?.trim() ? step.prompt : baseParams.positive_prompt;
+    const basePrompt = baseParams.positive_prompt?.trim() ?? "";
+    const localPrompt = step.prompt?.trim() ?? "";
+    let prompt: string;
+    if (!localPrompt) {
+      prompt = basePrompt;
+    } else if (step.promptAddToBase && basePrompt) {
+      prompt = `${basePrompt}, ${localPrompt}`;
+    } else {
+      prompt = localPrompt;
+    }
     const regionParams: GenerationParams = {
       ...baseParams,
       mode: "inpainting",

@@ -1517,6 +1517,7 @@ const pt: Record<string, string> = {
   "canvas.duplicate": "Duplicar camada",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Adicionar ao prompt base",
   "canvas.send_to_mask": "Enviar para máscara",
   "canvas.send_to_mask_title": "Mover traços para a camada de máscara",
   "canvas.delete_layer": "Excluir camada",

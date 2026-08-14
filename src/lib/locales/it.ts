@@ -1517,6 +1517,7 @@ const it: Record<string, string> = {
   "canvas.duplicate": "Duplica livello",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Aggiungi al prompt di base",
   "canvas.send_to_mask": "Invia alla maschera",
   "canvas.send_to_mask_title": "Sposta i tratti sul livello maschera",
   "canvas.delete_layer": "Elimina livello",

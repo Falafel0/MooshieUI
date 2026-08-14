@@ -1580,6 +1580,7 @@ const es: Record<string, string> = {
   "canvas.duplicate": "Duplicar capa",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Añadir al prompt base",
   "canvas.send_to_mask": "Enviar a máscara",
   "canvas.send_to_mask_title": "Mover trazos a la capa de máscara",
   "canvas.delete_layer": "Eliminar capa",

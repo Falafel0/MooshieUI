@@ -190,6 +190,15 @@
         onclick={(e) => e.stopPropagation()}
         class="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-indigo-500"
       />
+      <label class="flex items-center gap-1.5 mt-1 cursor-pointer" onclick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={layer.promptAddToBase ?? false}
+          onchange={(e) => canvas.setLayerPromptAddToBase(layer.id, (e.target as HTMLInputElement).checked)}
+          class="accent-indigo-500"
+        />
+        <span class="text-[10px] text-neutral-400">{locale.t('canvas.mask_prompt_add_to_base')}</span>
+      </label>
     </div>
   {/if}
 </div>

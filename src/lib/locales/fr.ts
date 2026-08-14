@@ -1542,6 +1542,7 @@ const fr: Record<string, string> = {
   "canvas.duplicate": "Dupliquer le calque",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Ajouter au prompt de base",
   "canvas.send_to_mask": "Envoyer vers masque",
   "canvas.send_to_mask_title": "Déplacer les traits vers le calque de masque",
   "canvas.delete_layer": "Supprimer le calque",

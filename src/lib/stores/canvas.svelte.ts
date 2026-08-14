@@ -17,6 +17,8 @@ export interface CanvasLayer {
   denoise?: number;
   /** Per-mask inpaint prompt (mask layers only). Empty falls back to the global prompt. */
   prompt?: string;
+  /** When true, this mask's prompt is APPENDED to the base prompt instead of replacing it. */
+  promptAddToBase?: boolean;
 }
 
 export interface BrushSettings {
@@ -934,6 +936,7 @@ class CanvasStore {
         maskBytes,
         denoise: meta.denoise ?? generation.denoise,
         prompt: meta.prompt ?? "",
+        promptAddToBase: meta.promptAddToBase ?? false,
       });
     }
     return steps;
@@ -1141,6 +1144,10 @@ class CanvasStore {
 
   setLayerPrompt(id: string, prompt: string) {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, prompt } : l));
+  }
+
+  setLayerPromptAddToBase(id: string, add: boolean) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, promptAddToBase: add } : l));
   }
 
   toggleLayerLock(id: string) {

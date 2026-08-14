@@ -1797,6 +1797,7 @@ const en: Record<string, string> = {
   "canvas.duplicate": "Duplicate layer",
   "canvas.mask_denoise": "Denoise",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "Append to base prompt",
   "canvas.send_to_mask": "Send to Mask",
   "canvas.send_to_mask_title": "Move strokes to the mask layer",
   "canvas.delete_layer": "Delete layer",

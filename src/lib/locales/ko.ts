@@ -1517,6 +1517,7 @@ const ko: Record<string, string> = {
   "canvas.duplicate": "레이어 복제",
   "canvas.mask_denoise": "디노이즈",
   "canvas.mask_prompt": "프롬프트",
+  "canvas.mask_prompt_add_to_base": "베이스 프롬프트에 추가",
   "canvas.send_to_mask": "마스크로 보내기",
   "canvas.send_to_mask_title": "획을 마스크 레이어로 이동",
   "canvas.delete_layer": "레이어 삭제",

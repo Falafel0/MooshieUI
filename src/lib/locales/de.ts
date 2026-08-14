@@ -1538,6 +1538,7 @@ const de: Record<string, string> = {
   "canvas.duplicate": "Ebene duplizieren",
   "canvas.mask_denoise": "Entrauschen",
   "canvas.mask_prompt": "Prompt",
+  "canvas.mask_prompt_add_to_base": "An Basisprompt anhängen",
   "canvas.send_to_mask": "Als Maske",
   "canvas.send_to_mask_title": "Striche auf die Maskenebene verschieben",
   "canvas.delete_layer": "Ebene löschen",

@@ -1517,6 +1517,7 @@ const zh: Record<string, string> = {
   "canvas.duplicate": "复制图层",
   "canvas.mask_denoise": "去噪",
   "canvas.mask_prompt": "提示词",
+  "canvas.mask_prompt_add_to_base": "添加到基础提示词",
   "canvas.send_to_mask": "发送到蒙版",
   "canvas.send_to_mask_title": "将笔触移动到蒙版图层",
   "canvas.delete_layer": "删除图层",
