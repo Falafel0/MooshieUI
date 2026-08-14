@@ -135,7 +135,6 @@
   const SECTION_ORDER: SectionId[] = [
     "dimensions",
     "prompts",
-    "imageInputs",
     "imageEdit",
     "videoSettings",
     "inpaintLayers",
@@ -2109,8 +2108,6 @@
       {@render dimensionsSection()}
     {:else if section === "prompts"}
       {@render promptsSection()}
-    {:else if section === "imageInputs"}
-      {@render imageInputsSection()}
     {:else if section === "imageEdit"}
       {@render imageEditSection()}
     {:else if section === "videoSettings"}
