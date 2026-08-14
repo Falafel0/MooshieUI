@@ -476,7 +476,7 @@
         generation.height = normalized.height;
         progress.setLastOutputForMode("inpainting", null);
 
-        canvas.setInpaintDrawMode("mask");
+        canvas.selectMaskLayer();
         canvas.isCanvasMode = true;
         canvas.clearStaging();
         canvas.setInpaintOriginalSource({

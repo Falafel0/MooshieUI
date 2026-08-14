@@ -1,6 +1,7 @@
 <script lang="ts">
   import { canvas, type CanvasLayer } from "../../../stores/canvas.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import { generation } from "../../../stores/generation.svelte.js";
 
   interface Props {
     layer: CanvasLayer;
@@ -30,6 +31,7 @@
   const isActive = $derived(canvas.activeLayerId === layer.id);
   const thumb = $derived(canvas.layerThumbnails[layer.id]);
   const canDelete = $derived(canvas.layers.length > 1);
+  const canSendToMask = $derived(generation.mode === "inpainting" && layer.type === "raster");
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -102,6 +104,15 @@
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
+      {#if canSendToMask}
+        <button
+          onclick={(e) => { e.stopPropagation(); canvas.sendActiveLayerToMask(layer.id); }}
+          class="w-5 h-5 flex items-center justify-center rounded text-neutral-500 hover:text-indigo-300 hover:bg-neutral-700"
+          title={locale.t('canvas.send_to_mask_title')}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 12h16"/><path d="M12 12v8"/></svg>
+        </button>
+      {/if}
       <button
         onclick={(e) => { e.stopPropagation(); canvas.duplicateLayer(layer.id); }}
         class="w-5 h-5 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700"
@@ -150,6 +161,35 @@
         class="flex-1 accent-indigo-500"
       />
       <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{Math.round(layer.opacity * 100)}%</span>
+    </div>
+  {/if}
+
+  <!-- Per-mask inpaint settings (active mask layer only) -->
+  {#if isActive && layer.type === "mask"}
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_denoise')}</span>
+      <input
+        type="range"
+        value={layer.denoise ?? 0.7}
+        oninput={(e) => canvas.setLayerDenoise(layer.id, parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="1"
+        step="0.01"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{Math.round((layer.denoise ?? 0.7) * 100)}%</span>
+    </div>
+    <div class="px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 block mb-0.5">{locale.t('canvas.mask_prompt')}</span>
+      <input
+        type="text"
+        value={layer.prompt ?? ""}
+        placeholder={locale.t('canvas.mask_prompt')}
+        oninput={(e) => canvas.setLayerPrompt(layer.id, (e.target as HTMLInputElement).value)}
+        onclick={(e) => e.stopPropagation()}
+        class="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-indigo-500"
+      />
     </div>
   {/if}
 </div>

@@ -106,6 +106,13 @@
         <div class="pointer-events-auto flex items-center gap-3 rounded-full border border-neutral-700/80 bg-neutral-950/90 py-1.5 pl-4 pr-1.5 shadow-2xl backdrop-blur-sm">
           <span class="text-xs text-neutral-300">{locale.t('canvas.inpaint_result_ready')}</span>
           <button
+            onclick={() => canvas.applyInpaintAsLayer()}
+            class="text-xs font-medium px-4 py-1.5 rounded-full border border-indigo-500 bg-indigo-600/25 text-indigo-100 hover:border-indigo-400 hover:bg-indigo-600/40"
+            title={locale.t('canvas.apply_as_layer_title')}
+          >
+            {locale.t('canvas.apply_as_layer')}
+          </button>
+          <button
             onclick={() => canvas.applyInpaintResult()}
             class="text-xs font-medium px-4 py-1.5 rounded-full border border-emerald-500 bg-emerald-600/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-600/40"
             title={locale.t('canvas.apply_inpaint_title')}

@@ -96,6 +96,16 @@
     thumbRafs.clear();
     // Drop the restore callback so a stale closure can't fire after unmount.
     canvasHistory.setOnRestored(null);
+    // Detach the store's stage ref so store methods can't act on a dead stage.
+    canvas.setStageRef(null);
+    konvaLayers.clear();
+    bgLayer = null;
+    refLayer = null;
+    persistedMaskLayer = null;
+    uiLayer = null;
+    checkerRect = null;
+    borderRect = null;
+    checkerPatternCanvas = null;
     if (stage) {
       stage.destroy();
       stage = null;
@@ -190,6 +200,11 @@
     canvasHistory.setRefs(konvaLayers, canvas.canvasWidth, canvas.canvasHeight);
     canvasHistory.setOnRestored((layerIds) => {
       for (const id of layerIds) scheduleThumbRefresh(id);
+      // Undo/redo restores layer pixels but the stage is not recomposited until
+      // the next pointer event. Re-apply the viewport (which re-applies the
+      // zoom/pan transform to every content layer and batchDraw()s the stage)
+      // so the restored frame is visible immediately.
+      applyViewport();
     });
 
     // Apply initial viewport
@@ -461,7 +476,9 @@
 
     for (const layer of sorted) {
       const effectiveVisible =
-        layer.visible && !(layer.type === "mask" && hideInpaintMask);
+        layer.visible &&
+        !(layer.type === "mask" && hideInpaintMask) &&
+        !canvas.showOriginalForComparison;
       if (!konvaLayers.has(layer.id)) {
         const kLayer = new Konva.Layer({
           id: layer.id,
@@ -589,14 +606,18 @@
     if (maxDim <= 0) return;
 
     // The viewport is applied as a layer transform; reset it so the thumbnail
-    // captures canvas-space pixels at a fixed scale, then restore it.
-    const origScale = kLayer.scaleX();
+    // captures canvas-space pixels at a fixed scale, then restore it. A hidden
+    // layer renders nothing, so force it visible for the capture.
+    const origScaleX = kLayer.scaleX();
+    const origScaleY = kLayer.scaleY();
     const origX = kLayer.x();
     const origY = kLayer.y();
+    const origVisible = kLayer.visible();
     kLayer.scaleX(1);
     kLayer.scaleY(1);
     kLayer.x(0);
     kLayer.y(0);
+    kLayer.visible(true);
 
     let url: string | null = null;
     try {
@@ -610,10 +631,11 @@
     } catch (error) {
       console.error("Failed to generate layer thumbnail:", error);
     } finally {
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
+      kLayer.visible(origVisible);
     }
 
     if (url) canvas.setLayerThumbnail(id, url);
@@ -687,6 +709,61 @@
     kLayer.add(kImage);
     kLayer.batchDraw();
     scheduleThumbRefresh(maskMeta.id);
+  }
+
+  // Clone vector nodes from one Konva layer to another (used by duplicateLayer).
+  // Preserves the vector nature of strokes (Konva.Line/Rect/etc.) instead of
+  // rasterizing, so the duplicate stays fully editable and zoom-crisp.
+  function cloneLayerNodes(sourceId: string, targetId: string) {
+    const src = konvaLayers.get(sourceId);
+    const dst = konvaLayers.get(targetId);
+    if (!src || !dst) return;
+
+    for (const node of src.getChildren()) {
+      const clone = node.clone();
+      if (!clone) continue;
+      clone.id(undefined); // avoid duplicate ids in the stage
+      dst.add(clone);
+    }
+    dst.batchDraw();
+    scheduleThumbRefresh(targetId);
+  }
+
+  // Stamp an image into a freshly-created layer (used by applyInpaintAsLayer).
+  // The image is already composited (only the changed region is opaque); we just
+  // place it full-canvas and revoke the object URL once it's loaded into Konva.
+  async function injectLayerImage(layerId: string, imageUrl: string, owned: boolean) {
+    const kLayer = konvaLayers.get(layerId);
+    if (!kLayer) {
+      if (owned) URL.revokeObjectURL(imageUrl);
+      return;
+    }
+
+    let img: HTMLImageElement;
+    try {
+      img = await loadImageEl(imageUrl);
+    } catch {
+      if (owned) URL.revokeObjectURL(imageUrl);
+      return;
+    }
+
+    if (konvaLayers.get(layerId) !== kLayer) {
+      if (owned) URL.revokeObjectURL(imageUrl);
+      return;
+    }
+
+    const kImage = new Konva.Image({
+      image: img,
+      x: 0,
+      y: 0,
+      width: canvas.canvasWidth,
+      height: canvas.canvasHeight,
+      listening: false,
+    });
+    kLayer.add(kImage);
+    kLayer.batchDraw();
+    scheduleThumbRefresh(layerId);
+    if (owned) URL.revokeObjectURL(imageUrl);
   }
 
   // Drawing handlers
@@ -1222,6 +1299,27 @@
       void restoreMaskFromSnapshot(restoreUrl);
     }
 
+    // Copy pixels into a freshly-duplicated layer (set by duplicateLayer).
+    const dup = canvas.pendingDuplicate;
+    if (dup) {
+      canvas.pendingDuplicate = null;
+      cloneLayerNodes(dup.sourceId, dup.targetId);
+    }
+
+    // Stamp a composited image into a freshly-created layer (applyInpaintAsLayer).
+    const layerImg = canvas.pendingLayerImage;
+    if (layerImg) {
+      canvas.pendingLayerImage = null;
+      void injectLayerImage(layerImg.layerId, layerImg.imageUrl, layerImg.owned);
+    }
+
+    // Refresh thumbnails after a direct Konva mutation (sendActiveLayerToMask).
+    const thumbIds = canvas.pendingThumbRefresh;
+    if (thumbIds.length) {
+      canvas.pendingThumbRefresh = [];
+      for (const id of thumbIds) scheduleThumbRefresh(id);
+    }
+
     // Generate an initial thumbnail for any layer we haven't captured yet.
     for (const layer of canvas.layers) {
       if (!thumbInitialized.has(layer.id)) {
@@ -1277,23 +1375,24 @@
   });
 
   $effect(() => {
-    void canvas.effectiveReferenceImage;
-    updateReferenceImage(canvas.effectiveReferenceImage);
+    void canvas.referenceImageToShow;
+    updateReferenceImage(canvas.referenceImageToShow);
   });
 
   $effect(() => {
-    // Toggle mask-layer visibility when the pending-result hide state changes.
-    // Only the Konva node's visibility is touched, never the layer model's
-    // `visible`, so the panel toggle and mask export (which reads the model) are
-    // unaffected.
+    // Re-apply Konva visibility when the pending-result hide state or compare
+    // mode changes. Only Konva node visibility is touched, never the layer
+    // model's `visible`, so the panel toggle and exports (which read the model)
+    // are unaffected.
     const hide = hideInpaintMask;
+    const compare = canvas.showOriginalForComparison;
     void canvas.layers;
     if (!stage) return;
     for (const layer of canvas.layers) {
-      if (layer.type !== "mask") continue;
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
-      kLayer.visible(layer.visible && !hide);
+      const hiddenByMask = layer.type === "mask" && hide;
+      kLayer.visible(layer.visible && !hiddenByMask && !compare);
     }
     stage.batchDraw();
   });
@@ -1326,7 +1425,8 @@
       if (!kLayer) continue;
 
       // Reset layer transform temporarily for export
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       kLayer.scaleX(1);
@@ -1334,21 +1434,23 @@
       kLayer.x(0);
       kLayer.y(0);
 
-      const layerCanvas = kLayer.toCanvas({
-        pixelRatio: 1,
-        width: canvas.canvasWidth,
-        height: canvas.canvasHeight,
-      });
+      try {
+        const layerCanvas = kLayer.toCanvas({
+          pixelRatio: 1,
+          width: canvas.canvasWidth,
+          height: canvas.canvasHeight,
+        });
 
-      ctx.globalAlpha = layer.opacity;
-      ctx.drawImage(layerCanvas, 0, 0);
-      ctx.globalAlpha = 1;
-
-      // Restore transform
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
+        ctx.globalAlpha = layer.opacity;
+        ctx.drawImage(layerCanvas, 0, 0);
+        ctx.globalAlpha = 1;
+      } finally {
+        // Restore transform
+        kLayer.scaleX(origScaleX);
+        kLayer.scaleY(origScaleY);
+        kLayer.x(origX);
+        kLayer.y(origY);
+      }
     }
 
     return offscreen;
@@ -1369,7 +1471,8 @@
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
 
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       // The mask node may be visually hidden while a result is previewed; Konva
@@ -1382,19 +1485,20 @@
       kLayer.y(0);
       kLayer.visible(true);
 
-      const layerCanvas = kLayer.toCanvas({
-        pixelRatio: 1,
-        width: canvas.canvasWidth,
-        height: canvas.canvasHeight,
-      });
-
-      ctx.drawImage(layerCanvas, 0, 0);
-
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
-      kLayer.visible(origVisible);
+      try {
+        const layerCanvas = kLayer.toCanvas({
+          pixelRatio: 1,
+          width: canvas.canvasWidth,
+          height: canvas.canvasHeight,
+        });
+        ctx.drawImage(layerCanvas, 0, 0);
+      } finally {
+        kLayer.scaleX(origScaleX);
+        kLayer.scaleY(origScaleY);
+        kLayer.x(origX);
+        kLayer.y(origY);
+        kLayer.visible(origVisible);
+      }
     }
 
     return offscreen;

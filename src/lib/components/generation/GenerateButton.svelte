@@ -18,6 +18,7 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
+  import { runMaskInpaintChain } from "../../utils/maskInpaintChain.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -266,7 +267,57 @@
       );
       generation.saveCurrentPromptToHistory();
 
-      if (useRegionalInpaintChain && configuredRegions > 0) {
+      // Per-mask inpaint chain: when the canvas has 2+ mask layers, inpaint each
+      // with its own denoise + prompt, chaining outputs (Photoshop-style layers).
+      const maskSteps =
+        generation.mode === "inpainting" && canvas.isCanvasMode
+          ? await canvas.getMaskInpaintSteps()
+          : [];
+
+      if (maskSteps.length >= 2) {
+        const chainToken = ++regionalChainToken;
+        regionalChainCancelRequested = false;
+        gallery.showToast(locale.t("generation.inpaint.mask_chain_started"), "info");
+        clearAllRegionalChainGallerySuppress();
+        try {
+          const chainResult = await runMaskInpaintChain(maskSteps, {
+            submit: async (chainParams, ctx) => {
+              const result = await requestGeneration(chainParams);
+              if (!ctx.isFinalOutput) {
+                suppressRegionalChainGallerySave(result.prompt_id);
+              }
+              trackGeneration(chainParams, result);
+              return { promptId: result.prompt_id, seed: result.seed };
+            },
+            onStep: ({ index, total }) => {
+              setRegionalChainStep("region", index, total);
+              gallery.showToast(
+                locale.t("generation.inpaint.mask_chain_step", {
+                  current: String(index),
+                  total: String(total),
+                }),
+                "info",
+              );
+            },
+            onWaitingForOutput: () => setRegionalChainStep("wait", 0, 0),
+            shouldCancel: () =>
+              regionalChainCancelRequested || chainToken !== regionalChainToken,
+          });
+          console.log(
+            "[maskchain] Mask inpaint chain finished:",
+            chainResult.maskCount,
+            "mask(s)",
+          );
+        } catch (chainError) {
+          if (regionalChainCancelRequested || chainToken !== regionalChainToken) {
+            console.log("[maskchain] Mask inpaint chain cancelled");
+          } else {
+            throw chainError;
+          }
+        } finally {
+          clearAllRegionalChainGallerySuppress();
+        }
+      } else if (useRegionalInpaintChain && configuredRegions > 0) {
         const chainToken = ++regionalChainToken;
         regionalChainCancelRequested = false;
         gallery.showToast(locale.t("generation.regional.inpaint_chain_started"), "info");

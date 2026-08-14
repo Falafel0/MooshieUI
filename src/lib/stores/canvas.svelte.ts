@@ -1,6 +1,8 @@
 import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
+import { canvasHistory } from "./canvasHistory.svelte.js";
+import type { MaskInpaintStep } from "../utils/maskInpaintChain.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "lasso" | "eyedropper" | "move" | "view" | "transform";
 
@@ -12,6 +14,10 @@ export interface CanvasLayer {
   opacity: number;
   locked: boolean;
   order: number;
+  /** Per-mask inpaint denoise (mask layers only). */
+  denoise?: number;
+  /** Per-mask inpaint prompt (mask layers only). Empty falls back to the global prompt. */
+  prompt?: string;
 }
 
 export interface BrushSettings {
@@ -61,6 +67,15 @@ function genLayerId(): string {
   return `layer_${++nextLayerId}`;
 }
 
+function loadImageDataUrl(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -94,10 +109,17 @@ class CanvasStore {
   // UI state
   isCanvasMode = $state(false);
   isPointerOverStage = $state(false);
-  inpaintDrawMode = $state<"mask" | "regular">("regular");
+  // Drawing mode is derived from the active layer type: selecting a mask layer
+  // enables mask drawing, selecting a raster layer enables regular drawing.
+  // No more global toggle — the layer panel is the source of truth.
+  get inpaintDrawMode(): "mask" | "regular" {
+    return this.activeLayer?.type === "mask" ? "mask" : "regular";
+  }
   showGrid = $state(false);
   showRuleOfThirds = $state(false);
   showCheckerboard = $state(true);
+  // Compare mode: hide editable layers and show only the original input image.
+  showOriginalForComparison = $state(false);
   cursorPos = $state<{ x: number; y: number } | null>(null);
   referenceImageUrl = $state<string | null>(null);
   originalInpaintInputImageName = $state<string | null>(null);
@@ -114,6 +136,15 @@ class CanvasStore {
   // A tinted mask snapshot waiting to be re-hydrated onto the freshly-rebuilt
   // mask layer after a base swap (consumed by CanvasStage).
   pendingMaskRestoreUrl = $state<string | null>(null);
+  // A layer just duplicated whose pixels still need to be copied from its source
+  // (consumed by CanvasStage once syncKonvaLayers creates the empty target layer).
+  pendingDuplicate = $state<{ sourceId: string; targetId: string } | null>(null);
+  // An image to inject into a freshly-created layer (consumed by CanvasStage after
+  // syncKonvaLayers) — used by applyInpaintAsLayer to stamp the changed region.
+  pendingLayerImage = $state<{ layerId: string; imageUrl: string; owned: boolean } | null>(null);
+  // A mask layer that needs a thumbnail refresh after a direct Konva mutation
+  // (e.g. sendActiveLayerToMask) — consumed by CanvasStage.
+  pendingThumbRefresh = $state<string[]>([]);
   // The latest inpaint result, held for DISPLAY ONLY. Pressing "Generate" always
   // re-rolls the current base + mask (never this result); it is only shown as the
   // canvas background so the user can preview it. "Apply" promotes it to the base.
@@ -398,6 +429,101 @@ class CanvasStore {
     this.initCanvas(generation.width, generation.height);
   }
 
+  // Apply the pending inpaint result as a NEW raster layer containing ONLY the
+  // changed (masked) region, transparent elsewhere, stacked on top of the
+  // untouched base — Photoshop-style non-destructive inpaint. The result is
+  // composited with the white-on-black mask (mask luminance → alpha). Returns
+  // the new layer id, or null when there is nothing to apply.
+  async applyInpaintAsLayer(): Promise<string | null> {
+    if (!this.pendingResultPreviewUrl) return null;
+
+    // Detach the pending result SYNCHRONOUSLY before any await, so a newer
+    // result arriving mid-load is neither revoked by mistake nor composited.
+    // Ownership of the result object URL transfers to this call.
+    const resultUrl = this.pendingResultPreviewUrl;
+    const resultOwned = this.pendingResultOwned;
+    const resultW = this.pendingResultWidth ?? this.canvasWidth;
+    const resultH = this.pendingResultHeight ?? this.canvasHeight;
+    this.pendingResultPreviewUrl = null;
+    this.pendingResultOwned = false;
+    this.pendingResultInputName = null;
+    this.pendingResultWidth = null;
+    this.pendingResultHeight = null;
+    this.maskEditedSinceResult = false;
+    const maskUrl = this.persistedMaskPreviewUrl;
+
+    const w = resultW;
+    const h = resultH;
+    if (w <= 0 || h <= 0) {
+      if (resultOwned) URL.revokeObjectURL(resultUrl);
+      return null;
+    }
+
+    let layerId: string | null = null;
+    try {
+      let resultImg: HTMLImageElement;
+      try {
+        resultImg = await loadImageDataUrl(resultUrl);
+      } catch {
+        return null;
+      }
+
+      const off = document.createElement("canvas");
+      off.width = w;
+      off.height = h;
+      const ctx = off.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(resultImg, 0, 0, w, h);
+
+      // Keep only the masked region: set output alpha from the mask's luminance.
+      if (maskUrl) {
+        try {
+          const maskImg = await loadImageDataUrl(maskUrl);
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = w;
+          maskCanvas.height = h;
+          const mctx = maskCanvas.getContext("2d");
+          if (mctx) {
+            mctx.drawImage(maskImg, 0, 0, w, h);
+            const maskData = mctx.getImageData(0, 0, w, h);
+            const outData = ctx.getImageData(0, 0, w, h);
+            // Mask is white-on-black: white (255) = keep, black (0) = transparent.
+            for (let i = 0; i < maskData.data.length; i += 4) {
+              outData.data[i + 3] = maskData.data[i];
+            }
+            ctx.putImageData(outData, 0, 0);
+          }
+        } catch {
+          // Mask failed to load — fall back to keeping the full result.
+        }
+      }
+
+      // Bail on an empty mask rather than creating a useless blank layer.
+      const check = ctx.getImageData(0, 0, w, h).data;
+      let hasPixels = false;
+      for (let i = 3; i < check.length; i += 4) {
+        if (check[i] > 0) {
+          hasPixels = true;
+          break;
+        }
+      }
+      if (!hasPixels) return null;
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        off.toBlob((b) => resolve(b), "image/png"),
+      );
+      if (!blob) return null;
+      const url = URL.createObjectURL(blob);
+
+      layerId = this.addLayer("raster", locale.t("canvas.layer.inpaint_result"));
+      this.pendingLayerImage = { layerId, imageUrl: url, owned: true };
+      return layerId;
+    } finally {
+      // The pending result's pixels are now consumed into the new layer.
+      if (resultOwned) URL.revokeObjectURL(resultUrl);
+    }
+  }
+
   get canApplyInpaintResult(): boolean {
     return generation.mode === "inpainting" && this.pendingResultPreviewUrl !== null;
   }
@@ -597,6 +723,17 @@ class CanvasStore {
     return this.currentStagingImage ?? this.referenceImageUrl;
   }
 
+  // The reference image actually shown on the canvas. In compare mode this is
+  // the ORIGINAL input (pre-inpaint), otherwise the effective (current) image.
+  get referenceImageToShow(): string | null {
+    if (this.showOriginalForComparison) return this.referenceImageUrl;
+    return this.effectiveReferenceImage;
+  }
+
+  toggleShowOriginal() {
+    this.showOriginalForComparison = !this.showOriginalForComparison;
+  }
+
   setReferenceImage(url: string | null) {
     this.referenceImageUrl = url;
   }
@@ -642,7 +779,8 @@ class CanvasStore {
 
       // The viewport is applied as a layer transform; reset it so the snapshot
       // captures canvas-space pixels, then restore it.
-      const origScale = layer.scaleX();
+      const origScaleX = layer.scaleX();
+      const origScaleY = layer.scaleY();
       const origX = layer.x();
       const origY = layer.y();
       layer.scaleX(1);
@@ -660,8 +798,8 @@ class CanvasStore {
       } catch (error) {
         console.error("Failed to snapshot inpaint mask:", error);
       } finally {
-        layer.scaleX(origScale);
-        layer.scaleY(origScale);
+        layer.scaleX(origScaleX);
+        layer.scaleY(origScaleY);
         layer.x(origX);
         layer.y(origY);
       }
@@ -683,15 +821,21 @@ class CanvasStore {
     return offscreen.toDataURL("image/png");
   }
 
-  setInpaintDrawMode(mode: "mask" | "regular") {
-    this.inpaintDrawMode = mode;
-  }
+  sendActiveLayerToMask(id?: string): boolean {
+    const sourceId = id ?? this.activeLayerId;
+    if (!this._stageRef || !sourceId) return false;
 
-  sendActiveLayerToMask(): boolean {
-    if (!this._stageRef || !this.activeLayerId) return false;
+    const sourceLayerMeta = this.layers.find((l) => l.id === sourceId);
+    if (!sourceLayerMeta || sourceLayerMeta.type !== "raster") return false;
 
-    const sourceLayerMeta = this.layers.find((l) => l.id === this.activeLayerId);
-    if (!sourceLayerMeta) return false;
+    // Resolve source + mask Konva layers and check the source has content
+    // BEFORE creating/selecting a mask layer, so an empty source can't leave a
+    // stray mask layer behind or switch the active layer pointlessly.
+    const stageLayers = this._stageRef.getLayers?.() ?? [];
+    const sourceLayer = stageLayers.find((layer: any) => layer.id?.() === sourceId);
+    if (!sourceLayer) return false;
+    const sourceNodes = sourceLayer.getChildren?.() ?? [];
+    if (!sourceNodes.length) return false;
 
     let maskLayerMeta = this.layers.find((l) => l.type === "mask");
     if (!maskLayerMeta) {
@@ -699,19 +843,11 @@ class CanvasStore {
       maskLayerMeta = this.layers.find((l) => l.id === newId) ?? undefined;
     }
     if (!maskLayerMeta) return false;
-
-    if (sourceLayerMeta.id === maskLayerMeta.id) {
-      this.activeLayerId = maskLayerMeta.id;
-      return true;
-    }
-
-    const stageLayers = this._stageRef.getLayers?.() ?? [];
-    const sourceLayer = stageLayers.find((layer: any) => layer.id?.() === sourceLayerMeta.id);
     const maskLayer = stageLayers.find((layer: any) => layer.id?.() === maskLayerMeta.id);
-    if (!sourceLayer || !maskLayer) return false;
+    if (!maskLayer) return false;
 
-    const sourceNodes = sourceLayer.getChildren?.() ?? [];
-    if (!sourceNodes.length) return false;
+    // Snapshot the source for undo before the destructive move.
+    canvasHistory.snapshot(sourceId);
 
     for (const node of sourceNodes) {
       const gco = node.globalCompositeOperation?.();
@@ -738,7 +874,95 @@ class CanvasStore {
     maskLayer.batchDraw?.();
 
     this.activeLayerId = maskLayerMeta.id;
+    // Refresh BOTH thumbnails: the source was emptied and the mask gained
+    // strokes (Konva nodes changed but the Svelte model didn't).
+    this.pendingThumbRefresh = [maskLayerMeta.id, sourceId];
     return true;
+  }
+
+  // Collect each visible mask layer's white-on-black PNG + per-mask denoise/prompt
+  // for the sequential per-mask inpaint chain. Skips empty masks.
+  async getMaskInpaintSteps(): Promise<MaskInpaintStep[]> {
+    const stage = this._stageRef;
+    if (!stage) return [];
+    const maskMetas = this.layers.filter((l) => l.type === "mask" && l.visible);
+    if (!maskMetas.length) return [];
+    const stageLayers = stage.getLayers?.() ?? [];
+    const steps: MaskInpaintStep[] = [];
+    for (const meta of maskMetas) {
+      const layer = stageLayers.find((l: any) => l.id?.() === meta.id);
+      if (!layer) continue;
+      const maskBytes = await this.maskLayerToPngBytes(layer);
+      if (!maskBytes) continue;
+      steps.push({
+        id: meta.id,
+        name: meta.name,
+        maskBytes,
+        denoise: meta.denoise ?? generation.denoise,
+        prompt: meta.prompt ?? "",
+      });
+    }
+    return steps;
+  }
+
+  // Extract a single mask layer as white-on-black PNG bytes. Mask strokes are
+  // drawn tinted (maskOverlayColor); any non-transparent pixel becomes white and
+  // everything else opaque black, matching the ComfyUI inpaint mask convention.
+  private async maskLayerToPngBytes(layer: any): Promise<number[] | null> {
+    const origScaleX = layer.scaleX();
+    const origScaleY = layer.scaleY();
+    const origX = layer.x();
+    const origY = layer.y();
+    const origVisible = layer.visible();
+    layer.scaleX(1);
+    layer.scaleY(1);
+    layer.x(0);
+    layer.y(0);
+    layer.visible(true);
+
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      canvas = layer.toCanvas({
+        pixelRatio: 1,
+        width: this.canvasWidth,
+        height: this.canvasHeight,
+      });
+    } catch (error) {
+      console.error("Failed to extract mask layer:", error);
+    } finally {
+      layer.scaleX(origScaleX);
+      layer.scaleY(origScaleY);
+      layer.x(origX);
+      layer.y(origY);
+      layer.visible(origVisible);
+    }
+
+    if (!canvas) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const w = canvas.width;
+    const h = canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const p = imgData.data;
+    let hasMask = false;
+    for (let i = 0; i < p.length; i += 4) {
+      if (p[i + 3] > 0 && (p[i] > 64 || p[i + 1] > 64 || p[i + 2] > 64)) {
+        p[i] = p[i + 1] = p[i + 2] = 255;
+        p[i + 3] = 255;
+        hasMask = true;
+      } else {
+        p[i] = p[i + 1] = p[i + 2] = 0;
+        p[i + 3] = 255;
+      }
+    }
+    if (!hasMask) return null;
+    ctx.putImageData(imgData, 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/png"),
+    );
+    if (!blob) return null;
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
   }
 
   // Brush
@@ -767,6 +991,9 @@ class CanvasStore {
         opacity: 1,
         locked: false,
         order: maxOrder + 1,
+        // Mask layers carry their own inpaint denoise + prompt.
+        denoise: type === "mask" ? generation.denoise : undefined,
+        prompt: type === "mask" ? "" : undefined,
       },
     ];
     this.activeLayerId = id;
@@ -818,6 +1045,9 @@ class CanvasStore {
       },
     ];
     this.activeLayerId = newId;
+    // The clone currently has no pixel content — request a pixel copy from the
+    // source Konva layer once syncKonvaLayers creates the empty target layer.
+    this.pendingDuplicate = { sourceId: id, targetId: newId };
     return newId;
   }
 
@@ -848,12 +1078,29 @@ class CanvasStore {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity } : l));
   }
 
+  setLayerDenoise(id: string, denoise: number) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, denoise } : l));
+  }
+
+  setLayerPrompt(id: string, prompt: string) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, prompt } : l));
+  }
+
   toggleLayerLock(id: string) {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l));
   }
 
   setActiveLayer(id: string) {
     this.activeLayerId = id;
+  }
+
+  // Select the first mask layer (used when entering the inpaint flow so the
+  // user starts drawing the mask).
+  selectMaskLayer(): boolean {
+    const maskLayer = this.layers.find((l) => l.type === "mask");
+    if (!maskLayer) return false;
+    this.activeLayerId = maskLayer.id;
+    return true;
   }
 
   // Clear all content from a layer (via Konva stage ref)
@@ -921,6 +1168,13 @@ class CanvasStore {
     // drawn on top of the fresh (empty) mask layer — ghost mask visual glitch.
     this.persistedMaskPreviewUrl = null;
     this.maskEditedSinceResult = false;
+    // Discard any display-only pending inpaint result (owned object URL would
+    // otherwise leak, and its dimensions no longer match the new canvas) and
+    // drop one-shot flags that now point at layer ids that no longer exist.
+    this.clearPendingInpaintResult();
+    this.pendingDuplicate = null;
+    this.pendingLayerImage = null;
+    this.pendingThumbRefresh = [];
 
     this.addLayer("raster", locale.t("canvas.layer.background"));
     this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
@@ -999,6 +1253,37 @@ class CanvasStore {
     return true;
   }
 
+  // Does the canvas have any non-transparent pixel (i.e. user-drawn content)?
+  private canvasHasAlpha(canvas: HTMLCanvasElement): boolean {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 0) return true;
+    }
+    return false;
+  }
+
+  // Composite the base image (letterboxed to the canvas) under drawn raster
+  // strokes, producing the full canvas content used as the inpaint input.
+  private async compositeBaseWithRaster(
+    baseUrl: string,
+    strokes: HTMLCanvasElement,
+  ): Promise<HTMLCanvasElement> {
+    const off = document.createElement("canvas");
+    off.width = this.canvasWidth;
+    off.height = this.canvasHeight;
+    const ctx = off.getContext("2d")!;
+    try {
+      const baseImg = await loadImageDataUrl(baseUrl);
+      ctx.drawImage(baseImg, 0, 0, off.width, off.height);
+    } catch {
+      // Base failed to load — fall back to strokes only.
+    }
+    ctx.drawImage(strokes, 0, 0);
+    return off;
+  }
+
   // Sync canvas to generation store before generating
   async syncToGeneration(
     getRasterComposite: () => HTMLCanvasElement | null,
@@ -1014,19 +1299,22 @@ class CanvasStore {
     // In inpainting mode, keep the currently selected input image as the baseline.
     // This makes denoise behave as expected: only the masked area is reworked.
     if (isInpainting) {
-      if (generation.inputImage) {
+      const hasRasterStrokes = rasterCanvas ? this.canvasHasAlpha(rasterCanvas) : false;
+      const baseUrl = this.effectiveReferenceImage;
+      if (hasRasterStrokes && baseUrl) {
+        // The user drew "regular" strokes on raster layers on top of the base —
+        // composite them so the inpaint reworks base+strokes, not just the base.
+        const composite = await this.compositeBaseWithRaster(baseUrl, rasterCanvas);
+        const result = await this.exportLayerAsImage(composite, "canvas_input.png");
+        generation.inputImage = result.name;
         hasRaster = true;
-      } else if (rasterCanvas) {
-        // Last resort only: if no source image exists, fall back to painted raster.
-        const ctx = rasterCanvas.getContext("2d")!;
-        const data = ctx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height).data;
-        for (let i = 3; i < data.length; i += 4) {
-          if (data[i] > 0) { hasRaster = true; break; }
-        }
-        if (hasRaster) {
-          const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
-          generation.inputImage = result.name;
-        }
+      } else if (generation.inputImage) {
+        hasRaster = true;
+      } else if (rasterCanvas && hasRasterStrokes) {
+        // Last resort: no base image, use painted raster directly.
+        const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
+        generation.inputImage = result.name;
+        hasRaster = true;
       }
     } else {
       // Non-inpaint modes use raster if present, otherwise staged image fallback.

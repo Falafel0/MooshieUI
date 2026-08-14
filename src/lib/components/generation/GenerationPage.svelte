@@ -1826,27 +1826,6 @@
       </div>
       {#if layersSectionOpen}
         <div class="px-3 pb-2 pt-0.5 space-y-2">
-          <div class="grid grid-cols-2 gap-1">
-            <button
-              onclick={() => canvas.setInpaintDrawMode("mask")}
-              class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'mask'
-                ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-              title={locale.t('generation.inpaint.inpaint_mask')}
-            >
-              {locale.t('generation.inpaint.inpaint_mask')}
-            </button>
-            <button
-              onclick={() => canvas.setInpaintDrawMode("regular")}
-              class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'regular'
-                ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-              title={locale.t('generation.inpaint.regular_inpaint')}
-            >
-              {locale.t('generation.inpaint.regular_inpaint')}
-            </button>
-          </div>
-
           {#if canvas.isCanvasMode}
             <LayerPanel />
           {:else}

@@ -46,7 +46,8 @@ class CanvasHistoryStore {
       if (!kLayer) continue;
 
       // Save current transform, reset for export
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       kLayer.scaleX(1);
@@ -61,8 +62,8 @@ class CanvasHistoryStore {
       });
 
       // Restore transform
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
 
@@ -92,7 +93,8 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
 
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       kLayer.scaleX(1);
@@ -106,8 +108,8 @@ class CanvasHistoryStore {
         height: this._canvasHeight,
       });
 
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
 
@@ -132,7 +134,8 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
 
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       kLayer.scaleX(1);
@@ -146,8 +149,8 @@ class CanvasHistoryStore {
         height: this._canvasHeight,
       });
 
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
 
@@ -163,6 +166,7 @@ class CanvasHistoryStore {
   private async _restoreEntries(entries: HistoryEntry[]) {
     if (!this._konvaLayers) return;
 
+    const restoredIds: string[] = [];
     for (const entry of entries) {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
@@ -170,8 +174,18 @@ class CanvasHistoryStore {
       // Clear the layer
       kLayer.destroyChildren();
 
-      // Load the snapshot image
-      const img = await this._loadImage(entry.imageData);
+      let img: HTMLImageElement;
+      try {
+        img = await this._loadImage(entry.imageData);
+      } catch (error) {
+        console.error("Failed to load history snapshot:", error);
+        continue;
+      }
+
+      // The layer may have been removed or rebuilt while the image loaded.
+      const cur = this._konvaLayers.get(entry.layerId);
+      if (!cur || cur !== kLayer) continue;
+
       const kImage = new Konva.Image({
         image: img,
         x: 0,
@@ -182,9 +196,10 @@ class CanvasHistoryStore {
       });
       kLayer.add(kImage);
       kLayer.batchDraw();
+      restoredIds.push(entry.layerId);
     }
 
-    this._onRestored?.(entries.map((e) => e.layerId));
+    this._onRestored?.(restoredIds);
   }
 
   private _loadImage(src: string): Promise<HTMLImageElement> {

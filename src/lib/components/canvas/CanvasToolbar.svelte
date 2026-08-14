@@ -109,29 +109,20 @@
   {#if generation.mode === "inpainting"}
     <div class="flex items-center gap-1 mr-2">
       <button
-        onclick={() => canvas.setInpaintDrawMode("mask")}
-        class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'mask'
-          ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-          : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-        title={locale.t('canvas.inpaint_mask_mode')}
-      >
-        {locale.t('canvas.inpaint_mask')}
-      </button>
-      <button
-        onclick={() => canvas.setInpaintDrawMode("regular")}
-        class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'regular'
-          ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-          : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-        title={locale.t('canvas.regular_inpaint_mode')}
-      >
-        {locale.t('canvas.regular_inpaint')}
-      </button>
-      <button
         onclick={() => { canvas.clearMask(); canvas.clearStaging(); }}
         class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 transition-colors"
         title={locale.t('canvas.clear_mask')}
       >
         {locale.t('canvas.clear_mask')}
+      </button>
+      <button
+        onclick={() => canvas.toggleShowOriginal()}
+        class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.showOriginalForComparison
+          ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
+          : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
+        title={locale.t('canvas.show_original_title')}
+      >
+        {locale.t('canvas.show_original')}
       </button>
     </div>
 
