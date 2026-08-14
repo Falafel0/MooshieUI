@@ -1050,9 +1050,15 @@ class CanvasStore {
     if (removed?.type === "mask") {
       // Removing a mask invalidates the composite mask synced to the generation
       // store and the persisted preview used by applyInpaintAsLayer — otherwise
-      // ComfyUI keeps inpainting with a deleted mask.
-      generation.maskImage = null;
-      this.persistedMaskPreviewUrl = null;
+      // ComfyUI keeps inpainting with a deleted mask. Only null the state when
+      // the LAST mask was removed: with other masks surviving, nulling here would
+      // make ComfyUI ignore them too; the composite is re-synced on the next
+      // auto-commit / Generate instead.
+      const remainingMasks = this.layers.some((l) => l.type === "mask");
+      if (!remainingMasks) {
+        generation.maskImage = null;
+        this.persistedMaskPreviewUrl = null;
+      }
     }
     if (this.activeLayerId === id) {
       if (this.layers.length === 0) {
@@ -1234,6 +1240,9 @@ class CanvasStore {
     // drop one-shot flags that now point at layer ids that no longer exist.
     this.clearPendingInpaintResult();
     this.pendingDuplicate = null;
+    if (this.pendingLayerImage?.owned && this.pendingLayerImage.imageUrl) {
+      URL.revokeObjectURL(this.pendingLayerImage.imageUrl);
+    }
     this.pendingLayerImage = null;
     this.pendingThumbRefresh = [];
 

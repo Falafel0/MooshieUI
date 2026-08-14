@@ -141,9 +141,9 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
 
-      // Clear the layer
-      kLayer.destroyChildren();
-
+      // Load the snapshot image FIRST so a load failure leaves the current
+      // content intact — destroying children before the async load meant a
+      // failed load permanently erased the layer.
       let img: HTMLImageElement;
       try {
         img = await this._loadImage(entry.imageData);
@@ -155,6 +155,8 @@ class CanvasHistoryStore {
       // The layer may have been removed or rebuilt while the image loaded.
       const cur = this._konvaLayers.get(entry.layerId);
       if (!cur || cur !== kLayer) continue;
+
+      kLayer.destroyChildren();
 
       const kImage = new Konva.Image({
         image: img,

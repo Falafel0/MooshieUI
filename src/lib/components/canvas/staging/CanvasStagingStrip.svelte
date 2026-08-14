@@ -6,6 +6,7 @@
   import { gallery } from "../../../stores/gallery.svelte.js";
   import { uploadImageBytes } from "../../../utils/api.js";
   import { prepareOutputImageForEditMode } from "../../../utils/editImagePreparation.js";
+  import { lazyThumbnail } from "../../../utils/lazyThumbnail.js";
   import type { OutputImage } from "../../../types/index.js";
 
   const editSessionImages = $derived(
@@ -17,11 +18,19 @@
   let selectingFilename = $state<string | null>(null);
 
   async function selectEditSource(image: OutputImage) {
+    // Ignore re-entry while a selection is in flight: a second click would fire
+    // a second upload + initCanvas, racing the first and leaving inputImage
+    // pointing at whichever finished last.
+    if (selectingFilename) return;
+    let previewUrlOwned = false;
+    let previewUrl: string | null = null;
     try {
       selectingFilename = image.filename;
       const prepared = await prepareOutputImageForEditMode(image, "inpainting");
       const normalized = prepared.normalized;
       if (!normalized) return;
+      previewUrl = normalized.previewUrl;
+      previewUrlOwned = true;
 
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
       // NOTE: do not set generation.inputImage here — setPreparedInpaintOverride /
@@ -50,6 +59,8 @@
           uploadedInputName: response.name,
         });
       }
+      // Ownership of the preview URL transferred to the canvas store above.
+      previewUrlOwned = false;
       generation.width = normalized.width;
       generation.height = normalized.height;
       canvas.isCanvasMode = true;
@@ -59,6 +70,7 @@
       }
     } catch (e) {
       console.error("Failed to select edit source:", e);
+      if (previewUrlOwned && previewUrl) URL.revokeObjectURL(previewUrl);
     } finally {
       selectingFilename = null;
     }
@@ -118,7 +130,7 @@
           onclick={() => void selectEditSource(image)}
           title={image.filename}
         >
-          <img src={image.url} alt={image.filename} class="w-full h-full object-cover" />
+          <img use:lazyThumbnail={{ image, size: 128 }} alt={image.filename} class="w-full h-full object-cover" />
         </button>
       {/each}
     {/if}
