@@ -1463,8 +1463,13 @@
     const w = canvas.canvasWidth;
     const h = canvas.canvasHeight;
     if (!stage || !containerW || !containerH || w <= 0 || h <= 0) return;
-    canvas.zoomToFit(containerW, containerH);
-    applyViewport();
+    // Untracked: zoomToFit WRITES canvas.viewport and applyViewport READS it.
+    // Tracking the viewport here would make this effect self-referential
+    // (re-run on every viewport write) and blow the Svelte 5 update depth.
+    untrack(() => {
+      canvas.zoomToFit(containerW, containerH);
+      applyViewport();
+    });
   });
 
   let historyDims = { w: 0, h: 0 };
