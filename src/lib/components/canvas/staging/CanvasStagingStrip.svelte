@@ -123,15 +123,22 @@
       <span class="text-[11px] text-neutral-500">{locale.t('bottom_panel.no_images')}</span>
     {:else}
       {#each editSessionImages as image}
-        <button
-          class="shrink-0 w-14 h-14 rounded border overflow-hidden transition-colors {selectingFilename === image.filename
-            ? 'border-indigo-400'
-            : 'border-neutral-700 hover:border-indigo-500'}"
-          onclick={() => void selectEditSource(image)}
-          title={image.filename}
-        >
-          <img use:lazyThumbnail={{ image, size: 128 }} alt={image.filename} class="w-full h-full object-cover" />
-        </button>
+        <div class="relative shrink-0 w-14 h-14 group">
+          <button
+            class="w-full h-full rounded border overflow-hidden transition-colors {selectingFilename === image.filename
+              ? 'border-indigo-400'
+              : 'border-neutral-700 hover:border-indigo-500'}"
+            onclick={() => void selectEditSource(image)}
+            title={image.filename}
+          >
+            <img use:lazyThumbnail={{ image, size: 128 }} alt={image.filename} class="w-full h-full object-cover" />
+          </button>
+          <button
+            class="absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl bg-neutral-900/90 text-neutral-300 text-xs leading-none hover:bg-indigo-600 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+            onclick={(e) => { e.stopPropagation(); canvas.addImageAsRasterLayer(image.url); }}
+            title="Add as raster layer"
+          >+</button>
+        </div>
       {/each}
     {/if}
   </div>

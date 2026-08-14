@@ -1092,6 +1092,16 @@ class CanvasStore {
     this.layerThumbnails = next;
   }
 
+  // Add a staged/gallery image as a NEW raster layer, letterboxed onto the
+  // canvas. The URL is borrowed (owned elsewhere); injectLayerImage stamps it
+  // without revoking.
+  addImageAsRasterLayer(imageUrl: string, name?: string): string | null {
+    if (!imageUrl) return null;
+    const layerId = this.addLayer("raster", name);
+    this.pendingLayerImage = { layerId, imageUrl, owned: false };
+    return layerId;
+  }
+
   duplicateLayer(id: string): string | null {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return null;

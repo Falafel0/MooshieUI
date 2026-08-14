@@ -858,12 +858,23 @@
       return;
     }
 
+    // Letterbox (contain) so an image with a different aspect ratio is shown
+    // in full instead of being stretched.
+    const imageRatio = img.naturalWidth / img.naturalHeight;
+    const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
+    let drawW = canvas.canvasWidth;
+    let drawH = canvas.canvasHeight;
+    if (imageRatio > canvasRatio) {
+      drawH = canvas.canvasWidth / imageRatio;
+    } else {
+      drawW = canvas.canvasHeight * imageRatio;
+    }
     const kImage = new Konva.Image({
       image: img,
-      x: 0,
-      y: 0,
-      width: canvas.canvasWidth,
-      height: canvas.canvasHeight,
+      x: (canvas.canvasWidth - drawW) / 2,
+      y: (canvas.canvasHeight - drawH) / 2,
+      width: drawW,
+      height: drawH,
       listening: false,
     });
     kLayer.add(kImage);
