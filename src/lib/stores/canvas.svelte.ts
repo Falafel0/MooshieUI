@@ -540,6 +540,9 @@ class CanvasStore {
     this.pendingResultHeight = null;
     this.maskEditedSinceResult = false;
     const maskUrl = this.pendingResultMaskUrl;
+    // Base image the inpaint was applied to — used to compute the changed region
+    // (result minus base) so only what actually changed is added as a layer.
+    const baseUrl = this.preparedInpaintPreviewUrl ?? this.referenceImageUrl;
 
     // Composite at the RESULT's native dimensions (fallback to canvas dims). The
     // result can return a few px off the canvas (VAE padding rounds to multiples
@@ -570,7 +573,12 @@ class CanvasStore {
       if (!ctx) return null;
       ctx.drawImage(resultImg, 0, 0, w, h);
 
-      // Keep only the masked region: set output alpha from the mask's luminance.
+      // Compute the changed region as the pixel DIFFERENCE between the base and
+      // the result, so only what actually changed is added — with a smooth alpha
+      // edge from the diff magnitude — instead of a hard mask cut. The mask (if
+      // present) still restricts the region, but the diff drives the alpha.
+      const outData = ctx.getImageData(0, 0, w, h);
+      let maskAlpha: Uint8ClampedArray | null = null;
       if (maskUrl) {
         try {
           const maskImg = await loadImageDataUrl(maskUrl);
@@ -580,17 +588,52 @@ class CanvasStore {
           const mctx = maskCanvas.getContext("2d");
           if (mctx) {
             mctx.drawImage(maskImg, 0, 0, w, h);
-            const maskData = mctx.getImageData(0, 0, w, h);
-            const outData = ctx.getImageData(0, 0, w, h);
-            // Mask is white-on-black: white (255) = keep, black (0) = transparent.
-            for (let i = 0; i < maskData.data.length; i += 4) {
-              outData.data[i + 3] = maskData.data[i];
-            }
-            ctx.putImageData(outData, 0, 0);
+            maskAlpha = mctx.getImageData(0, 0, w, h).data;
           }
         } catch {
-          // Mask failed to load — fall back to keeping the full result.
+          // Mask failed to load — proceed without a region restriction.
         }
+      }
+
+      let diffApplied = false;
+      if (baseUrl) {
+        try {
+          const baseImg = await loadImageDataUrl(baseUrl);
+          const baseCanvas = document.createElement("canvas");
+          baseCanvas.width = w;
+          baseCanvas.height = h;
+          const bctx = baseCanvas.getContext("2d");
+          if (bctx) {
+            bctx.drawImage(baseImg, 0, 0, w, h);
+            const baseData = bctx.getImageData(0, 0, w, h).data;
+            const THRESHOLD = 8; // ignore tiny JPEG/VAE noise
+            const SOFTNESS = 48; // ramp to full opacity over this diff range
+            for (let i = 0; i < outData.data.length; i += 4) {
+              const dr = Math.abs(outData.data[i] - baseData[i]);
+              const dg = Math.abs(outData.data[i + 1] - baseData[i + 1]);
+              const db = Math.abs(outData.data[i + 2] - baseData[i + 2]);
+              const diff = Math.max(dr, dg, db);
+              let a = 0;
+              if (diff > THRESHOLD) {
+                a = Math.min(255, ((diff - THRESHOLD) / SOFTNESS) * 255);
+              }
+              if (maskAlpha) a = Math.min(a, maskAlpha[i]);
+              outData.data[i + 3] = a;
+            }
+            ctx.putImageData(outData, 0, 0);
+            diffApplied = true;
+          }
+        } catch {
+          // Base failed to load — fall back to the mask cut below.
+        }
+      }
+
+      if (!diffApplied) {
+        // No usable base: fall back to the mask cut (or keep the full result).
+        for (let i = 0; i < outData.data.length; i += 4) {
+          if (maskAlpha) outData.data[i + 3] = maskAlpha[i];
+        }
+        ctx.putImageData(outData, 0, 0);
       }
 
       // Bail on an empty mask rather than creating a useless blank layer.
