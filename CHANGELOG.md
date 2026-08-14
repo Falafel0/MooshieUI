@@ -1,5 +1,28 @@
 # Changelog
 
+## What's New in v2.1.0
+
+### Canvas & Inpaint — Major Overhaul (Phases B–D)
+
+- **Per-layer inpaint settings (Phase B)**: every mask and raster layer now carries its own complete inpaint config (denoise, grow mask by, mask_only, inpaint mask width/height/blend/hipass, context factor, device mode, differential diffusion, prompt, prompt-add-to-base). Global values serve as defaults for new layers.
+- **Global Apply-as-Layer edge controls**: two shared sliders in the mask panel replace per-layer feather:
+  - **Edge Feather (0–64px)** — box-blur the mask so the result alpha extends beyond the mask boundary with a smooth fade, blending onto the non-inpainted region.
+  - **Diff Tolerance (0–64)** — colour-difference threshold (base vs result) below which pixels become transparent. Higher = fewer changed pixels.
+- **Diff-based Apply-as-Layer** (replaces binary mask cut): computes per-pixel difference between the base image and the inpaint result, using the diff magnitude as soft alpha. The mask still restricts the region. Falls back to mask cut when no base exists.
+- **Input image optional (Phase C)**: canvas mode no longer requires a loaded input image. An empty canvas falls back to txt2img (clean generation) instead of hard-blocking.
+- **Explicit clear buttons (Phase D)**: separate toolbar actions — Clear Masks / Clear Rasters / Clear Content — no silent auto-reset.
+- **Resize without wipe (D3)**: changing canvas dimensions scales existing layers and updates clips, instead of re-initialising and wiping everything.
+- **Feather mask alpha beyond boundary**: box-blur the mask so result alpha extends past the mask edge with a smooth fade, blending onto surrounding non-inpainted area.
+- **Canvas toggle no state reset**: toggling Canvas Editor OFF→ON keeps the Konva stage mounted; masks, rasters, and strokes survive.
+
+### Fixes
+- **Effect update depth exceeded** → `untrack()` in viewport re-fit (was blowing Svelte 5 update depth, causing app reload loop / stuck on "Initializing...").
+- **Raster feather (Konva Blur) removed** — it blurred the whole layer RGB, not just edges. Replaced by alpha-only feather on mask.
+- **Per-mask feather field removed** — dead code after `activeMaskFeather` cleanup.
+- **Canvas mode mode-resolution**: selected inpainting/img2img now gracefully downgrades to txt2img when no raster/input exists, instead of hard-error.
+
+---
+
 ## What's New in v2.0.8
 
 ### ComfyUI setup
