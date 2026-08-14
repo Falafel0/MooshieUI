@@ -215,13 +215,9 @@
         }
       }
 
-      // Anima models produce poor results below 1024 — clamp to 1024² area preserving aspect ratio
-      if (generation.isAnima && (generation.width < 1024 || generation.height < 1024)) {
-        const ratio = generation.width / generation.height;
-        const area = 1024 * 1024;
-        generation.width = Math.round(Math.sqrt(area * ratio) / 8) * 8;
-        generation.height = Math.round(Math.sqrt(area / ratio) / 8) * 8;
-      }
+      // NOTE: the Anima ≥1024 clamp now lives in generation.toParams() and is
+      // applied to the params there — NOT to generation.width/height, which would
+      // re-trigger the canvas resize effect and wipe the user's layers.
 
       if (orderedWildcardRunCount > 1) {
         await handleOrderedWildcardGenerate(orderedWildcardRunCount);

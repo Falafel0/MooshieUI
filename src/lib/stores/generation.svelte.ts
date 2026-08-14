@@ -2617,6 +2617,19 @@ class GenerationStore {
     // (see `utils/timelineProvider.ts`).
     const timeline = isVideo ? compileTimeline(translatedPositiveBase) : null;
 
+    // Anima models produce poor results below 1024 — clamp to a 1024² area
+    // preserving aspect ratio. Applied to the RETURNED params, NOT this.width/
+    // this.height: mutating the store dimensions re-triggers the canvas resize
+    // effect and wipes the user's layers (masks, per-mask prompt/denoise).
+    let width = this.width;
+    let height = this.height;
+    if (this.isAnima && (width < 1024 || height < 1024)) {
+      const ratio = width / height;
+      const area = 1024 * 1024;
+      width = Math.round(Math.sqrt(area * ratio) / 8) * 8;
+      height = Math.round(Math.sqrt(area / ratio) / 8) * 8;
+    }
+
     const params: GenerationParams = {
       mode: this.mode,
       positive_prompt: translatedPositiveBase,
@@ -2648,8 +2661,8 @@ class GenerationStore {
       steps: this.steps,
       cfg: this.cfg,
       seed: this.seed,
-      width: this.width,
-      height: this.height,
+      width,
+      height,
       batch_size: this.batchSize,
       denoise: this.denoise,
       differential_diffusion: this.differentialDiffusion,
