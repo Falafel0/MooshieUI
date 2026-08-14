@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
   import Konva from "konva";
   import { generation } from "../../stores/generation.svelte.js";
   import { canvas, type ToolType } from "../../stores/canvas.svelte.js";
@@ -174,9 +174,13 @@
     updateReferenceImage(canvas.effectiveReferenceImage);
 
     // Persisted mask preview layer (sits above reference, below paint layers)
+    // The persisted mask overlay is intentionally left EMPTY: the editable
+    // vector mask layers now render the mask directly, and rendering BOTH would
+    // double-blend the same pixels (and binarize light strokes to full opacity).
+    // The layer stays in the stack for z-order; persistedMaskPreviewUrl is still
+    // kept as data for applyInpaintAsLayer.
     persistedMaskLayer = new Konva.Layer({ listening: false });
     stage.add(persistedMaskLayer);
-    updatePersistedMaskOverlay(canvas.persistedMaskPreviewUrl);
 
     // Create Konva layers for each canvas layer
     syncKonvaLayers();
@@ -241,9 +245,14 @@
     }
 
     const sorted = [...canvas.layers].sort((a, b) => a.order - b.order);
+    // Rasters first (bottom), then masks (top): masks are always overlays on top
+    // of the raster content, regardless of their `order` relative to rasters.
+    // A single pass by `order` let a later-added raster cover the masks.
     for (const layer of sorted) {
-      const kLayer = konvaLayers.get(layer.id);
-      if (kLayer) kLayer.moveToTop();
+      if (layer.type === "raster") konvaLayers.get(layer.id)?.moveToTop();
+    }
+    for (const layer of sorted) {
+      if (layer.type === "mask") konvaLayers.get(layer.id)?.moveToTop();
     }
 
     uiLayer?.moveToTop();
@@ -563,8 +572,11 @@
   }
 
   function getMaskTargetLayer(): { layer: (typeof canvas.layers)[number]; kLayer: Konva.Layer } | null {
-    const maskLayer = canvas.layers.find((l) => l.type === "mask");
-    if (!maskLayer || maskLayer.locked) return null;
+    // Draw into the ACTIVE mask layer, not the first one in the list. When this
+    // is called, isInpaintMaskMode() is true, which means the active layer IS a
+    // mask — so canvas.activeLayer is exactly the layer the user selected.
+    const maskLayer = canvas.activeLayer;
+    if (!maskLayer || maskLayer.type !== "mask" || maskLayer.locked) return null;
 
     const kLayer = konvaLayers.get(maskLayer.id) ?? null;
     if (!kLayer) return null;
@@ -727,6 +739,42 @@
     }
     dst.batchDraw();
     scheduleThumbRefresh(targetId);
+  }
+
+  // Move a raster layer's vector nodes into a mask layer (used by
+  // sendActiveLayerToMask). The source is emptied and its strokes are re-styled
+  // as mask strokes (maskOverlayColor at the standard mask opacity).
+  function moveNodesToMask(sourceId: string, maskId: string) {
+    const src = konvaLayers.get(sourceId);
+    const dst = konvaLayers.get(maskId);
+    if (!src || !dst) return;
+
+    for (const node of src.getChildren()) {
+      const gco = node.globalCompositeOperation?.();
+      if (gco === "destination-out") continue;
+
+      const clone = node.clone();
+      if (!clone) continue;
+      clone.id(undefined);
+
+      clone.globalCompositeOperation?.("source-over");
+      // Match the brush-stroke mask opacity instead of full 1.0 (which made the
+      // moved content look denser than hand-drawn masks).
+      clone.opacity?.(canvas.maskOverlayOpacity);
+
+      if (clone.stroke && typeof clone.stroke === "function") {
+        clone.stroke(canvas.maskOverlayColor);
+      }
+      if (clone.fill && typeof clone.fill === "function") {
+        clone.fill(canvas.maskOverlayColor);
+      }
+
+      dst.add(clone);
+    }
+
+    src.destroyChildren?.();
+    src.batchDraw?.();
+    dst.batchDraw?.();
   }
 
   // Stamp an image into a freshly-created layer (used by applyInpaintAsLayer).
@@ -1289,7 +1337,11 @@
     // Re-sync Konva layers when canvas layers change
     void canvas.layers;
     syncKonvaLayers();
-    applyViewport();
+    // Apply the viewport to any newly-created Konva layers WITHOUT tracking
+    // canvas.viewport here. Tracking it makes this effect re-run (and thus
+    // re-sync ALL layers) on every pan/zoom tick — the main jank source. The
+    // dedicated viewport $effect below handles live pan/zoom instead.
+    untrack(() => applyViewport());
 
     // Re-hydrate a preserved inpaint mask onto the freshly-rebuilt mask layer
     // (set by the store on a base swap or an inpaint-base undo).
@@ -1304,6 +1356,13 @@
     if (dup) {
       canvas.pendingDuplicate = null;
       cloneLayerNodes(dup.sourceId, dup.targetId);
+    }
+
+    // Move a raster layer's nodes into a mask layer (set by sendActiveLayerToMask).
+    const send = canvas.pendingSendToMask;
+    if (send) {
+      canvas.pendingSendToMask = null;
+      moveNodesToMask(send.sourceId, send.maskId);
     }
 
     // Stamp a composited image into a freshly-created layer (applyInpaintAsLayer).
@@ -1397,15 +1456,9 @@
     stage.batchDraw();
   });
 
-  $effect(() => {
-    void canvas.persistedMaskPreviewUrl;
-    void canvas.maskOverlayVisible;
-    void canvas.maskOverlayColor;
-    void canvas.maskOverlayOpacity;
-    void canvas.canvasWidth;
-    void canvas.canvasHeight;
-    updatePersistedMaskOverlay(canvas.persistedMaskPreviewUrl);
-  });
+  // (Persisted mask overlay rendering removed — it double-rendered the mask on
+  // top of the editable vector strokes. persistedMaskPreviewUrl remains in the
+  // store as the mask data used by applyInpaintAsLayer.)
 
   // Public API for export
   export function getRasterComposite(): HTMLCanvasElement | null {
@@ -1429,10 +1482,15 @@
       const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
+      // A raster layer may be visually hidden (e.g. "show original" compare
+      // mode); Konva renders nothing for an invisible node, so force it visible
+      // for the capture and restore afterwards (mirrors getMaskCanvas).
+      const origVisible = kLayer.visible();
       kLayer.scaleX(1);
       kLayer.scaleY(1);
       kLayer.x(0);
       kLayer.y(0);
+      kLayer.visible(true);
 
       try {
         const layerCanvas = kLayer.toCanvas({
@@ -1445,11 +1503,12 @@
         ctx.drawImage(layerCanvas, 0, 0);
         ctx.globalAlpha = 1;
       } finally {
-        // Restore transform
+        // Restore transform and visibility
         kLayer.scaleX(origScaleX);
         kLayer.scaleY(origScaleY);
         kLayer.x(origX);
         kLayer.y(origY);
+        kLayer.visible(origVisible);
       }
     }
 

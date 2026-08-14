@@ -11,6 +11,9 @@ export interface QueuedPrompt {
   startedAt?: number;
   /** Total wall-clock generation time in ms (computed in completePrompt). */
   durationMs?: number;
+  /** inpaintSourceVersion captured at enqueue (generate) time; used to discard
+   *  a stale inpaint result when the base changed while the prompt was queued. */
+  inpaintSourceVersion?: number | null;
 }
 
 class ProgressStore {
@@ -280,6 +283,7 @@ class ProgressStore {
     wasUpscaled: boolean = false,
     mode: GenerationMode = "txt2img",
     params: GenerationParams | null = null,
+    inpaintSourceVersion: number | null = null,
   ) {
     const existingIdx = this.pendingPrompts.findIndex((p) => p.promptId === promptId);
     if (existingIdx >= 0) {
@@ -290,6 +294,7 @@ class ProgressStore {
         mode,
         wasUpscaled,
         params: params!,
+        inpaintSourceVersion,
         // Preserve enqueuedAt from the existing entry (set by restoreFromSnapshot
         // or a prior enqueue). If unset, stamp it now so the reconciler's 30s
         // activity guard has a valid baseline.
@@ -305,6 +310,7 @@ class ProgressStore {
         mode,
         wasUpscaled,
         params: params!,
+        inpaintSourceVersion,
         enqueuedAt: Date.now(),
       },
     ];

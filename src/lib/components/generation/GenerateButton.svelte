@@ -317,6 +317,18 @@
         } finally {
           clearAllRegionalChainGallerySuppress();
         }
+      } else if (maskSteps.length === 1) {
+        // Single mask (the standard inpaint case): apply its per-mask denoise +
+        // prompt directly. The chain gate above only handles 2+ masks, so a lone
+        // mask layer previously fell through to the global denoise, silently
+        // discarding the per-mask slider value.
+        const step = maskSteps[0];
+        const params = generation.toParams();
+        params.denoise = step.denoise;
+        if (step.prompt?.trim()) {
+          params.positive_prompt = step.prompt;
+        }
+        await submitGeneration(params);
       } else if (useRegionalInpaintChain && configuredRegions > 0) {
         const chainToken = ++regionalChainToken;
         regionalChainCancelRequested = false;

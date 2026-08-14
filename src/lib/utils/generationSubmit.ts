@@ -1,5 +1,6 @@
 import { generate, type GenerateResponse } from "./api.js";
 import { progress } from "../stores/progress.svelte.js";
+import { canvas } from "../stores/canvas.svelte.js";
 import type { GenerationParams } from "../types/index.js";
 
 /**
@@ -21,7 +22,7 @@ export async function requestGeneration(params: GenerationParams): Promise<Gener
 }
 
 export function trackGeneration(params: GenerationParams, result: GenerateResponse): string {
-  progress.enqueue(result.prompt_id, params.upscale_enabled, params.mode, params);
+  progress.enqueue(result.prompt_id, params.upscale_enabled, params.mode, params, canvas.inpaintSourceVersion);
   if (result.queue_position != null && result.queue_total != null) {
     progress.updateQueuePosition(result.prompt_id, result.queue_position, result.queue_total);
   }

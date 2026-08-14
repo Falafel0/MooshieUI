@@ -1866,7 +1866,7 @@
    * Finalize images received via WebSocket during generation.
    * MooshieSaveImage sends PNG bytes directly over WS — no disk round-trip.
    */
-  async function prepareLatestInpaintResult(image: OutputImage, sourceVersion: number) {
+  async function prepareLatestInpaintResult(image: OutputImage, sourceVersion: number | null) {
     try {
       const prepared = await prepareOutputImageForEditMode(image, "inpainting");
       const normalized = prepared.normalized;
@@ -1876,7 +1876,7 @@
       if (
         generation.mode !== "inpainting" ||
         !canvas.isCanvasMode ||
-        canvas.inpaintSourceVersion !== sourceVersion
+        (sourceVersion != null && canvas.inpaintSourceVersion !== sourceVersion)
       ) {
         URL.revokeObjectURL(normalized.previewUrl);
         return;
@@ -1902,6 +1902,7 @@
     params: GenerationParams | null,
     images: Array<{ blob: Blob; url: string; tempFilename?: string; displayTempFilename?: string }>,
     generationTimeMs?: number,
+    inpaintSourceVersion?: number | null,
   ) {
     if (images.length === 0) return;
 
@@ -1928,8 +1929,9 @@
     gallery.addImages(newImages);
     progress.setLastOutputForMode(mode, newImages[0]?.url ?? null);
     if (mode === "inpainting" && generation.mode === "inpainting" && canvas.isCanvasMode && newImages[0]) {
-      const sourceVersion = canvas.inpaintSourceVersion;
-      void prepareLatestInpaintResult(newImages[0], sourceVersion);
+      // Pass the version captured at enqueue time (generate), not the current
+      // one, so a base change while the prompt was queued discards the result.
+      void prepareLatestInpaintResult(newImages[0], inpaintSourceVersion ?? null);
     }
 
     const metadata = params ? buildPngMetadata(params) : undefined;
@@ -2829,7 +2831,7 @@
               clearRegionalChainGallerySuppress(promptId);
               console.log("[regional] Skipping gallery save for chain intermediate:", promptId);
             } else {
-              finalizeOutputImages(promptId, item.mode, item.wasUpscaled, item.params, images, item.durationMs);
+              finalizeOutputImages(promptId, item.mode, item.wasUpscaled, item.params, images, item.durationMs, item.inpaintSourceVersion);
             }
 
             // Track grid batch completion — stitch when all cells are done
@@ -2959,7 +2961,7 @@
                   clearRegionalChainGallerySuppress(p.promptId);
                   console.log("[regional] Skipping gallery save for chain intermediate:", p.promptId);
                 } else {
-                  finalizeOutputImages(p.promptId, item.mode, item.wasUpscaled, item.params, images, item.durationMs);
+                  finalizeOutputImages(p.promptId, item.mode, item.wasUpscaled, item.params, images, item.durationMs, item.inpaintSourceVersion);
                 }
               } else {
                 const failedStyleTransfer = item.params?.style_transfer_enabled;

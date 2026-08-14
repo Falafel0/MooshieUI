@@ -122,6 +122,10 @@ class CanvasStore {
   showOriginalForComparison = $state(false);
   cursorPos = $state<{ x: number; y: number } | null>(null);
   referenceImageUrl = $state<string | null>(null);
+  // Whether referenceImageUrl is an object URL this store created and owns
+  // (must be revoked when replaced/cleared). Gallery/display URLs passed via
+  // setReferenceImage are borrowed and owned elsewhere.
+  private referenceImageUrlOwned = false;
   originalInpaintInputImageName = $state<string | null>(null);
   originalInpaintWidth = $state<number | null>(null);
   originalInpaintHeight = $state<number | null>(null);
@@ -145,6 +149,9 @@ class CanvasStore {
   // A mask layer that needs a thumbnail refresh after a direct Konva mutation
   // (e.g. sendActiveLayerToMask) — consumed by CanvasStage.
   pendingThumbRefresh = $state<string[]>([]);
+  // A raster→mask content move that must run after syncKonvaLayers has created
+  // the (possibly freshly-added) target mask's Konva layer — consumed by CanvasStage.
+  pendingSendToMask = $state<{ sourceId: string; maskId: string } | null>(null);
   // The latest inpaint result, held for DISPLAY ONLY. Pressing "Generate" always
   // re-rolls the current base + mask (never this result); it is only shown as the
   // canvas background so the user can preview it. "Apply" promotes it to the base.
@@ -153,6 +160,10 @@ class CanvasStore {
   pendingResultInputName = $state<string | null>(null);
   pendingResultWidth = $state<number | null>(null);
   pendingResultHeight = $state<number | null>(null);
+  // The mask snapshot captured when the pending result was generated. Used by
+  // applyInpaintAsLayer so a mask edited AFTER generation doesn't change the
+  // alpha region of the applied result.
+  pendingResultMaskUrl = $state<string | null>(null);
   // While a finished inpaint result is being previewed, the editable mask strokes
   // are hidden so the clean result is visible. This flips true once the user starts
   // painting more mask, bringing the mask back so they can see what they're editing.
@@ -268,6 +279,18 @@ class CanvasStore {
     }
   }
 
+  // Replace the reference image, revoking the previous URL when this store owns
+  // it. `owned` is true only for object URLs this store created (from
+  // normalizeGenerationInputBytes); gallery/display URLs are borrowed.
+  private setReferenceImageUrl(url: string | null, owned: boolean) {
+    const prev = this.referenceImageUrl;
+    if (prev && this.referenceImageUrlOwned && prev !== url) {
+      URL.revokeObjectURL(prev);
+    }
+    this.referenceImageUrl = url;
+    this.referenceImageUrlOwned = url !== null && owned;
+  }
+
   private clearPreparedInpaintOverride() {
     if (this.preparedInpaintOwned && this.preparedInpaintPreviewUrl) {
       URL.revokeObjectURL(this.preparedInpaintPreviewUrl);
@@ -286,6 +309,7 @@ class CanvasStore {
     this.pendingResultInputName = null;
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
+    this.pendingResultMaskUrl = null;
     this.maskEditedSinceResult = false;
   }
 
@@ -304,11 +328,11 @@ class CanvasStore {
       this.originalInpaintInputImageName = null;
       this.originalInpaintWidth = null;
       this.originalInpaintHeight = null;
-      this.referenceImageUrl = null;
+      this.setReferenceImageUrl(null, false);
       return;
     }
 
-    this.referenceImageUrl = source.previewUrl;
+    this.setReferenceImageUrl(source.previewUrl, true);
     this.originalInpaintInputImageName = source.uploadedInputName;
     this.originalInpaintWidth = source.width;
     this.originalInpaintHeight = source.height;
@@ -328,6 +352,8 @@ class CanvasStore {
   }) {
     // Swapping to an explicit new base discards any display-only pending result.
     this.clearPendingInpaintResult();
+    // Base changed: invalidate any in-flight result from the previous base.
+    this.inpaintSourceVersion += 1;
     // Snapshot the outgoing base and the mask applied to it so the user can undo
     // back to it, and so the same mask can be re-hydrated onto the incoming
     // result (letting "Generate" re-roll the same region without repainting).
@@ -381,6 +407,9 @@ class CanvasStore {
     this.pendingResultInputName = source.uploadedInputName;
     this.pendingResultWidth = source.width;
     this.pendingResultHeight = source.height;
+    // Capture the mask that produced this result, so applyInpaintAsLayer uses it
+    // even if the user edits the mask afterward.
+    this.pendingResultMaskUrl = this.persistedMaskPreviewUrl;
   }
 
   // Promote the pending inpaint result to be the new base: checkpoint the current
@@ -391,6 +420,9 @@ class CanvasStore {
     if (!this.pendingResultPreviewUrl || this.pendingResultWidth == null || this.pendingResultHeight == null) {
       return;
     }
+
+    // Base changed: invalidate any in-flight result from the previous base.
+    this.inpaintSourceVersion += 1;
 
     const outgoingMask = this.snapshotInpaintMask();
     this.inpaintBaseHistory = [
@@ -413,8 +445,11 @@ class CanvasStore {
     this.preparedInpaintPreviewUrl = this.pendingResultPreviewUrl;
     this.preparedInpaintOwned = this.pendingResultOwned;
     generation.inputImage = this.pendingResultInputName;
-    generation.width = this.pendingResultWidth;
-    generation.height = this.pendingResultHeight;
+    // Preserve the original canvas dimensions — the inpaint result can come back
+    // a few px off (VAE padding rounds to multiples of 8), and adopting those
+    // would silently shrink/grow the canvas on apply.
+    generation.width = this.canvasWidth;
+    generation.height = this.canvasHeight;
 
     // Clear pending WITHOUT revoking (ownership was transferred above).
     this.pendingResultPreviewUrl = null;
@@ -450,7 +485,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.maskEditedSinceResult = false;
-    const maskUrl = this.persistedMaskPreviewUrl;
+    const maskUrl = this.pendingResultMaskUrl;
 
     const w = resultW;
     const h = resultH;
@@ -553,6 +588,8 @@ class CanvasStore {
     if (!this.originalInpaintInputImageName || this.originalInpaintWidth == null || this.originalInpaintHeight == null) {
       return;
     }
+    // Base changed: invalidate any in-flight result from the previous base.
+    this.inpaintSourceVersion += 1;
     this.clearPreparedInpaintOverride();
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
@@ -572,7 +609,7 @@ class CanvasStore {
     this.originalInpaintInputImageName = null;
     this.originalInpaintWidth = null;
     this.originalInpaintHeight = null;
-    this.referenceImageUrl = null;
+    this.setReferenceImageUrl(null, false);
   }
 
   private clearInpaintBaseHistory() {
@@ -589,6 +626,8 @@ class CanvasStore {
 
     // Stepping back discards any un-applied result being previewed.
     this.clearPendingInpaintResult();
+    // Base changed: invalidate any in-flight result from the previous base.
+    this.inpaintSourceVersion += 1;
 
     const entry = this.inpaintBaseHistory[this.inpaintBaseHistory.length - 1];
     this.inpaintBaseHistory = this.inpaintBaseHistory.slice(0, -1);
@@ -735,7 +774,7 @@ class CanvasStore {
   }
 
   setReferenceImage(url: string | null) {
-    this.referenceImageUrl = url;
+    this.setReferenceImageUrl(url, false);
   }
 
   setPersistedMaskPreview(url: string | null) {
@@ -778,15 +817,18 @@ class CanvasStore {
       if (!layer) continue;
 
       // The viewport is applied as a layer transform; reset it so the snapshot
-      // captures canvas-space pixels, then restore it.
+      // captures canvas-space pixels, then restore it. Force the mask visible —
+      // a hidden mask (result being previewed) otherwise snapshots as empty.
       const origScaleX = layer.scaleX();
       const origScaleY = layer.scaleY();
       const origX = layer.x();
       const origY = layer.y();
+      const origVisible = layer.visible();
       layer.scaleX(1);
       layer.scaleY(1);
       layer.x(0);
       layer.y(0);
+      layer.visible(true);
       try {
         const layerCanvas = layer.toCanvas({
           pixelRatio: 1,
@@ -802,6 +844,7 @@ class CanvasStore {
         layer.scaleY(origScaleY);
         layer.x(origX);
         layer.y(origY);
+        layer.visible(origVisible);
       }
     }
 
@@ -828,54 +871,31 @@ class CanvasStore {
     const sourceLayerMeta = this.layers.find((l) => l.id === sourceId);
     if (!sourceLayerMeta || sourceLayerMeta.type !== "raster") return false;
 
-    // Resolve source + mask Konva layers and check the source has content
-    // BEFORE creating/selecting a mask layer, so an empty source can't leave a
-    // stray mask layer behind or switch the active layer pointlessly.
+    // Resolve the source Konva layer and check it has content BEFORE creating a
+    // mask, so an empty source can't leave a stray mask layer behind.
     const stageLayers = this._stageRef.getLayers?.() ?? [];
     const sourceLayer = stageLayers.find((layer: any) => layer.id?.() === sourceId);
     if (!sourceLayer) return false;
     const sourceNodes = sourceLayer.getChildren?.() ?? [];
     if (!sourceNodes.length) return false;
 
+    // Ensure a mask layer exists (create if the user removed the only one).
     let maskLayerMeta = this.layers.find((l) => l.type === "mask");
     if (!maskLayerMeta) {
       const newId = this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
       maskLayerMeta = this.layers.find((l) => l.id === newId) ?? undefined;
     }
     if (!maskLayerMeta) return false;
-    const maskLayer = stageLayers.find((layer: any) => layer.id?.() === maskLayerMeta.id);
-    if (!maskLayer) return false;
 
     // Snapshot the source for undo before the destructive move.
     canvasHistory.snapshot(sourceId);
 
-    for (const node of sourceNodes) {
-      const gco = node.globalCompositeOperation?.();
-      if (gco === "destination-out") continue;
-
-      const clone = node.clone?.();
-      if (!clone) continue;
-
-      clone.globalCompositeOperation?.("source-over");
-      clone.opacity?.(1);
-
-      if (clone.stroke && typeof clone.stroke === "function") {
-        clone.stroke(this.maskOverlayColor);
-      }
-      if (clone.fill && typeof clone.fill === "function") {
-        clone.fill(this.maskOverlayColor);
-      }
-
-      maskLayer.add(clone);
-    }
-
-    sourceLayer.destroyChildren?.();
-    sourceLayer.batchDraw?.();
-    maskLayer.batchDraw?.();
-
     this.activeLayerId = maskLayerMeta.id;
-    // Refresh BOTH thumbnails: the source was emptied and the mask gained
-    // strokes (Konva nodes changed but the Svelte model didn't).
+    // The mask's Konva layer may not exist yet (a freshly-added mask only gets
+    // one after syncKonvaLayers runs in CanvasStage's $effect). Defer the actual
+    // node move so the target layer is resolved from the current Konva tree.
+    this.pendingSendToMask = { sourceId, maskId: maskLayerMeta.id };
+    // Refresh BOTH thumbnails once the move completes.
     this.pendingThumbRefresh = [maskLayerMeta.id, sourceId];
     return true;
   }
@@ -977,9 +997,19 @@ class CanvasStore {
   addLayer(type: "raster" | "mask" = "raster", name?: string): string {
     const id = genLayerId();
     const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
-    const layerName = name ?? (type === "mask"
-      ? locale.t("canvas.layer.inpaint_mask")
-      : locale.t("canvas.layer.raster", { n: String(this.layers.filter((l) => l.type === "raster").length + 1) }));
+    let layerName = name;
+    if (!layerName && type === "raster") {
+      // Pick the first unused "Raster N" name so removing a layer doesn't make
+      // a later add reuse an already-taken name.
+      const existing = new Set(this.layers.map((l) => l.name));
+      let n = this.layers.filter((l) => l.type === "raster").length + 1;
+      do {
+        layerName = locale.t("canvas.layer.raster", { n: String(n) });
+        n += 1;
+      } while (existing.has(layerName));
+    } else if (!layerName) {
+      layerName = locale.t("canvas.layer.inpaint_mask");
+    }
 
     this.layers = [
       ...this.layers,
@@ -1004,6 +1034,13 @@ class CanvasStore {
     const removed = this.layers.find((l) => l.id === id);
     this.layers = this.layers.filter((l) => l.id !== id);
     this.clearLayerThumbnail(id);
+    if (removed?.type === "mask") {
+      // Removing a mask invalidates the composite mask synced to the generation
+      // store and the persisted preview used by applyInpaintAsLayer — otherwise
+      // ComfyUI keeps inpainting with a deleted mask.
+      generation.maskImage = null;
+      this.persistedMaskPreviewUrl = null;
+    }
     if (this.activeLayerId === id) {
       if (this.layers.length === 0) {
         this.activeLayerId = null;
@@ -1106,6 +1143,7 @@ class CanvasStore {
   // Clear all content from a layer (via Konva stage ref)
   clearLayer(id: string) {
     if (!this._stageRef) return;
+    const meta = this.layers.find((l) => l.id === id);
     const layers = this._stageRef.getLayers();
     for (const kLayer of layers) {
       if (kLayer.id() === id) {
@@ -1114,6 +1152,13 @@ class CanvasStore {
         break;
       }
     }
+    if (meta?.type === "mask") {
+      // Clearing a mask empties it, so the synced composite mask is stale.
+      generation.maskImage = null;
+      this.persistedMaskPreviewUrl = null;
+    }
+    // Refresh the now-empty layer's thumbnail.
+    this.pendingThumbRefresh = [id];
   }
 
   // Viewport

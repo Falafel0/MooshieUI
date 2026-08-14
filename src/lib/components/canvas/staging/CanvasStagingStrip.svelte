@@ -24,7 +24,11 @@
       if (!normalized) return;
 
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
-      generation.inputImage = response.name;
+      // NOTE: do not set generation.inputImage here — setPreparedInpaintOverride /
+      // setInpaintOriginalSource below snapshot the OUTGOING base's input name
+      // into undo history before swapping, and set generation.inputImage from
+      // source.uploadedInputName themselves. Pre-assigning here would record the
+      // NEW name as the outgoing base (wrong Undo-base target).
       generation.mode = "inpainting";
       progress.setLastOutputForMode("inpainting", null);
       // Don't clear the mask here — setPreparedInpaintOverride / setInpaintOriginalSource

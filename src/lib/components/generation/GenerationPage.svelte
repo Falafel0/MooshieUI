@@ -1542,10 +1542,17 @@
       {#if imageSectionOpen}
         <div class="px-3 pb-2 pt-0.5 space-y-2">
           {#if canvas.currentPreparedInputImage}
-            <div class="rounded-md border border-amber-700/50 bg-amber-900/20 p-2 flex items-center justify-between gap-2">
-              <span class="text-[11px] text-amber-300">{locale.t('generation.image.staged_active')}</span>
+            <div class="rounded-md border border-amber-700/50 bg-amber-900/20 p-2 space-y-2">
+              <div class="flex items-center gap-2">
+                <img
+                  src={canvas.currentPreparedInputImage}
+                  alt={locale.t('generation.image.staged_active')}
+                  class="w-12 h-12 rounded border border-amber-700/50 object-cover shrink-0"
+                />
+                <p class="text-[11px] text-amber-300 leading-snug min-w-0 flex-1">{locale.t('generation.image.staged_active')}</p>
+              </div>
               <button
-                class="px-2 py-1 text-[11px] rounded border border-amber-600/60 text-amber-200 hover:border-amber-400 hover:text-amber-100 transition-colors"
+                class="w-full px-2 py-1.5 text-[11px] rounded border border-amber-600/60 text-amber-200 hover:border-amber-400 hover:text-amber-100 hover:bg-amber-800/30 transition-colors"
                 onclick={() => canvas.dismissPreparedInput()}
                 title={locale.t('generation.image.remove_staged')}
               >
@@ -1719,13 +1726,15 @@
             <div>
               <div class="flex items-center justify-between mb-1">
                 <p class="text-xs text-neutral-400">{locale.t('generation.inpaint.mask')}</p>
-                <button
-                  class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-300 hover:border-red-500 hover:text-red-300 transition-colors"
-                  onclick={clearMask}
-                  title={locale.t('generation.image.remove_mask')}
-                >
-                  {locale.t('generation.image.remove_mask')}
-                </button>
+                {#if maskPreviewUrl}
+                  <button
+                    class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-300 hover:border-red-500 hover:text-red-300 transition-colors"
+                    onclick={clearMask}
+                    title={locale.t('generation.image.remove_mask')}
+                  >
+                    {locale.t('generation.image.remove_mask')}
+                  </button>
+                {/if}
               </div>
               {#if maskPreviewUrl}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->

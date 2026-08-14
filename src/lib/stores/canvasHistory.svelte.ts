@@ -45,28 +45,7 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(id);
       if (!kLayer) continue;
 
-      // Save current transform, reset for export
-      const origScaleX = kLayer.scaleX();
-      const origScaleY = kLayer.scaleY();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      // Restore transform
-      kLayer.scaleX(origScaleX);
-      kLayer.scaleY(origScaleY);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
+      const dataUrl = this._captureLayer(kLayer);
       entries.push({ layerId: id, imageData: dataUrl });
     }
 
@@ -82,6 +61,35 @@ class CanvasHistoryStore {
     this.snapshotLayers([layerId]);
   }
 
+  // Capture a layer as a data URL, forcing it visible during capture so a hidden
+  // mask layer (e.g. while an inpaint result is being previewed) still yields
+  // pixels instead of a transparent/empty frame. Restores transform + visibility.
+  private _captureLayer(kLayer: Konva.Layer): string {
+    const origScaleX = kLayer.scaleX();
+    const origScaleY = kLayer.scaleY();
+    const origX = kLayer.x();
+    const origY = kLayer.y();
+    const origVisible = kLayer.visible();
+    kLayer.scaleX(1);
+    kLayer.scaleY(1);
+    kLayer.x(0);
+    kLayer.y(0);
+    kLayer.visible(true);
+    try {
+      return kLayer.toDataURL({
+        pixelRatio: 1,
+        width: this._canvasWidth,
+        height: this._canvasHeight,
+      });
+    } finally {
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
+      kLayer.x(origX);
+      kLayer.y(origY);
+      kLayer.visible(origVisible);
+    }
+  }
+
   async undo() {
     if (!this.canUndo || !this._konvaLayers) return;
 
@@ -93,26 +101,7 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
 
-      const origScaleX = kLayer.scaleX();
-      const origScaleY = kLayer.scaleY();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      kLayer.scaleX(origScaleX);
-      kLayer.scaleY(origScaleY);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
+      const dataUrl = this._captureLayer(kLayer);
       redoEntries.push({ layerId: entry.layerId, imageData: dataUrl });
     }
 
@@ -134,26 +123,7 @@ class CanvasHistoryStore {
       const kLayer = this._konvaLayers.get(entry.layerId);
       if (!kLayer) continue;
 
-      const origScaleX = kLayer.scaleX();
-      const origScaleY = kLayer.scaleY();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      kLayer.scaleX(origScaleX);
-      kLayer.scaleY(origScaleY);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
+      const dataUrl = this._captureLayer(kLayer);
       undoEntries.push({ layerId: entry.layerId, imageData: dataUrl });
     }
 
