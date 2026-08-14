@@ -88,6 +88,8 @@ class CanvasStore {
   // Layers
   layers = $state<CanvasLayer[]>([]);
   activeLayerId = $state<string | null>(null);
+  /** Id of the background raster layer that mirrors the input image. */
+  backgroundLayerId = $state<string | null>(null);
 
   // Per-layer pixel thumbnails (data URLs), keyed by layer id
   layerThumbnails = $state<Record<string, string>>({});
@@ -1254,7 +1256,7 @@ class CanvasStore {
     this.pendingLayerImage = null;
     this.pendingThumbRefresh = [];
 
-    this.addLayer("raster", locale.t("canvas.layer.background"));
+    this.backgroundLayerId = this.addLayer("raster", locale.t("canvas.layer.background"));
     this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
 
     // Set active to the raster layer
@@ -1354,7 +1356,19 @@ class CanvasStore {
     const ctx = off.getContext("2d")!;
     try {
       const baseImg = await loadImageDataUrl(baseUrl);
-      ctx.drawImage(baseImg, 0, 0, off.width, off.height);
+      // Letterbox (contain) the base onto the canvas, preserving aspect ratio —
+      // stretching distorts the base (and misaligns it with the raster strokes)
+      // whenever the base's aspect ratio differs from the canvas.
+      const imageRatio = baseImg.naturalWidth / baseImg.naturalHeight;
+      const canvasRatio = off.width / off.height;
+      let drawW = off.width;
+      let drawH = off.height;
+      if (imageRatio > canvasRatio) {
+        drawH = off.width / imageRatio;
+      } else {
+        drawW = off.height * imageRatio;
+      }
+      ctx.drawImage(baseImg, (off.width - drawW) / 2, (off.height - drawH) / 2, drawW, drawH);
     } catch {
       // Base failed to load — fall back to strokes only.
     }
@@ -1377,21 +1391,14 @@ class CanvasStore {
     // In inpainting mode, keep the currently selected input image as the baseline.
     // This makes denoise behave as expected: only the masked area is reworked.
     if (isInpainting) {
-      const hasRasterStrokes = rasterCanvas ? this.canvasHasAlpha(rasterCanvas) : false;
-      const baseUrl = this.effectiveReferenceImage;
-      if (hasRasterStrokes && baseUrl) {
-        // The user drew "regular" strokes on raster layers on top of the base —
-        // composite them so the inpaint reworks base+strokes, not just the base.
-        const composite = await this.compositeBaseWithRaster(baseUrl, rasterCanvas);
-        const result = await this.exportLayerAsImage(composite, "canvas_input.png");
+      // The background raster layer mirrors the input image, so the raster
+      // composite IS the full base+strokes input — upload it directly (no
+      // separate base composite step).
+      if (rasterCanvas && this.canvasHasAlpha(rasterCanvas)) {
+        const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
         generation.inputImage = result.name;
         hasRaster = true;
       } else if (generation.inputImage) {
-        hasRaster = true;
-      } else if (rasterCanvas && hasRasterStrokes) {
-        // Last resort: no base image, use painted raster directly.
-        const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
-        generation.inputImage = result.name;
         hasRaster = true;
       }
     } else {

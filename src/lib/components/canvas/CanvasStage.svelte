@@ -324,6 +324,58 @@
     img.src = url;
   }
 
+  // Stamp the input image into the background raster layer, letterboxed (contain)
+  // to match updateReferenceImage. Only the named background-image node is
+  // replaced so user strokes drawn on the same layer are preserved.
+  let lastStampSource: string | null = null;
+  async function stampBackgroundImage(layerId: string, url: string | null) {
+    const kLayer = konvaLayers.get(layerId);
+    if (!kLayer) return;
+
+    const existing = kLayer.find(".background-image")[0] as Konva.Image | undefined;
+    if (!url) {
+      lastStampSource = null;
+      existing?.destroy();
+      kLayer.batchDraw();
+      scheduleThumbRefresh(layerId);
+      return;
+    }
+
+    lastStampSource = url;
+    let img: HTMLImageElement;
+    try {
+      img = await loadImageEl(url);
+    } catch {
+      return;
+    }
+    if (konvaLayers.get(layerId) !== kLayer || lastStampSource !== url) return;
+
+    const imageRatio = img.naturalWidth / img.naturalHeight;
+    const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
+    let drawW = canvas.canvasWidth;
+    let drawH = canvas.canvasHeight;
+    if (imageRatio > canvasRatio) {
+      drawH = canvas.canvasWidth / imageRatio;
+    } else {
+      drawW = canvas.canvasHeight * imageRatio;
+    }
+
+    const kImage = new Konva.Image({
+      image: img,
+      x: (canvas.canvasWidth - drawW) / 2,
+      y: (canvas.canvasHeight - drawH) / 2,
+      width: drawW,
+      height: drawH,
+      listening: false,
+      name: "background-image",
+    });
+    existing?.destroy();
+    kLayer.add(kImage);
+    kImage.moveToBottom();
+    kLayer.batchDraw();
+    scheduleThumbRefresh(layerId);
+  }
+
   function parseHexColor(hex: string): { r: number; g: number; b: number } {
     const clean = hex.replace("#", "");
     const value = clean.length === 3
@@ -1445,8 +1497,10 @@
   });
 
   $effect(() => {
-    void canvas.referenceImageToShow;
-    updateReferenceImage(canvas.referenceImageToShow);
+    const url = canvas.referenceImageToShow;
+    const bgId = canvas.backgroundLayerId;
+    updateReferenceImage(url);
+    if (bgId) void stampBackgroundImage(bgId, url);
   });
 
   $effect(() => {
