@@ -1,5 +1,13 @@
 # Changelog
 
+## What's New in v2.0.8
+
+### ComfyUI setup
+- **Auto-install `ComfyUI-Inpaint-CropAndStitch`**: the setup wizard now clones this node automatically (for `mask_only` crop-and-stitch inpaint), no longer a manual install.
+- **Auto-install `Anima-Artist-Mixer`**: cloned automatically at startup for multi-artist Anima mixing.
+
+---
+
 ## What's New in v2.0.7
 
 ### Canvas layers
