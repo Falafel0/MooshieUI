@@ -89,11 +89,18 @@
       <div class="ml-auto flex items-center gap-1">
         {#if canvas.canApplyInpaintResult}
           <button
-            onclick={() => canvas.applyInpaintResult()}
+            onclick={() => canvas.acceptInpaintAsBackground()}
             class="text-[11px] px-2 py-1 rounded border border-emerald-600 bg-emerald-600/20 text-emerald-200 hover:border-emerald-400 hover:bg-emerald-600/30 hover:text-emerald-100"
-            title={locale.t('canvas.apply_inpaint_title')}
+            title={locale.t('canvas.accept_as_background_title')}
           >
-            {locale.t('canvas.accept')}
+            {locale.t('canvas.accept_as_background')}
+          </button>
+          <button
+            onclick={() => canvas.acceptInpaintAsFullLayer()}
+            class="text-[11px] px-2 py-1 rounded border border-sky-600 bg-sky-600/20 text-sky-200 hover:border-sky-400 hover:bg-sky-600/30 hover:text-sky-100"
+            title={locale.t('canvas.accept_as_full_layer_title')}
+          >
+            {locale.t('canvas.accept_as_full_layer')}
           </button>
         {/if}
         {#if canvas.canUndoInpaintBase}

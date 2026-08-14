@@ -36,6 +36,8 @@ export interface CanvasLayer {
   inpaintDeviceMode?: "cpu (compatible)" | "gpu (much faster)";
   /** Per-mask differential diffusion toggle. Falls back to the global setting. */
   differentialDiffusion?: boolean;
+  /** Per-mask result edge feather radius (px). Softens the applied result edge. */
+  feather?: number;
 }
 
 export interface BrushSettings {
@@ -216,6 +218,8 @@ class CanvasStore {
   // applyInpaintAsLayer so a mask edited AFTER generation doesn't change the
   // alpha region of the applied result.
   pendingResultMaskUrl = $state<string | null>(null);
+  // Feather radius captured when the pending result was generated (default 4px).
+  pendingResultFeather = $state(4);
   // While a finished inpaint result is being previewed, the editable mask strokes
   // are hidden so the clean result is visible. This flips true once the user starts
   // painting more mask, bringing the mask back so they can see what they're editing.
@@ -250,6 +254,14 @@ class CanvasStore {
   // Derived
   get activeLayer(): CanvasLayer | null {
     return this.layers.find((l) => l.id === this.activeLayerId) ?? null;
+  }
+
+  // Feather radius of the active mask layer (fallback to the topmost mask, then 4).
+  get activeMaskFeather(): number {
+    const active = this.activeLayer;
+    if (active && active.type === "mask" && active.feather != null) return active.feather;
+    const masks = this.layers.filter((l) => l.type === "mask");
+    return masks[masks.length - 1]?.feather ?? 4;
   }
 
   get visibleLayers(): CanvasLayer[] {
@@ -362,6 +374,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
+    this.pendingResultFeather = 4;
     this.maskEditedSinceResult = false;
   }
 
@@ -462,13 +475,14 @@ class CanvasStore {
     // Capture the mask that produced this result, so applyInpaintAsLayer uses it
     // even if the user edits the mask afterward.
     this.pendingResultMaskUrl = this.persistedMaskPreviewUrl;
+    this.pendingResultFeather = this.activeMaskFeather;
   }
 
-  // Promote the pending inpaint result to be the new base: checkpoint the current
-  // base + its mask for undo, adopt the result as the base, then start a fresh
-  // mask on top. Ownership of the pending preview URL transfers to the prepared
-  // override (so it is NOT revoked here).
-  applyInpaintResult() {
+  // Accept the pending inpaint result as the NEW BACKGROUND (base): checkpoint the
+  // current base for undo, adopt the result as the base, and clear the consumed
+  // mask — WITHOUT wiping the raster layer stack (no initCanvas). The background
+  // raster re-stamps via the referenceImageToShow effect.
+  acceptInpaintAsBackground() {
     if (!this.pendingResultPreviewUrl || this.pendingResultWidth == null || this.pendingResultHeight == null) {
       return;
     }
@@ -509,11 +523,35 @@ class CanvasStore {
     this.pendingResultInputName = null;
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
+    this.pendingResultMaskUrl = null;
+    this.pendingResultFeather = 4;
 
-    // Fresh mask on the new base.
+    // Clear the consumed mask (it applied to the old base) but KEEP the raster
+    // layer stack — the new base simply becomes the background behind them.
     this.persistedMaskPreviewUrl = null;
     this.clearMask();
-    this.initCanvas(generation.width, generation.height);
+  }
+
+  // Accept the pending inpaint result as a NEW FULL raster layer (the whole
+  // picture, not a masked region). Ownership of the pending preview URL transfers
+  // to the layer injection. Returns the new layer id, or null when nothing to add.
+  acceptInpaintAsFullLayer(): string | null {
+    if (!this.pendingResultPreviewUrl) return null;
+
+    const resultUrl = this.pendingResultPreviewUrl;
+    const resultOwned = this.pendingResultOwned;
+    this.pendingResultPreviewUrl = null;
+    this.pendingResultOwned = false;
+    this.pendingResultInputName = null;
+    this.pendingResultWidth = null;
+    this.pendingResultHeight = null;
+    this.pendingResultMaskUrl = null;
+    this.pendingResultFeather = 4;
+    this.maskEditedSinceResult = false;
+
+    const layerId = this.addLayer("raster", "Inpaint result");
+    this.pendingLayerImage = { layerId, imageUrl: resultUrl, owned: resultOwned };
+    return layerId;
   }
 
   // Apply the pending inpaint result as a NEW raster layer containing ONLY the
@@ -529,6 +567,12 @@ class CanvasStore {
     // Ownership of the result object URL transfers to this call.
     const resultUrl = this.pendingResultPreviewUrl;
     const resultOwned = this.pendingResultOwned;
+    // Capture the result's native dimensions + feather BEFORE nulling them, so
+    // the composite uses the true output resolution (avoids resampling that
+    // softens the result).
+    const resultW = this.pendingResultWidth;
+    const resultH = this.pendingResultHeight;
+    const feather = this.pendingResultFeather;
     this.pendingResultPreviewUrl = null;
     this.pendingResultOwned = false;
     this.pendingResultInputName = null;
@@ -537,14 +581,14 @@ class CanvasStore {
     this.maskEditedSinceResult = false;
     const maskUrl = this.pendingResultMaskUrl;
 
-    // Composite at CANVAS dimensions: the result may return a few px off (VAE
-    // padding rounds to multiples of 8, and normalizeGenerationInputBytes shrinks
-    // >1M px inputs), while the mask snapshot is captured at canvas dimensions.
-    // Compositing both onto a canvas-sized offscreen keeps them aligned and
-    // avoids the mask being stretched out of register (then re-stretched by
-    // injectLayerImage).
-    const w = this.canvasWidth;
-    const h = this.canvasHeight;
+    // Composite at the RESULT's native dimensions (fallback to canvas dims). The
+    // result can return a few px off the canvas (VAE padding rounds to multiples
+    // of 8, and normalizeGenerationInputBytes shrinks >1M px inputs); drawing it
+    // at canvas size would resample it and soften the output. The mask snapshot
+    // (captured at canvas size) is scaled onto the result-sized offscreen to
+    // stay in register.
+    const w = resultW && resultW > 0 ? resultW : this.canvasWidth;
+    const h = resultH && resultH > 0 ? resultH : this.canvasHeight;
     if (w <= 0 || h <= 0) {
       if (resultOwned) URL.revokeObjectURL(resultUrl);
       return null;
@@ -579,7 +623,7 @@ class CanvasStore {
             const maskData = mctx.getImageData(0, 0, w, h);
             // Feather the mask edge so the result alpha is a soft gradient, not a
             // hard binary cut (otherwise the inpainted region shows a visible seam).
-            featherMaskLuminance(maskData.data, w, h, 4);
+            featherMaskLuminance(maskData.data, w, h, feather);
             const outData = ctx.getImageData(0, 0, w, h);
             // Mask is white-on-black: white (255) = keep, black (0) = transparent.
             for (let i = 0; i < maskData.data.length; i += 4) {

@@ -277,27 +277,18 @@
     img.onload = () => {
       if (!refLayer || lastRefSource !== url) return;
 
-      const imageRatio = img.naturalWidth / img.naturalHeight;
-      const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
-
-      let drawWidth = canvas.canvasWidth;
-      let drawHeight = canvas.canvasHeight;
-      if (imageRatio > canvasRatio) {
-        drawHeight = canvas.canvasWidth / imageRatio;
-      } else {
-        drawWidth = canvas.canvasHeight * imageRatio;
-      }
-
-      const offsetX = (canvas.canvasWidth - drawWidth) / 2;
-      const offsetY = (canvas.canvasHeight - drawHeight) / 2;
+      // Place at the image's NATIVE size (1:1, centered) — no letterbox, no
+      // stretch — so the background is exactly the input image (hard link).
+      const offsetX = (canvas.canvasWidth - img.naturalWidth) / 2;
+      const offsetY = (canvas.canvasHeight - img.naturalHeight) / 2;
 
       if (!refImageNode) {
         refImageNode = new Konva.Image({
           image: img,
           x: offsetX,
           y: offsetY,
-          width: drawWidth,
-          height: drawHeight,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
           listening: false,
           opacity: 0.95,
         });
@@ -306,8 +297,8 @@
         refImageNode.image(img);
         refImageNode.x(offsetX);
         refImageNode.y(offsetY);
-        refImageNode.width(drawWidth);
-        refImageNode.height(drawHeight);
+        refImageNode.width(img.naturalWidth);
+        refImageNode.height(img.naturalHeight);
       }
 
       reorderStageLayers();
@@ -350,22 +341,14 @@
     }
     if (konvaLayers.get(layerId) !== kLayer || lastStampSource !== url) return;
 
-    const imageRatio = img.naturalWidth / img.naturalHeight;
-    const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
-    let drawW = canvas.canvasWidth;
-    let drawH = canvas.canvasHeight;
-    if (imageRatio > canvasRatio) {
-      drawH = canvas.canvasWidth / imageRatio;
-    } else {
-      drawW = canvas.canvasHeight * imageRatio;
-    }
-
+    // Native-size placement (1:1, centered) — the background raster layer IS the
+    // input image, so it must not be letterboxed/stretched out of register.
     const kImage = new Konva.Image({
       image: img,
-      x: (canvas.canvasWidth - drawW) / 2,
-      y: (canvas.canvasHeight - drawH) / 2,
-      width: drawW,
-      height: drawH,
+      x: (canvas.canvasWidth - img.naturalWidth) / 2,
+      y: (canvas.canvasHeight - img.naturalHeight) / 2,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
       listening: false,
       name: "background-image",
     });
@@ -865,23 +848,14 @@
       return;
     }
 
-    // Letterbox (contain) so an image with a different aspect ratio is shown
-    // in full instead of being stretched.
-    const imageRatio = img.naturalWidth / img.naturalHeight;
-    const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
-    let drawW = canvas.canvasWidth;
-    let drawH = canvas.canvasHeight;
-    if (imageRatio > canvasRatio) {
-      drawH = canvas.canvasWidth / imageRatio;
-    } else {
-      drawW = canvas.canvasHeight * imageRatio;
-    }
+    // Place at NATIVE size (1:1, centered) — no letterbox/stretch — so an added
+    // raster is pixel-exact to its source (no "slightly different size").
     const kImage = new Konva.Image({
       image: img,
-      x: (canvas.canvasWidth - drawW) / 2,
-      y: (canvas.canvasHeight - drawH) / 2,
-      width: drawW,
-      height: drawH,
+      x: (canvas.canvasWidth - img.naturalWidth) / 2,
+      y: (canvas.canvasHeight - img.naturalHeight) / 2,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
       listening: false,
     });
     kLayer.add(kImage);

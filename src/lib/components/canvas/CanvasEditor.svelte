@@ -115,11 +115,18 @@
             {locale.t('canvas.apply_as_layer')}
           </button>
           <button
-            onclick={() => canvas.applyInpaintResult()}
+            onclick={() => canvas.acceptInpaintAsBackground()}
             class="text-xs font-medium px-4 py-1.5 rounded-full border border-emerald-500 bg-emerald-600/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-600/40"
-            title={locale.t('canvas.apply_inpaint_title')}
+            title={locale.t('canvas.accept_as_background_title')}
           >
-            {locale.t('canvas.accept')}
+            {locale.t('canvas.accept_as_background')}
+          </button>
+          <button
+            onclick={() => canvas.acceptInpaintAsFullLayer()}
+            class="text-xs font-medium px-4 py-1.5 rounded-full border border-sky-500 bg-sky-600/25 text-sky-100 hover:border-sky-400 hover:bg-sky-600/40"
+            title={locale.t('canvas.accept_as_full_layer_title')}
+          >
+            {locale.t('canvas.accept_as_full_layer')}
           </button>
         </div>
       </div>
