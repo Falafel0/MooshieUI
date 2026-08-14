@@ -1532,6 +1532,8 @@ const zhTw: Record<string, string> = {
   "canvas.mask_grow": "Mask grow",
   "canvas.mask_feather": "Feather",
   "canvas.mask_context": "Context",
+  "canvas.apply_diff_tolerance": "差异容差度",
+  "canvas.apply_edge_feather": "邊維濁化",
   "canvas.mask_blend": "Blend",
   "canvas.mask_hipass": "Hi-pass",
   "canvas.mask_device": "Device",

@@ -177,40 +177,9 @@
       />
       <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{Math.round(layer.opacity * 100)}%</span>
     </div>
-  {/if}
+      {/if}
 
-  <!-- Blend mode (active raster layer only) -->
-  {#if isActive && layer.type === "raster"}
-    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
-      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.blend_mode')}</span>
-      <select
-        value={layer.blendMode ?? "source-over"}
-        onchange={(e) => canvas.setLayerBlendMode(layer.id, (e.target as HTMLSelectElement).value)}
-        onclick={(e) => e.stopPropagation()}
-        class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-0.5 text-[10px] text-neutral-200"
-      >
-        {#each BLEND_MODES as m}
-          <option value={m.value}>{m.label}</option>
-        {/each}
-      </select>
-    </div>
-    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
-      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_feather')}</span>
-      <input
-        type="range"
-        value={layer.feather ?? 0}
-        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'feather', parseFloat((e.target as HTMLInputElement).value))}
-        onclick={(e) => e.stopPropagation()}
-        min="0"
-        max="64"
-        step="1"
-        class="flex-1 accent-indigo-500"
-      />
-      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 0}px</span>
-    </div>
-  {/if}
-
-  <!-- Per-mask inpaint settings (active mask layer only) -->
+      <!-- Per-mask inpaint settings (active mask layer only) -->
   {#if isActive && layer.type === "mask"}
     <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
       <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_denoise')}</span>
@@ -247,35 +216,50 @@
       </label>
     </div>
     <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
-      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_grow')}</span>
-      <input
-        type="range"
-        value={layer.growMaskBy ?? generation.growMaskBy}
-        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'growMaskBy', parseFloat((e.target as HTMLInputElement).value))}
-        onclick={(e) => e.stopPropagation()}
-        min="0"
-        max="64"
-        step="1"
-        class="flex-1 accent-indigo-500"
-      />
-      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.growMaskBy ?? generation.growMaskBy}px</span>
-    </div>
-    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
-      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_feather')}</span>
-      <input
-        type="range"
-        value={layer.feather ?? 16}
-        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'feather', parseFloat((e.target as HTMLInputElement).value))}
-        onclick={(e) => e.stopPropagation()}
-        min="0"
-        max="32"
-        step="1"
-        class="flex-1 accent-indigo-500"
-      />
-      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 16}px</span>
-    </div>
-    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
-      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_context')}</span>
+          <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_grow')}</span>
+          <input
+            type="range"
+            value={layer.growMaskBy ?? generation.growMaskBy}
+            oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'growMaskBy', parseFloat((e.target as HTMLInputElement).value))}
+            onclick={(e) => e.stopPropagation()}
+            min="0"
+            max="64"
+            step="1"
+            class="flex-1 accent-indigo-500"
+          />
+          <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.growMaskBy ?? generation.growMaskBy}px</span>
+        </div>
+        <!-- Global Apply-as-Layer edge controls (shared for all masks) -->
+        <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+          <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.apply_edge_feather')}</span>
+          <input
+            type="range"
+            value={canvas.applyEdgeFeather}
+            oninput={(e) => { canvas.applyEdgeFeather = parseFloat((e.target as HTMLInputElement).value); }}
+            onclick={(e) => e.stopPropagation()}
+            min="0"
+            max="64"
+            step="1"
+            class="flex-1 accent-indigo-500"
+          />
+          <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{canvas.applyEdgeFeather}px</span>
+        </div>
+        <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+          <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.apply_diff_tolerance')}</span>
+          <input
+            type="range"
+            value={canvas.applyDiffTolerance}
+            oninput={(e) => { canvas.applyDiffTolerance = parseFloat((e.target as HTMLInputElement).value); }}
+            onclick={(e) => e.stopPropagation()}
+            min="0"
+            max="64"
+            step="1"
+            class="flex-1 accent-indigo-500"
+          />
+          <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{canvas.applyDiffTolerance}</span>
+        </div>
+        <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+          <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_context')}</span>
       <input
         type="range"
         value={layer.inpaintContextFactor ?? generation.inpaintContextFactor}

@@ -1557,6 +1557,8 @@ const ja: Record<string, string> = {
   "canvas.mask_grow": "Mask grow",
   "canvas.mask_feather": "Feather",
   "canvas.mask_context": "Context",
+  "canvas.apply_diff_tolerance": "差分認光度",
+  "canvas.apply_edge_feather": "エジヾフェザー",
   "canvas.mask_blend": "Blend",
   "canvas.mask_hipass": "Hi-pass",
   "canvas.mask_device": "Device",

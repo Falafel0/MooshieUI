@@ -1532,6 +1532,8 @@ const pt: Record<string, string> = {
   "canvas.mask_grow": "Mask grow",
   "canvas.mask_feather": "Feather",
   "canvas.mask_context": "Context",
+  "canvas.apply_diff_tolerance": "Tolerância de Diferença",
+  "canvas.apply_edge_feather": "Penugem de Borda",
   "canvas.mask_blend": "Blend",
   "canvas.mask_hipass": "Hi-pass",
   "canvas.mask_device": "Device",

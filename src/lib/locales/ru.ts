@@ -1532,6 +1532,8 @@ const ru: Record<string, string> = {
   "canvas.mask_grow": "Рост маски",
   "canvas.mask_feather": "Feather",
   "canvas.mask_context": "Context",
+  "canvas.apply_diff_tolerance": "Допуск дифф.",
+  "canvas.apply_edge_feather": "Фежер края",
   "canvas.mask_blend": "Blend",
   "canvas.mask_hipass": "Hi-pass",
   "canvas.mask_device": "Device",

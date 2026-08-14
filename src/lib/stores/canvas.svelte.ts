@@ -38,8 +38,6 @@ export interface CanvasLayer {
   inpaintDeviceMode?: "cpu (compatible)" | "gpu (much faster)";
   /** Per-mask differential diffusion toggle. Falls back to the global setting. */
   differentialDiffusion?: boolean;
-  /** Per-mask result edge feather radius (px). Softens the applied result edge. */
-  feather?: number;
 }
 
 export interface BrushSettings {
@@ -189,6 +187,12 @@ class CanvasStore {
   preparedInpaintPreviewUrl = $state<string | null>(null);
   preparedInpaintOwned = $state(false);
   inpaintSourceVersion = $state(0);
+  // Edge feather radius (px) for the "Apply as Layer" operation — a box blur on
+  // the mask extends the result alpha beyond the mask boundary with a smooth fade.
+  applyEdgeFeather = $state(12);
+  // Diff tolerance: colour-difference threshold between base and result below
+  // which a pixel is treated as "unchanged" (transparent). Higher = fewer pixels.
+  applyDiffTolerance = $state(8);
   persistedMaskPreviewUrl = $state<string | null>(null);
   // Base-image undo history for iterative inpainting. Each entry is a base that
   // was inpainted plus the mask that was applied to it, so the user can step
@@ -624,7 +628,7 @@ class CanvasStore {
             const md = mctx.getImageData(0, 0, w, h);
             // Feather the mask so its alpha extends BEYOND the mask boundary,
             // blending the result onto the surrounding non-inpainted region.
-            featherMaskAlpha(md.data, w, h, 12);
+            featherMaskAlpha(md.data, w, h, this.applyEdgeFeather);
             maskAlpha = md.data;
           }
         } catch {
@@ -643,7 +647,7 @@ class CanvasStore {
           if (bctx) {
             bctx.drawImage(baseImg, 0, 0, w, h);
             const baseData = bctx.getImageData(0, 0, w, h).data;
-            const THRESHOLD = 8; // ignore tiny JPEG/VAE noise
+            const THRESHOLD = this.applyDiffTolerance; // ignore tiny JPEG/VAE noise
             const SOFTNESS = 48; // ramp to full opacity over this diff range
             for (let i = 0; i < outData.data.length; i += 4) {
               const dr = Math.abs(outData.data[i] - baseData[i]);
