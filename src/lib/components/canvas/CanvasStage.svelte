@@ -7,7 +7,57 @@
   import { progress } from "../../stores/progress.svelte.js";
   import ColorTooltip from "../ui/ColorTooltip.svelte";
 
-  // Hide the editable inpaint mask while a finished result is being previewed, so
+    // Alpha-only feather: soften a raster layer's edge (transparency) WITHOUT
+    // blurring the RGB content. Konva's built-in Blur blurs the whole layer,
+    // which makes the entire image look soft instead of just feathering the edge.
+    (Konva.Filters as any).Feather = function featherFilter(imageData: ImageData) {
+      const radius = (this as any).featherRadius?.() ?? 0;
+      if (!radius || radius <= 0) return;
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const n = width * height;
+      const src = new Float32Array(n);
+      for (let i = 0; i < n; i++) src[i] = data[(i << 2) + 3];
+      const tmp = new Float32Array(n);
+      // Horizontal box blur (separable)
+      for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+          const x0 = Math.max(0, x - radius);
+          const x1 = Math.min(width - 1, x + radius);
+          let sum = 0;
+          for (let xx = x0; xx <= x1; xx++) sum += src[row + xx];
+          tmp[row + x] = sum / (x1 - x0 + 1);
+        }
+      }
+      // Vertical box blur
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const y0 = Math.max(0, y - radius);
+          const y1 = Math.min(height - 1, y + radius);
+          let sum = 0;
+          for (let yy = y0; yy <= y1; yy++) sum += tmp[yy * width + x];
+          data[((y * width + x) << 2) + 3] = sum / (y1 - y0 + 1);
+        }
+      }
+    };
+
+    // Apply (or clear) the alpha-only feather on a raster Konva layer. cache() must
+    // run AFTER content is on the layer; callers re-invoke this once content lands.
+    function applyRasterFeather(kLayer: Konva.Layer, layer: { type: string; feather?: number }) {
+      const feather = layer.type === "raster" ? (layer.feather ?? 0) : 0;
+      if (feather > 0) {
+        (kLayer as any).featherRadius(feather);
+        kLayer.cache();
+        kLayer.filters([(Konva.Filters as any).Feather]);
+      } else {
+        kLayer.clearCache();
+        kLayer.filters([]);
+      }
+    }
+
+    // Hide the editable inpaint mask while a finished result is being previewed, so
   // the clean output is visible. Keep it shown before any result, during a re-roll
   // (progress.isGenerating), and once the user paints more mask (markMaskEdited).
   const hideInpaintMask = $derived(canvas.shouldHideInpaintMask && !progress.isGenerating);
@@ -356,6 +406,8 @@
     kLayer.add(kImage);
     kImage.moveToBottom();
     kLayer.batchDraw();
+    const meta = canvas.layers.find((l) => l.id === layerId);
+    if (meta) applyRasterFeather(kLayer, meta);
     scheduleThumbRefresh(layerId);
   }
 
@@ -531,11 +583,7 @@
           visible: effectiveVisible,
         });
         kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
-        if (layer.type === "raster" && layer.feather != null && layer.feather > 0) {
-                  kLayer.cache();
-                  kLayer.filters([Konva.Filters.Blur]);
-                  kLayer.blurRadius(layer.feather);
-                }
+        applyRasterFeather(kLayer, layer);
 
         // Clip to canvas bounds
         kLayer.clip({
@@ -553,17 +601,7 @@
         kLayer.opacity(layer.opacity);
         kLayer.visible(effectiveVisible);
         kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
-        if (layer.type === "raster") {
-                  if (layer.feather != null && layer.feather > 0) {
-                    kLayer.cache();
-                    kLayer.filters([Konva.Filters.Blur]);
-                    kLayer.blurRadius(layer.feather);
-                  } else {
-                    kLayer.clearCache();
-                    kLayer.filters([]);
-                    kLayer.blurRadius(0);
-                  }
-                }
+        applyRasterFeather(kLayer, layer);
         // Keep the clip in sync with the canvas size (resize without wipe).
         kLayer.clip({
           x: 0,
@@ -878,6 +916,8 @@
     });
     kLayer.add(kImage);
     kLayer.batchDraw();
+    const meta = canvas.layers.find((l) => l.id === layerId);
+    if (meta) applyRasterFeather(kLayer, meta);
     scheduleThumbRefresh(layerId);
     if (owned) URL.revokeObjectURL(imageUrl);
   }
