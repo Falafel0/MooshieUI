@@ -19,6 +19,23 @@ export interface CanvasLayer {
   prompt?: string;
   /** When true, this mask's prompt is APPENDED to the base prompt instead of replacing it. */
   promptAddToBase?: boolean;
+  /** Per-mask inpaint grow (mask expansion px). Falls back to the global setting. */
+  growMaskBy?: number;
+  /** Per-mask inpaint area mode. Falls back to the global setting. */
+  inpaintArea?: "whole" | "mask_only";
+  /** Per-mask mask_only box resolution. Falls back to the global setting. */
+  inpaintMaskWidth?: number;
+  inpaintMaskHeight?: number;
+  /** Per-mask mask edge blend pixels. Falls back to the global setting. */
+  inpaintMaskBlend?: number;
+  /** Per-mask mask hipass filter. Falls back to the global setting. */
+  inpaintMaskHipass?: number;
+  /** Per-mask context crop factor. Falls back to the global setting. */
+  inpaintContextFactor?: number;
+  /** Per-mask device mode. Falls back to the global setting. */
+  inpaintDeviceMode?: "cpu (compatible)" | "gpu (much faster)";
+  /** Per-mask differential diffusion toggle. Falls back to the global setting. */
+  differentialDiffusion?: boolean;
 }
 
 export interface BrushSettings {
@@ -1005,6 +1022,15 @@ class CanvasStore {
         denoise: meta.denoise ?? generation.denoise,
         prompt: meta.prompt ?? "",
         promptAddToBase: meta.promptAddToBase ?? false,
+        growMaskBy: meta.growMaskBy ?? generation.growMaskBy,
+        inpaintArea: meta.inpaintArea ?? generation.inpaintArea,
+        inpaintMaskWidth: meta.inpaintMaskWidth ?? generation.inpaintMaskWidth,
+        inpaintMaskHeight: meta.inpaintMaskHeight ?? generation.inpaintMaskHeight,
+        inpaintMaskBlend: meta.inpaintMaskBlend ?? generation.inpaintMaskBlend,
+        inpaintMaskHipass: meta.inpaintMaskHipass ?? generation.inpaintMaskHipass,
+        inpaintContextFactor: meta.inpaintContextFactor ?? generation.inpaintContextFactor,
+        inpaintDeviceMode: meta.inpaintDeviceMode ?? generation.inpaintDeviceMode,
+        differentialDiffusion: meta.differentialDiffusion ?? generation.differentialDiffusion,
       });
     }
     return steps;
@@ -1226,6 +1252,11 @@ class CanvasStore {
 
   setLayerPromptAddToBase(id: string, add: boolean) {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, promptAddToBase: add } : l));
+  }
+
+  // Generic per-layer inpaint setting setter (key = CanvasLayer field name).
+  setLayerInpaintSetting(id: string, key: string, value: unknown) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, [key]: value } : l));
   }
 
   toggleLayerLock(id: string) {

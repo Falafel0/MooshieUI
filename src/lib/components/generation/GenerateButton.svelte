@@ -328,6 +328,19 @@
             params.positive_prompt = step.prompt;
           }
         }
+        // Apply per-mask inpaint settings (each falls back to the global value
+        // already in params when the layer doesn't override it).
+        params.grow_mask_by = step.growMaskBy ?? params.grow_mask_by;
+        params.inpaint_area = step.inpaintArea ?? params.inpaint_area;
+        params.inpaint_mask_hipass = step.inpaintMaskHipass ?? params.inpaint_mask_hipass;
+        params.inpaint_context_factor = step.inpaintContextFactor ?? params.inpaint_context_factor;
+        params.inpaint_device_mode = step.inpaintDeviceMode ?? params.inpaint_device_mode;
+        params.differential_diffusion = step.differentialDiffusion ?? params.differential_diffusion;
+        if (params.inpaint_area === "mask_only") {
+          params.inpaint_mask_width = step.inpaintMaskWidth ?? params.inpaint_mask_width;
+          params.inpaint_mask_height = step.inpaintMaskHeight ?? params.inpaint_mask_height;
+          params.inpaint_mask_blend = step.inpaintMaskBlend ?? params.inpaint_mask_blend;
+        }
         await submitGeneration(params);
       } else if (useRegionalInpaintChain && configuredRegions > 0) {
         const chainToken = ++regionalChainToken;

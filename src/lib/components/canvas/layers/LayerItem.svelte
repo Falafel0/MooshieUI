@@ -200,5 +200,39 @@
         <span class="text-[10px] text-neutral-400">{locale.t('canvas.mask_prompt_add_to_base')}</span>
       </label>
     </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_grow')}</span>
+      <input
+        type="range"
+        value={layer.growMaskBy ?? generation.growMaskBy}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'growMaskBy', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="64"
+        step="1"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.growMaskBy ?? generation.growMaskBy}px</span>
+    </div>
+    <div class="px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <label class="flex items-center gap-1.5 cursor-pointer" onclick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={(layer.inpaintArea ?? generation.inpaintArea) === "mask_only"}
+          onchange={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintArea', (e.target as HTMLInputElement).checked ? 'mask_only' : 'whole')}
+          class="accent-indigo-500"
+        />
+        <span class="text-[10px] text-neutral-400">{locale.t('canvas.mask_area_mask_only')}</span>
+      </label>
+      <label class="flex items-center gap-1.5 mt-1 cursor-pointer" onclick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={layer.differentialDiffusion ?? generation.differentialDiffusion}
+          onchange={(e) => canvas.setLayerInpaintSetting(layer.id, 'differentialDiffusion', (e.target as HTMLInputElement).checked)}
+          class="accent-indigo-500"
+        />
+        <span class="text-[10px] text-neutral-400">{locale.t('canvas.mask_differential_diffusion')}</span>
+      </label>
+    </div>
   {/if}
 </div>

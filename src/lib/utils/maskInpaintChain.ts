@@ -15,6 +15,15 @@ export interface MaskInpaintStep {
   denoise: number;
   prompt: string;
   promptAddToBase?: boolean;
+  growMaskBy?: number;
+  inpaintArea?: "whole" | "mask_only";
+  inpaintMaskWidth?: number;
+  inpaintMaskHeight?: number;
+  inpaintMaskBlend?: number;
+  inpaintMaskHipass?: number;
+  inpaintContextFactor?: number;
+  inpaintDeviceMode?: "cpu (compatible)" | "gpu (much faster)";
+  differentialDiffusion?: boolean;
 }
 
 export interface MaskInpaintChainContext {
@@ -84,6 +93,8 @@ export async function runMaskInpaintChain(
     } else {
       prompt = localPrompt;
     }
+    const growMaskBy = step.growMaskBy ?? baseParams.grow_mask_by;
+    const inpaintArea = step.inpaintArea ?? baseParams.inpaint_area;
     const regionParams: GenerationParams = {
       ...baseParams,
       mode: "inpainting",
@@ -92,6 +103,15 @@ export async function runMaskInpaintChain(
       positive_prompt: prompt,
       positive_regions: [],
       denoise: step.denoise,
+      grow_mask_by: growMaskBy,
+      inpaint_area: inpaintArea,
+      inpaint_mask_width: inpaintArea === "mask_only" ? (step.inpaintMaskWidth ?? baseParams.inpaint_mask_width) : null,
+      inpaint_mask_height: inpaintArea === "mask_only" ? (step.inpaintMaskHeight ?? baseParams.inpaint_mask_height) : null,
+      inpaint_mask_blend: inpaintArea === "mask_only" ? (step.inpaintMaskBlend ?? baseParams.inpaint_mask_blend) : 0,
+      inpaint_mask_hipass: step.inpaintMaskHipass ?? baseParams.inpaint_mask_hipass,
+      inpaint_context_factor: step.inpaintContextFactor ?? baseParams.inpaint_context_factor,
+      inpaint_device_mode: step.inpaintDeviceMode ?? baseParams.inpaint_device_mode,
+      differential_diffusion: step.differentialDiffusion ?? baseParams.differential_diffusion,
     };
 
     const result = await callbacks.submit(regionParams, {
