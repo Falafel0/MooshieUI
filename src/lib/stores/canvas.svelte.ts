@@ -1551,10 +1551,13 @@ class CanvasStore {
     // Export mask
     hasMask = await this.syncMaskToGeneration(maskCanvas, true);
 
-    // Keep the user-selected mode when using canvas flow for image editing modes.
-    if (generation.mode === "inpainting") {
+    // Keep the user-selected mode only when it is actually satisfiable. A
+    // selected inpainting/img2img mode with no base (empty raster composite,
+    // no loaded input) would otherwise hard-block generation downstream —
+    // fall through to the content-derived resolution (→ txt2img) instead.
+    if (generation.mode === "inpainting" && hasRaster) {
       generation.mode = "inpainting";
-    } else if (generation.mode === "img2img") {
+    } else if (generation.mode === "img2img" && hasRaster) {
       generation.mode = "img2img";
     } else if (hasRaster && hasMask) {
       generation.mode = "inpainting";
@@ -1562,6 +1565,13 @@ class CanvasStore {
       generation.mode = "img2img";
     } else {
       generation.mode = "txt2img";
+    }
+
+    // txt2img has no base to inpaint — drop any leftover mask/input so the
+    // request isn't treated as an inpaint downstream.
+    if (generation.mode === "txt2img") {
+      generation.maskImage = null;
+      generation.inputImage = null;
     }
 
     // Sync dimensions from bounding box
