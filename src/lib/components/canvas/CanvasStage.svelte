@@ -563,6 +563,13 @@
         const kLayer = konvaLayers.get(layer.id)!;
         kLayer.opacity(layer.opacity);
         kLayer.visible(effectiveVisible);
+        // Keep the clip in sync with the canvas size (resize without wipe).
+        kLayer.clip({
+          x: 0,
+          y: 0,
+          width: canvas.canvasWidth,
+          height: canvas.canvasHeight,
+        });
       }
     }
 
@@ -1408,8 +1415,11 @@
 
   // Reactive effects
   $effect(() => {
-    // Re-sync Konva layers when canvas layers change
+    // Re-sync Konva layers when the layer list OR the canvas size changes
+    // (resize without wipe updates the clip + re-stamps the background).
     void canvas.layers;
+    void canvas.canvasWidth;
+    void canvas.canvasHeight;
     syncKonvaLayers();
     // Apply the viewport to any newly-created Konva layers WITHOUT tracking
     // canvas.viewport here. Tracking it makes this effect re-run (and thus
@@ -1510,6 +1520,8 @@
   $effect(() => {
     const url = canvas.referenceImageToShow;
     const bgId = canvas.backgroundLayerId;
+    void canvas.canvasWidth;
+    void canvas.canvasHeight;
     updateReferenceImage(url);
     if (bgId) void stampBackgroundImage(bgId, url);
   });

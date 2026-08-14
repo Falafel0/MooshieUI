@@ -1310,6 +1310,20 @@ class CanvasStore {
     this.viewport = { zoom: 1, panX: 0, panY: 0 };
   }
 
+  // Resize the canvas WITHOUT wiping layers — used when the user changes the
+  // generation dimensions. Existing content stays at its coordinates; the Konva
+  // clip and the background letterbox are updated reactively (syncKonvaLayers +
+  // the reference/background effects watch canvasWidth/canvasHeight).
+  resizeCanvas(width: number, height: number) {
+    if (width === this.canvasWidth && height === this.canvasHeight) return;
+    if (this.layers.length === 0) {
+      this.initCanvas(width, height);
+      return;
+    }
+    this.canvasWidth = width;
+    this.canvasHeight = height;
+  }
+
   // Canvas init — creates default layers
   initCanvas(width: number, height: number) {
     this.canvasWidth = width;

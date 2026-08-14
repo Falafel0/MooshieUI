@@ -39,7 +39,9 @@
     // the canvas keeps the original image size.
     if (generation.mode !== "inpainting" || generation.inpaintArea !== "mask_only") {
       if (canvas.canvasWidth !== width || canvas.canvasHeight !== height) {
-        canvas.initCanvas(width, height);
+        // Resize WITHOUT wiping layers: the user's masks + raster strokes survive
+        // a dimension change (previously initCanvas() reset everything).
+        canvas.resizeCanvas(width, height);
       }
     }
   });
