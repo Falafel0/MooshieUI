@@ -55,6 +55,7 @@
   let isMovingLayer = false;
   let moveStartPos: { x: number; y: number } | null = null;
   let moveNodeStarts: Array<{ node: Konva.Node; x: number; y: number }> = [];
+  let movingLayerId: string | null = null;
   let viewportRaf: number | null = null;
 
   // Lasso tool state (points kept in canvas space; preview drawn on the UI layer in screen space)
@@ -749,6 +750,11 @@
     const dst = konvaLayers.get(maskId);
     if (!src || !dst) return;
 
+    // Snapshot BOTH source and mask before the move so undo restores both —
+    // otherwise the source is restored but the clones left in the mask remain,
+    // showing the content twice.
+    canvasHistory.snapshotLayers([sourceId, maskId]);
+
     for (const node of src.getChildren()) {
       const gco = node.globalCompositeOperation?.();
       if (gco === "destination-out") continue;
@@ -969,6 +975,7 @@
       canvas.beginMove(layer.id, pos.x, pos.y);
 
       isMovingLayer = true;
+      movingLayerId = layer.id;
       moveStartPos = pos;
       moveNodeStarts = kLayer.getChildren().map((node) => ({
         node,
@@ -1193,6 +1200,8 @@
       moveStartPos = null;
       moveNodeStarts = [];
       canvas.endMove();
+      if (movingLayerId) scheduleThumbRefresh(movingLayerId);
+      movingLayerId = null;
     }
 
     if (shouldAutoCommitMask) {
@@ -1250,6 +1259,8 @@
       moveStartPos = null;
       moveNodeStarts = [];
       canvas.endMove();
+      if (movingLayerId) scheduleThumbRefresh(movingLayerId);
+      movingLayerId = null;
     }
   }
 

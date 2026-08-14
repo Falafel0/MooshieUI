@@ -1,7 +1,6 @@
 import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
-import { canvasHistory } from "./canvasHistory.svelte.js";
 import type { MaskInpaintStep } from "../utils/maskInpaintChain.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "lasso" | "eyedropper" | "move" | "view" | "transform";
@@ -477,8 +476,6 @@ class CanvasStore {
     // Ownership of the result object URL transfers to this call.
     const resultUrl = this.pendingResultPreviewUrl;
     const resultOwned = this.pendingResultOwned;
-    const resultW = this.pendingResultWidth ?? this.canvasWidth;
-    const resultH = this.pendingResultHeight ?? this.canvasHeight;
     this.pendingResultPreviewUrl = null;
     this.pendingResultOwned = false;
     this.pendingResultInputName = null;
@@ -487,8 +484,14 @@ class CanvasStore {
     this.maskEditedSinceResult = false;
     const maskUrl = this.pendingResultMaskUrl;
 
-    const w = resultW;
-    const h = resultH;
+    // Composite at CANVAS dimensions: the result may return a few px off (VAE
+    // padding rounds to multiples of 8, and normalizeGenerationInputBytes shrinks
+    // >1M px inputs), while the mask snapshot is captured at canvas dimensions.
+    // Compositing both onto a canvas-sized offscreen keeps them aligned and
+    // avoids the mask being stretched out of register (then re-stretched by
+    // injectLayerImage).
+    const w = this.canvasWidth;
+    const h = this.canvasHeight;
     if (w <= 0 || h <= 0) {
       if (resultOwned) URL.revokeObjectURL(resultUrl);
       return null;
@@ -787,11 +790,15 @@ class CanvasStore {
 
     if (!this._stageRef) return;
     const stageLayers = this._stageRef.getLayers?.() ?? [];
+    const clearedIds: string[] = [];
     for (const layerMeta of this.layers.filter((l) => l.type === "mask")) {
       const layer = stageLayers.find((l: any) => l.id?.() === layerMeta.id);
       layer?.destroyChildren?.();
       layer?.batchDraw?.();
+      clearedIds.push(layerMeta.id);
     }
+    // Refresh the mask thumbnails so the panel stops showing the old mask.
+    if (clearedIds.length) this.pendingThumbRefresh = clearedIds;
   }
 
   // Composite the editable inpaint mask layer(s) into a tinted, transparent-bg
@@ -880,16 +887,20 @@ class CanvasStore {
     if (!sourceNodes.length) return false;
 
     // Ensure a mask layer exists (create if the user removed the only one).
-    let maskLayerMeta = this.layers.find((l) => l.type === "mask");
+    // Prefer the ACTIVE mask as the target so multi-mask sends land on the mask
+    // the user is editing, not always the first.
+    let maskLayerMeta =
+      this.activeLayer?.type === "mask"
+        ? this.activeLayer
+        : this.layers.find((l) => l.type === "mask");
     if (!maskLayerMeta) {
       const newId = this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
       maskLayerMeta = this.layers.find((l) => l.id === newId) ?? undefined;
     }
     if (!maskLayerMeta) return false;
 
-    // Snapshot the source for undo before the destructive move.
-    canvasHistory.snapshot(sourceId);
-
+    // Undo snapshot happens in moveNodesToMask (after the mask's Konva layer
+    // exists) so both source and mask target are captured.
     this.activeLayerId = maskLayerMeta.id;
     // The mask's Konva layer may not exist yet (a freshly-added mask only gets
     // one after syncKonvaLayers runs in CanvasStage's $effect). Defer the actual
@@ -905,7 +916,9 @@ class CanvasStore {
   async getMaskInpaintSteps(): Promise<MaskInpaintStep[]> {
     const stage = this._stageRef;
     if (!stage) return [];
-    const maskMetas = this.layers.filter((l) => l.type === "mask" && l.visible);
+    const maskMetas = this.layers
+      .filter((l) => l.type === "mask" && l.visible)
+      .sort((a, b) => a.order - b.order);
     if (!maskMetas.length) return [];
     const stageLayers = stage.getLayers?.() ?? [];
     const steps: MaskInpaintStep[] = [];
@@ -1134,6 +1147,9 @@ class CanvasStore {
   // Select the first mask layer (used when entering the inpaint flow so the
   // user starts drawing the mask).
   selectMaskLayer(): boolean {
+    // Keep the ACTIVE mask if one is already selected (multi-mask: entering the
+    // inpaint flow should not yank selection back to mask #1).
+    if (this.activeLayer?.type === "mask") return true;
     const maskLayer = this.layers.find((l) => l.type === "mask");
     if (!maskLayer) return false;
     this.activeLayerId = maskLayer.id;
