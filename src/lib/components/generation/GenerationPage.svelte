@@ -2321,11 +2321,10 @@
       </div>
     {/if}
 
-    {#if canvas.isCanvasMode}
-      <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <CanvasEditor bind:this={canvasEditorRef} />
-      </div>
-    {:else}
+    <div class="flex-1 min-w-0 flex flex-col overflow-hidden" class:hidden={!canvas.isCanvasMode}>
+      <CanvasEditor bind:this={canvasEditorRef} />
+    </div>
+    {#if !canvas.isCanvasMode}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
         <!-- Preview area -->
         <div
