@@ -58,7 +58,8 @@ function tauriBuildArgs(args) {
     return args;
   }
   // Local builds without release signing keys should still succeed.
-  return [...args, "--config", '{"bundle":{"createUpdaterArtifacts":false}}'];
+  const config = JSON.stringify({ bundle: { createUpdaterArtifacts: false } });
+  return [...args, "--config", config.replace(/"/g, '\\"')];
 }
 
 async function main() {
