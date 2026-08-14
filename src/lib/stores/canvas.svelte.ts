@@ -98,6 +98,39 @@ function loadImageDataUrl(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// Feather a white-on-black mask (red channel carries the luminance) with a
+// separable box blur. The blur makes the alpha EXTEND BEYOND the mask boundary
+// (dilates it) with a smooth fade, so the applied result blends onto the
+// surrounding non-inpainted region instead of a hard seam at the mask edge.
+function featherMaskAlpha(data: Uint8ClampedArray, width: number, height: number, radius: number) {
+  if (radius <= 0 || width <= 0 || height <= 0) return;
+  const n = width * height;
+  const src = new Float32Array(n);
+  for (let i = 0; i < n; i++) src[i] = data[i << 2];
+  const tmp = new Float32Array(n);
+  // Horizontal box blur
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+      let sum = 0;
+      for (let xx = x0; xx <= x1; xx++) sum += src[row + xx];
+      tmp[row + x] = sum / (x1 - x0 + 1);
+    }
+  }
+  // Vertical box blur
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const y0 = Math.max(0, y - radius);
+      const y1 = Math.min(height - 1, y + radius);
+      let sum = 0;
+      for (let yy = y0; yy <= y1; yy++) sum += tmp[yy * width + x];
+      data[(y * width + x) << 2] = sum / (y1 - y0 + 1);
+    }
+  }
+}
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -588,7 +621,11 @@ class CanvasStore {
           const mctx = maskCanvas.getContext("2d");
           if (mctx) {
             mctx.drawImage(maskImg, 0, 0, w, h);
-            maskAlpha = mctx.getImageData(0, 0, w, h).data;
+            const md = mctx.getImageData(0, 0, w, h);
+            // Feather the mask so its alpha extends BEYOND the mask boundary,
+            // blending the result onto the surrounding non-inpainted region.
+            featherMaskAlpha(md.data, w, h, 12);
+            maskAlpha = md.data;
           }
         } catch {
           // Mask failed to load — proceed without a region restriction.
