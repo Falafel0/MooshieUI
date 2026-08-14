@@ -214,6 +214,74 @@
       />
       <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.growMaskBy ?? generation.growMaskBy}px</span>
     </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_feather')}</span>
+      <input
+        type="range"
+        value={layer.feather ?? 4}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'feather', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="32"
+        step="1"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 4}px</span>
+    </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_context')}</span>
+      <input
+        type="range"
+        value={layer.inpaintContextFactor ?? generation.inpaintContextFactor}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintContextFactor', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="1"
+        max="3"
+        step="0.1"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{(layer.inpaintContextFactor ?? generation.inpaintContextFactor).toFixed(1)}</span>
+    </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_blend')}</span>
+      <input
+        type="range"
+        value={layer.inpaintMaskBlend ?? generation.inpaintMaskBlend}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintMaskBlend', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="64"
+        step="1"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.inpaintMaskBlend ?? generation.inpaintMaskBlend}</span>
+    </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_hipass')}</span>
+      <input
+        type="range"
+        value={layer.inpaintMaskHipass ?? generation.inpaintMaskHipass}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintMaskHipass', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="1"
+        step="0.01"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{(layer.inpaintMaskHipass ?? generation.inpaintMaskHipass).toFixed(2)}</span>
+    </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_device')}</span>
+      <select
+        value={layer.inpaintDeviceMode ?? generation.inpaintDeviceMode}
+        onchange={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintDeviceMode', (e.target as HTMLSelectElement).value)}
+        onclick={(e) => e.stopPropagation()}
+        class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-0.5 text-[10px] text-neutral-200"
+      >
+        <option value="gpu (much faster)">GPU</option>
+        <option value="cpu (compatible)">CPU</option>
+      </select>
+    </div>
     <div class="px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
       <label class="flex items-center gap-1.5 cursor-pointer" onclick={(e) => e.stopPropagation()}>
         <input

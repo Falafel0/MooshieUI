@@ -135,16 +135,27 @@
             class="w-full h-full rounded border overflow-hidden transition-colors {selectingFilename === image.filename
               ? 'border-indigo-400'
               : 'border-neutral-700 hover:border-indigo-500'}"
-            onclick={() => void selectEditSource(image)}
             title={image.filename}
           >
             <img use:lazyThumbnail={{ image, size: 128 }} alt={image.filename} class="w-full h-full object-cover" />
           </button>
-          <button
-            class="absolute top-0 right-0 w-4 h-4 flex items-center justify-center rounded-bl bg-neutral-900/90 text-neutral-300 text-xs leading-none hover:bg-indigo-600 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-            onclick={(e) => { e.stopPropagation(); canvas.addImageAsRasterLayer(image.url); }}
-            title="Add as raster layer"
-          >+</button>
+          <div class="absolute inset-x-0 bottom-0 flex opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              class="h-4 flex-1 flex items-center justify-center bg-neutral-900/90 text-neutral-300 text-[9px] hover:bg-indigo-600 hover:text-white"
+              onclick={(e) => { e.stopPropagation(); void selectEditSource(image); }}
+              title={locale.t('canvas.set_as_base')}
+            >&#8679;</button>
+            <button
+              class="h-4 flex-1 flex items-center justify-center bg-neutral-900/90 text-neutral-300 text-[9px] hover:bg-emerald-600 hover:text-white"
+              onclick={(e) => { e.stopPropagation(); if (image.url) void canvas.addImageAsRegionLayer(image.url); }}
+              title={locale.t('canvas.add_as_region')}
+            >&#9681;</button>
+            <button
+              class="h-4 flex-1 flex items-center justify-center bg-neutral-900/90 text-neutral-300 text-[9px] hover:bg-indigo-600 hover:text-white"
+              onclick={(e) => { e.stopPropagation(); if (image.url) canvas.addImageAsRasterLayer(image.url); }}
+              title={locale.t('canvas.add_as_raster')}
+            >+</button>
+          </div>
         </div>
       {/each}
     {/if}

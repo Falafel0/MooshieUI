@@ -1238,6 +1238,55 @@ class CanvasStore {
     return layerId;
   }
 
+  // Add an image as a REGION raster layer: composite it at native size, then set
+  // alpha from the current mask luminance (white = opaque, black = transparent)
+  // with the active mask's feather. Falls back to a full raster layer when there
+  // is no mask snapshot to define the region.
+  async addImageAsRegionLayer(imageUrl: string, name?: string): Promise<string | null> {
+    if (!imageUrl) return null;
+    const maskUrl = this.persistedMaskPreviewUrl;
+    if (!maskUrl) {
+      return this.addImageAsRasterLayer(imageUrl, name);
+    }
+
+    try {
+      const img = await loadImageDataUrl(imageUrl);
+      const w = img.naturalWidth || this.canvasWidth;
+      const h = img.naturalHeight || this.canvasHeight;
+      if (w <= 0 || h <= 0) return null;
+
+      const off = document.createElement("canvas");
+      off.width = w;
+      off.height = h;
+      const ctx = off.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const maskImg = await loadImageDataUrl(maskUrl);
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+      const mctx = maskCanvas.getContext("2d");
+      if (!mctx) return null;
+      mctx.drawImage(maskImg, 0, 0, w, h);
+      const maskData = mctx.getImageData(0, 0, w, h);
+      featherMaskLuminance(maskData.data, w, h, this.activeMaskFeather);
+
+      const outData = ctx.getImageData(0, 0, w, h);
+      for (let i = 0; i < maskData.data.length; i += 4) {
+        outData.data[i + 3] = maskData.data[i];
+      }
+      ctx.putImageData(outData, 0, 0);
+
+      const dataUrl = off.toDataURL("image/png");
+      const layerId = this.addLayer("raster", name ?? "Region");
+      this.pendingLayerImage = { layerId, imageUrl: dataUrl, owned: false };
+      return layerId;
+    } catch {
+      return null;
+    }
+  }
+
   duplicateLayer(id: string): string | null {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return null;

@@ -375,14 +375,14 @@
   });
 
   function applyImageGeometry(width: number, height: number) {
-    imageAspect = { w: width, h: height };
-    generation.width = width;
-    generation.height = height;
+      imageAspect = { w: width, h: height };
+      generation.width = width;
+      generation.height = height;
 
-    if (canvas.isCanvasMode && (canvas.canvasWidth !== width || canvas.canvasHeight !== height)) {
-      canvas.initCanvas(width, height);
+      if (canvas.isCanvasMode && (canvas.canvasWidth !== width || canvas.canvasHeight !== height)) {
+        canvas.resizeCanvas(width, height);
+      }
     }
-  }
 
   function applyNormalizedImagePreview(normalized: NormalizedInputImage) {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
