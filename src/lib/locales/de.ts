@@ -1513,6 +1513,7 @@ const de: Record<string, string> = {
   "canvas.redo": "Wiederholen",
   "canvas.brush_size": "Größe",
   "canvas.opacity": "Deckkraft",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Vergrößern",
   "canvas.zoom_out": "Verkleinern",
   "canvas.reset_zoom": "Zoom zurücksetzen",

@@ -1492,6 +1492,7 @@ const zh: Record<string, string> = {
   "canvas.redo": "重做",
   "canvas.brush_size": "大小",
   "canvas.opacity": "不透明度",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "放大",
   "canvas.zoom_out": "缩小",
   "canvas.reset_zoom": "重置缩放",

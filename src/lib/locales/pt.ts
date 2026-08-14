@@ -1492,6 +1492,7 @@ const pt: Record<string, string> = {
   "canvas.redo": "Refazer",
   "canvas.brush_size": "Tamanho",
   "canvas.opacity": "Opacidade",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Aumentar zoom",
   "canvas.zoom_out": "Diminuir zoom",
   "canvas.reset_zoom": "Redefinir zoom",

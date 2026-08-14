@@ -530,6 +530,11 @@
           opacity: layer.opacity,
           visible: effectiveVisible,
         });
+        kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
+        if (layer.type === "raster" && layer.feather != null && layer.feather > 0) {
+          kLayer.filters([Konva.Filters.Blur]);
+          kLayer.blurRadius(layer.feather);
+        }
 
         // Clip to canvas bounds
         kLayer.clip({
@@ -546,6 +551,16 @@
         const kLayer = konvaLayers.get(layer.id)!;
         kLayer.opacity(layer.opacity);
         kLayer.visible(effectiveVisible);
+        kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
+        if (layer.type === "raster") {
+          if (layer.feather != null && layer.feather > 0) {
+            kLayer.filters([Konva.Filters.Blur]);
+            kLayer.blurRadius(layer.feather);
+          } else {
+            kLayer.filters([]);
+            kLayer.blurRadius(0);
+          }
+        }
         // Keep the clip in sync with the canvas size (resize without wipe).
         kLayer.clip({
           x: 0,
@@ -1507,13 +1522,11 @@
   });
 
   $effect(() => {
-    const url = canvas.referenceImageToShow;
-    const bgId = canvas.backgroundLayerId;
-    void canvas.canvasWidth;
-    void canvas.canvasHeight;
-    updateReferenceImage(url);
-    if (bgId) void stampBackgroundImage(bgId, url);
-  });
+      const url = canvas.referenceImageToShow;
+      void canvas.canvasWidth;
+      void canvas.canvasHeight;
+      updateReferenceImage(url);
+    });
 
   $effect(() => {
     // Re-apply Konva visibility when the pending-result hide state or compare

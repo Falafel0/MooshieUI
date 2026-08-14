@@ -13,6 +13,8 @@ export interface CanvasLayer {
   opacity: number;
   locked: boolean;
   order: number;
+  /** Layer blend mode (Konva globalCompositeOperation). Defaults to source-over. */
+  blendMode?: string;
   /** Per-mask inpaint denoise (mask layers only). */
   denoise?: number;
   /** Per-mask inpaint prompt (mask layers only). Empty falls back to the global prompt. */
@@ -218,8 +220,8 @@ class CanvasStore {
   // applyInpaintAsLayer so a mask edited AFTER generation doesn't change the
   // alpha region of the applied result.
   pendingResultMaskUrl = $state<string | null>(null);
-  // Feather radius captured when the pending result was generated (default 4px).
-  pendingResultFeather = $state(4);
+  // Feather radius captured when the pending result was generated (default 16px).
+  pendingResultFeather = $state(16);
   // While a finished inpaint result is being previewed, the editable mask strokes
   // are hidden so the clean result is visible. This flips true once the user starts
   // painting more mask, bringing the mask back so they can see what they're editing.
@@ -261,7 +263,7 @@ class CanvasStore {
     const active = this.activeLayer;
     if (active && active.type === "mask" && active.feather != null) return active.feather;
     const masks = this.layers.filter((l) => l.type === "mask");
-    return masks[masks.length - 1]?.feather ?? 4;
+    return masks[masks.length - 1]?.feather ?? 16;
   }
 
   get visibleLayers(): CanvasLayer[] {
@@ -374,7 +376,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 4;
+    this.pendingResultFeather = 16;
     this.maskEditedSinceResult = false;
   }
 
@@ -524,7 +526,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 4;
+    this.pendingResultFeather = 16;
 
     // Clear the consumed mask (it applied to the old base) but KEEP the raster
     // layer stack — the new base simply becomes the background behind them.
@@ -546,7 +548,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 4;
+    this.pendingResultFeather = 16;
     this.maskEditedSinceResult = false;
 
     const layerId = this.addLayer("raster", "Inpaint result");
@@ -1340,6 +1342,10 @@ class CanvasStore {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity } : l));
   }
 
+  setLayerBlendMode(id: string, blendMode: string) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, blendMode } : l));
+  }
+
   setLayerDenoise(id: string, denoise: number) {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, denoise } : l));
   }
@@ -1610,10 +1616,16 @@ class CanvasStore {
     // In inpainting mode, keep the currently selected input image as the baseline.
     // This makes denoise behave as expected: only the masked area is reworked.
     if (isInpainting) {
-      // The background raster layer mirrors the input image, so the raster
-      // composite IS the full base+strokes input — upload it directly (no
-      // separate base composite step).
-      if (rasterCanvas && this.canvasHasAlpha(rasterCanvas)) {
+      // The input image (loaded via the panel) is the base — raster strokes
+      // drawn by the user are composited on top. The background raster no
+      // longer mirrors the input image, so the raw composite is strokes only.
+      const baseUrl = this.referenceImageToShow;
+      if (generation.inputImage && baseUrl && rasterCanvas && this.canvasHasAlpha(rasterCanvas)) {
+        const composite = await this.compositeBaseWithRaster(baseUrl, rasterCanvas);
+        const result = await this.exportLayerAsImage(composite, "canvas_input.png");
+        generation.inputImage = result.name;
+        hasRaster = true;
+      } else if (rasterCanvas && this.canvasHasAlpha(rasterCanvas)) {
         const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
         generation.inputImage = result.name;
         hasRaster = true;
@@ -1672,9 +1684,10 @@ class CanvasStore {
       generation.inputImage = null;
     }
 
-    // Sync dimensions from bounding box
-    generation.width = this.boundingBox.width;
-    generation.height = this.boundingBox.height;
+    // NOTE: do NOT overwrite generation.width/height here. The canvas follows
+    // the generation dimensions (CanvasEditor resize effect), so re-assigning
+    // them from a stale boundingBox (which resizeCanvas never updates) would
+    // silently shrink the generation back to an old canvas size.
   }
 }
 

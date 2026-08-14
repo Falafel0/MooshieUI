@@ -1753,6 +1753,7 @@ const pl: Record<string, string> = {
   "canvas.redo": "Ponów",
   "canvas.brush_size": "Rozmiar",
   "canvas.opacity": "Krycie",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Powiększ",
   "canvas.zoom_out": "Pomniejsz",
   "canvas.reset_zoom": "Resetuj zoom",

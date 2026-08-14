@@ -1492,6 +1492,7 @@ const it: Record<string, string> = {
   "canvas.redo": "Ripeti",
   "canvas.brush_size": "Dimensione",
   "canvas.opacity": "Opacità",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Zoom avanti",
   "canvas.zoom_out": "Zoom indietro",
   "canvas.reset_zoom": "Reimposta zoom",

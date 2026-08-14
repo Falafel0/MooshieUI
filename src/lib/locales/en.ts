@@ -1769,6 +1769,7 @@ const en: Record<string, string> = {
   "canvas.redo": "Redo",
   "canvas.brush_size": "Size",
   "canvas.opacity": "Opacity",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Zoom in",
   "canvas.zoom_out": "Zoom out",
   "canvas.reset_zoom": "Reset zoom",

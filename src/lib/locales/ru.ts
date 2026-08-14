@@ -1492,6 +1492,7 @@ const ru: Record<string, string> = {
   "canvas.redo": "Повторить",
   "canvas.brush_size": "Размер",
   "canvas.opacity": "Непрозрачность",
+    "canvas.blend_mode": "Режим наложения",
   "canvas.zoom_in": "Увеличить",
   "canvas.zoom_out": "Уменьшить",
   "canvas.reset_zoom": "Сбросить масштаб",

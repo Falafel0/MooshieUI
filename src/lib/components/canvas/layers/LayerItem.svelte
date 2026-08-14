@@ -32,6 +32,21 @@
   const thumb = $derived(canvas.layerThumbnails[layer.id]);
   const canDelete = $derived(canvas.layers.length > 1);
   const canSendToMask = $derived(generation.mode === "inpainting" && layer.type === "raster");
+
+  const BLEND_MODES = [
+    { value: "source-over", label: "Normal" },
+    { value: "multiply", label: "Multiply" },
+    { value: "screen", label: "Screen" },
+    { value: "overlay", label: "Overlay" },
+    { value: "darken", label: "Darken" },
+    { value: "lighten", label: "Lighten" },
+    { value: "color-dodge", label: "Color Dodge" },
+    { value: "color-burn", label: "Color Burn" },
+    { value: "hard-light", label: "Hard Light" },
+    { value: "soft-light", label: "Soft Light" },
+    { value: "difference", label: "Difference" },
+    { value: "exclusion", label: "Exclusion" },
+  ];
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -164,6 +179,37 @@
     </div>
   {/if}
 
+  <!-- Blend mode (active raster layer only) -->
+  {#if isActive && layer.type === "raster"}
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.blend_mode')}</span>
+      <select
+        value={layer.blendMode ?? "source-over"}
+        onchange={(e) => canvas.setLayerBlendMode(layer.id, (e.target as HTMLSelectElement).value)}
+        onclick={(e) => e.stopPropagation()}
+        class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-0.5 text-[10px] text-neutral-200"
+      >
+        {#each BLEND_MODES as m}
+          <option value={m.value}>{m.label}</option>
+        {/each}
+      </select>
+    </div>
+    <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
+      <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_feather')}</span>
+      <input
+        type="range"
+        value={layer.feather ?? 0}
+        oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'feather', parseFloat((e.target as HTMLInputElement).value))}
+        onclick={(e) => e.stopPropagation()}
+        min="0"
+        max="64"
+        step="1"
+        class="flex-1 accent-indigo-500"
+      />
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 0}px</span>
+    </div>
+  {/if}
+
   <!-- Per-mask inpaint settings (active mask layer only) -->
   {#if isActive && layer.type === "mask"}
     <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
@@ -218,7 +264,7 @@
       <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_feather')}</span>
       <input
         type="range"
-        value={layer.feather ?? 4}
+        value={layer.feather ?? 16}
         oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'feather', parseFloat((e.target as HTMLInputElement).value))}
         onclick={(e) => e.stopPropagation()}
         min="0"
@@ -226,7 +272,7 @@
         step="1"
         class="flex-1 accent-indigo-500"
       />
-      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 4}px</span>
+      <span class="text-[10px] text-neutral-400 tabular-nums shrink-0 w-8 text-right">{layer.feather ?? 16}px</span>
     </div>
     <div class="flex items-center gap-2 px-2 py-1.5 border-t border-neutral-700/60 bg-neutral-900/40">
       <span class="text-[10px] text-neutral-500 shrink-0">{locale.t('canvas.mask_context')}</span>
@@ -292,6 +338,36 @@
         />
         <span class="text-[10px] text-neutral-400">{locale.t('canvas.mask_area_mask_only')}</span>
       </label>
+      {#if (layer.inpaintArea ?? generation.inpaintArea) === "mask_only"}
+        <div class="flex gap-2 mt-1.5">
+          <div class="flex-1">
+            <label class="text-[10px] text-neutral-500 block mb-0.5">{locale.t('generation.image.width')}</label>
+            <input
+              type="number"
+              value={layer.inpaintMaskWidth ?? generation.inpaintMaskWidth}
+              oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintMaskWidth', parseInt((e.target as HTMLInputElement).value) || 1024)}
+              onclick={(e) => e.stopPropagation()}
+              min="64"
+              max="4096"
+              step="64"
+              class="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200"
+            />
+          </div>
+          <div class="flex-1">
+            <label class="text-[10px] text-neutral-500 block mb-0.5">{locale.t('generation.image.height')}</label>
+            <input
+              type="number"
+              value={layer.inpaintMaskHeight ?? generation.inpaintMaskHeight}
+              oninput={(e) => canvas.setLayerInpaintSetting(layer.id, 'inpaintMaskHeight', parseInt((e.target as HTMLInputElement).value) || 1024)}
+              onclick={(e) => e.stopPropagation()}
+              min="64"
+              max="4096"
+              step="64"
+              class="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200"
+            />
+          </div>
+        </div>
+      {/if}
       <label class="flex items-center gap-1.5 mt-1 cursor-pointer" onclick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"

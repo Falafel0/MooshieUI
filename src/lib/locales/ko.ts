@@ -1492,6 +1492,7 @@ const ko: Record<string, string> = {
   "canvas.redo": "다시 실행",
   "canvas.brush_size": "크기",
   "canvas.opacity": "불투명도",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "확대",
   "canvas.zoom_out": "축소",
   "canvas.reset_zoom": "줌 초기화",

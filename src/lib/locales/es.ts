@@ -1555,6 +1555,7 @@ const es: Record<string, string> = {
   "canvas.redo": "Rehacer",
   "canvas.brush_size": "Tamaño",
   "canvas.opacity": "Opacidad",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Acercar",
   "canvas.zoom_out": "Alejar",
   "canvas.reset_zoom": "Restablecer zoom",

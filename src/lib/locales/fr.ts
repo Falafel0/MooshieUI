@@ -1517,6 +1517,7 @@ const fr: Record<string, string> = {
   "canvas.redo": "Rétablir",
   "canvas.brush_size": "Taille",
   "canvas.opacity": "Opacité",
+    "canvas.blend_mode": "Blend mode",
   "canvas.zoom_in": "Zoom avant",
   "canvas.zoom_out": "Zoom arrière",
   "canvas.reset_zoom": "Réinitialiser le zoom",
