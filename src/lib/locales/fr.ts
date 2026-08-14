@@ -535,6 +535,8 @@ const fr: Record<string, string> = {
   "generation.dimensions.resolution_tip": "La surface totale en pixels de votre image, exprimée comme le côté d'un carré équivalent. 1024 = ~1 mégapixel. Résolution plus élevée = plus de détails mais génération plus lente et plus de VRAM utilisée.",
   "generation.dimensions.width": "L",
   "generation.dimensions.height": "H",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Inverser L/H",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Ratio uniquement — définit la forme de l'image, pas sa taille en pixels.",
@@ -648,6 +650,7 @@ const fr: Record<string, string> = {
   // Entrées d'image
   "generation.image.title": "Entrées d'image",
   "generation.image.input": "Image d'entrée",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Déposez l'image ici ou",
   "generation.image.uploading": "Téléversement...",
   "generation.image.drag_desc": "Faites glisser une génération existante ici pour la charger en édition.",

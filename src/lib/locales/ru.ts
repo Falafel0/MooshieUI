@@ -523,6 +523,8 @@ const ru: Record<string, string> = {
   "generation.dimensions.resolution_tip": "Общая площадь пикселей вашего изображения, выраженная как эквивалентная сторона квадрата. 1024 = ~1 мегапиксель. Выше разрешение = больше деталей, но медленнее генерация и больше VRAM.",
   "generation.dimensions.width": "Ш",
   "generation.dimensions.height": "В",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Поменять Ш/В",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Только соотношение — задаёт форму изображения, а не размер в пикселях.",
@@ -633,6 +635,7 @@ const ru: Record<string, string> = {
 
   "generation.image.title": "Входные изображения",
   "generation.image.input": "Входное изображение",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Перетащите изображение сюда или",
   "generation.image.uploading": "Загрузка...",
   "generation.image.drag_desc": "Перетащите существующую генерацию сюда для загрузки в редактор.",

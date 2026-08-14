@@ -601,6 +601,8 @@ const pl: Record<string, string> = {
   "generation.dimensions.resolution_tip": "Łączna powierzchnia pikselowa obrazu wyrażona jako równoważna długość boku kwadratu. 1024 = ~1 megapiksel. Wyższa rozdzielczość = więcej szczegółów, ale wolniejsze generowanie i większe zużycie VRAM.",
   "generation.dimensions.width": "S",
   "generation.dimensions.height": "W",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Zamień S/W",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Tylko proporcje — ustawia kształt obrazu, a nie rozmiar w pikselach.",
@@ -720,6 +722,7 @@ const pl: Record<string, string> = {
   // Image inputs
   "generation.image.title": "Wejściowe obrazy",
   "generation.image.input": "Obraz wejściowy",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Upuść obraz tutaj lub",
   "generation.image.uploading": "Przesyłanie...",
   "generation.image.drag_desc": "Przeciągnij istniejące generowanie tutaj, aby załadować je do edycji.",

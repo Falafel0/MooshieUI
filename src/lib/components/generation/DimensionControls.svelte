@@ -281,7 +281,7 @@
     </div>
     <div class="flex items-center gap-1.5">
       <div class="flex-1">
-        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.width')}</span>
+        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.ratio_w')}</span>
         <input
           type="text"
           inputmode="decimal"
@@ -292,7 +292,7 @@
       </div>
       <span class="text-neutral-500 text-sm mt-4">:</span>
       <div class="flex-1">
-        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.height')}</span>
+        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.ratio_h')}</span>
         <input
           type="text"
           inputmode="decimal"

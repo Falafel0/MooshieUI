@@ -619,6 +619,18 @@
     }
   }
 
+  // Remove the input image WITHOUT resetting the canvas layers/masks — the input
+  // image is independent of the background layer and only defines the base + size.
+  function removeInputImage() {
+    generation.inputImage = null;
+    imageAspect = null;
+    canvas.setReferenceImage(null);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+      imagePreviewUrl = null;
+    }
+  }
+
   /** Open the image-input section and scroll it into view so a "send to img2img"
    *  action visibly lands somewhere — otherwise switching to img2img mode loads
    *  the source image into a section the user may not have on screen (#398). */
@@ -1836,6 +1848,31 @@
         <div class="px-3 pb-2 pt-0.5 space-y-2">
           {#if canvas.isCanvasMode}
             <LayerPanel />
+            <div class="rounded-md border border-neutral-800 bg-neutral-900/60 p-2 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-medium text-neutral-300">{locale.t('generation.image.input')}</span>
+                {#if canvas.referenceImageToShow}
+                  <button
+                    onclick={removeInputImage}
+                    class="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300"
+                    title={locale.t('common.remove')}
+                  >{locale.t('common.remove')}</button>
+                {/if}
+              </div>
+              {#if canvas.referenceImageToShow}
+                <img
+                  src={canvas.referenceImageToShow}
+                  alt={locale.t('generation.image.input')}
+                  class="w-full rounded border border-neutral-700 object-contain max-h-32"
+                />
+                <p class="text-[10px] text-neutral-500 text-center">{generation.width} &times; {generation.height}</p>
+              {:else}
+                <button
+                  onclick={browseImage}
+                  class="w-full px-2 py-1.5 text-[11px] rounded border border-dashed border-neutral-700 text-neutral-400 hover:border-indigo-500 hover:text-indigo-300"
+                >{locale.t('generation.image.load')}</button>
+              {/if}
+            </div>
           {:else}
             <div class="space-y-2">
               <p class="text-[11px] text-neutral-500">{locale.t('generation.inpaint.canvas_off')}</p>

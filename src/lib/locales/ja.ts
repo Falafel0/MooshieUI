@@ -535,6 +535,8 @@ const ja: Record<string, string> = {
   "generation.dimensions.resolution_tip": "画像の総ピクセル面積。等価正方形の辺の長さで表されます。1024 = 約100万ピクセル。解像度が高い = より詳細だが生成が遅くVRAM使用量が増加。",
   "generation.dimensions.width": "幅",
   "generation.dimensions.height": "高さ",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "幅と高さを入れ替え",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "比率のみ — 画像の形状を決めるもので、ピクセルサイズではありません。",
@@ -648,6 +650,7 @@ const ja: Record<string, string> = {
   // 画像入力
   "generation.image.title": "画像入力",
   "generation.image.input": "入力画像",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "画像をここにドロップ、または",
   "generation.image.uploading": "アップロード中...",
   "generation.image.drag_desc": "既存の生成画像をここにドラッグして編集用に読み込みます。",

@@ -523,6 +523,8 @@ const zhTw: Record<string, string> = {
   "generation.dimensions.resolution_tip": "影像的總像素面積，用等效正方形邊長表示。1024 ≈ 100 萬像素。解析度越高，細節越多，但生成更慢，顯存佔用更大。",
   "generation.dimensions.width": "寬度",
   "generation.dimensions.height": "高度",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "交換寬高",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "僅為比例 — 決定圖像形狀，而非像素尺寸。",
@@ -633,6 +635,7 @@ const zhTw: Record<string, string> = {
 
   "generation.image.title": "影像輸入",
   "generation.image.input": "輸入影像",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "拖放影像到此處",
   "generation.image.uploading": "上傳中...",
   "generation.image.drag_desc": "將已有的生成影像拖曳到此處以載入編輯。",

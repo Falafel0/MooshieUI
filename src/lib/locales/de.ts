@@ -544,6 +544,8 @@ const de: Record<string, string> = {
   "generation.dimensions.resolution_tip": "Die Gesamtpixelfläche des Bildes, als äquivalente Quadratseitenlänge ausgedrückt. 1024 ≈ 1 Megapixel. Höhere Auflösung = mehr Details, aber langsamer und mehr VRAM-Verbrauch.",
   "generation.dimensions.width": "Breite",
   "generation.dimensions.height": "Höhe",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Breite/Höhe tauschen",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Nur Verhältnis — bestimmt die Bildform, nicht die Pixelgröße.",
@@ -654,6 +656,7 @@ const de: Record<string, string> = {
 
   "generation.image.title": "Bildeingabe",
   "generation.image.input": "Eingabebild",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Bild hier ablegen oder",
   "generation.image.uploading": "Hochladen...",
   "generation.image.drag_desc": "Ziehen Sie ein vorhandenes erzeugtes Bild hierher, um es zur Bearbeitung zu laden.",

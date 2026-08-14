@@ -523,6 +523,8 @@ const ko: Record<string, string> = {
   "generation.dimensions.resolution_tip": "이미지의 총 픽셀 면적. 동등한 정사각형 변의 길이로 표현됩니다. 1024 = 약 100만 픽셀. 해상도가 높을수록 더 세밀하지만 생성이 느리고 VRAM 사용량이 증가합니다.",
   "generation.dimensions.width": "너비",
   "generation.dimensions.height": "높이",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "가로/세로 전환",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "비율 전용 — 이미지의 형태를 결정하며 픽셀 크기가 아닙니다.",
@@ -633,6 +635,7 @@ const ko: Record<string, string> = {
 
   "generation.image.title": "이미지 입력",
   "generation.image.input": "입력 이미지",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "이미지를 여기에 드롭하거나",
   "generation.image.uploading": "업로드 중...",
   "generation.image.drag_desc": "기존 생성 이미지를 여기에 드래그하여 편집용으로 로드합니다.",

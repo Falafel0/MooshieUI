@@ -1457,6 +1457,16 @@
     }
   });
 
+  // Re-fit the viewport when the canvas size changes (e.g. loading an image
+  // into an empty canvas) so the new content is visible at the right scale.
+  $effect(() => {
+    const w = canvas.canvasWidth;
+    const h = canvas.canvasHeight;
+    if (!stage || !containerW || !containerH || w <= 0 || h <= 0) return;
+    canvas.zoomToFit(containerW, containerH);
+    applyViewport();
+  });
+
   let historyDims = { w: 0, h: 0 };
   $effect(() => {
     // Keep undo/redo snapshot dimensions in sync with the canvas. When the

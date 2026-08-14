@@ -523,6 +523,8 @@ const zh: Record<string, string> = {
   "generation.dimensions.resolution_tip": "图像的总像素面积，用等效正方形边长表示。1024 ≈ 100万像素。分辨率越高，细节越多，但生成更慢，显存占用更大。",
   "generation.dimensions.width": "宽度",
   "generation.dimensions.height": "高度",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "交换宽高",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "仅为比例 — 决定图像形状，而非像素尺寸。",
@@ -633,6 +635,7 @@ const zh: Record<string, string> = {
 
   "generation.image.title": "图像输入",
   "generation.image.input": "输入图像",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "拖放图像到此处",
   "generation.image.uploading": "上传中...",
   "generation.image.drag_desc": "将现有生成的图像拖到此处以加载编辑。",

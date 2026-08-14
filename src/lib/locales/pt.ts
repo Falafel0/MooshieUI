@@ -523,6 +523,8 @@ const pt: Record<string, string> = {
   "generation.dimensions.resolution_tip": "A área total de pixels da sua imagem, expressa como comprimento de lado quadrado equivalente. 1024 = ~1 megapixel. Maior resolução = mais detalhes, mas geração mais lenta e mais uso de VRAM.",
   "generation.dimensions.width": "L",
   "generation.dimensions.height": "A",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Trocar L/A",
   "generation.dimensions.canvas_active_hint": "Canvas is open — resizing will scale your mask proportionally.",
   "generation.dimensions.ratio_hint": "Apenas proporção — define a forma da imagem, não o tamanho em pixels.",
@@ -633,6 +635,7 @@ const pt: Record<string, string> = {
 
   "generation.image.title": "Entrada de Imagem",
   "generation.image.input": "Imagem de Entrada",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Solte a imagem aqui ou",
   "generation.image.uploading": "Enviando...",
   "generation.image.drag_desc": "Arraste uma geração existente aqui para carregá-la para edição.",

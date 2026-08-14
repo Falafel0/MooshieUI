@@ -1202,12 +1202,10 @@ class CanvasStore {
         this.persistedMaskPreviewUrl = null;
       }
     }
-    // Hard link background === input image: deleting the background raster
-    // layer also deletes the input (reference + generation.inputImage).
+    // Deleting the background raster layer only clears the background reference
+    // (it is NOT linked to the input image — input is managed separately).
     if (id === this.backgroundLayerId) {
       this.backgroundLayerId = null;
-      this.setReferenceImageUrl(null, false);
-      generation.inputImage = null;
     }
     if (this.activeLayerId === id) {
       if (this.layers.length === 0) {

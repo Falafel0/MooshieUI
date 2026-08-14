@@ -602,6 +602,8 @@ const en: Record<string, string> = {
   "generation.dimensions.resolution_tip": "The total pixel area of your image, expressed as an equivalent square side length. 1024 = ~1 megapixel. Higher resolution = more detail but slower generation and more VRAM usage.",
   "generation.dimensions.width": "W",
   "generation.dimensions.height": "H",
+  "generation.dimensions.ratio_w": "Ratio W",
+  "generation.dimensions.ratio_h": "Ratio H",
   "generation.dimensions.swap": "Swap W/H",
   "generation.dimensions.ratio_hint": "Ratio only — sets the image shape, not its pixel size.",
   "generation.dimensions.reset": "Reset to {res}",
@@ -721,6 +723,7 @@ const en: Record<string, string> = {
   // Image inputs
   "generation.image.title": "Image Inputs",
   "generation.image.input": "Input Image",
+  "generation.image.load": "Load image",
   "generation.image.drop_or": "Drop image here or",
   "generation.image.uploading": "Uploading...",
   "generation.image.drag_desc": "Drag an existing generation here to load it for editing.",
