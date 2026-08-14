@@ -532,9 +532,10 @@
         });
         kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
         if (layer.type === "raster" && layer.feather != null && layer.feather > 0) {
-          kLayer.filters([Konva.Filters.Blur]);
-          kLayer.blurRadius(layer.feather);
-        }
+                  kLayer.cache();
+                  kLayer.filters([Konva.Filters.Blur]);
+                  kLayer.blurRadius(layer.feather);
+                }
 
         // Clip to canvas bounds
         kLayer.clip({
@@ -553,14 +554,16 @@
         kLayer.visible(effectiveVisible);
         kLayer.globalCompositeOperation((layer.blendMode ?? "source-over") as any);
         if (layer.type === "raster") {
-          if (layer.feather != null && layer.feather > 0) {
-            kLayer.filters([Konva.Filters.Blur]);
-            kLayer.blurRadius(layer.feather);
-          } else {
-            kLayer.filters([]);
-            kLayer.blurRadius(0);
-          }
-        }
+                  if (layer.feather != null && layer.feather > 0) {
+                    kLayer.cache();
+                    kLayer.filters([Konva.Filters.Blur]);
+                    kLayer.blurRadius(layer.feather);
+                  } else {
+                    kLayer.clearCache();
+                    kLayer.filters([]);
+                    kLayer.blurRadius(0);
+                  }
+                }
         // Keep the clip in sync with the canvas size (resize without wipe).
         kLayer.clip({
           x: 0,
