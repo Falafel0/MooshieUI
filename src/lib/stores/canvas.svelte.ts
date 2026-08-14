@@ -597,10 +597,11 @@ class CanvasStore {
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
     generation.inputImage = this.originalInpaintInputImageName;
-    generation.width = this.originalInpaintWidth;
-    generation.height = this.originalInpaintHeight;
-    this.clearMask();
-    this.initCanvas(this.originalInpaintWidth, this.originalInpaintHeight);
+    // Restore the base to the ORIGINAL input but KEEP the canvas layers + masks.
+    // "Clear all"/"Dismiss" reset the staged input, not the user's drawings —
+    // clearMask()/initCanvas() here would wipe the masks and raster layers.
+    generation.width = this.canvasWidth;
+    generation.height = this.canvasHeight;
   }
 
   clearInpaintSession() {
