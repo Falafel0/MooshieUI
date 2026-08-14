@@ -1,3 +1,17 @@
+## What's New in v2.0.7
+
+### Canvas layers
+- **Per-mask inpaint denoise + prompt**: each mask layer now carries its own denoise strength and prompt (editable in the layer panel), and the app inpaints multiple masks sequentially — Photoshop-style — instead of one shared denoise/prompt for everything.
+- **Inpaint result as a layer**: "Apply as Layer" saves only the changed (masked) region as a new raster layer on top of the untouched original.
+- **Compare with original**: a "Show Original" toggle hides editable layers to reveal the pre-inpaint image.
+- **Drawing mode follows the active layer**: no more separate mask/regular toggle — select a mask layer to paint the mask, select a raster layer to paint normally.
+
+### Fixes
+- **Duplicate layer** now clones strokes as vectors instead of producing an empty layer.
+- **Undo/redo** re-renders immediately (no longer requires clicking the canvas).
+- **Send to Mask** now targets the hovered layer and is undoable.
+- Fixed layer transform save/restore bugs (scaleX/scaleY handled separately), mask thumbnail generation on hidden layers, and object-URL leaks on canvas re-init.
+
 ## What's New in v2.0.6
 
 ### Fixes and maintenance
