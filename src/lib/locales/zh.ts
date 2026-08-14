@@ -2522,6 +2522,8 @@ const zh: Record<string, string> = {
   "canvas.layer.raster": "图层 {n}",
   "canvas.layer.inpaint_result": "修补结果",
   "canvas.clear_mask": "清除遮罩",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "显示原图",
   "canvas.show_original_title": "显示原图以比较前后",
   "generation.controlnet.no_image_data": "事件中没有图像数据",

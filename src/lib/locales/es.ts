@@ -2550,6 +2550,8 @@ const es: Record<string, string> = {
   "canvas.layer.raster": "Capa {n}",
   "canvas.layer.inpaint_result": "Resultado de inpaint",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Ver original",
   "canvas.show_original_title": "Mostrar la imagen original para comparar antes/después",
   "generation.controlnet.no_image_data": "No hay datos de imagen en el evento",

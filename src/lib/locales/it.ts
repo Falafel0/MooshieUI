@@ -2521,6 +2521,8 @@ const it: Record<string, string> = {
   "canvas.layer.raster": "Livello {n}",
   "canvas.layer.inpaint_result": "Risultato inpaint",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Mostra originale",
   "canvas.show_original_title": "Mostra l'immagine originale per confrontare prima/dopo",
   "generation.controlnet.no_image_data": "Nessun dato immagine nell'evento",

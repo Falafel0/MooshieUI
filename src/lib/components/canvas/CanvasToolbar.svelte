@@ -109,11 +109,25 @@
   {#if generation.mode === "inpainting"}
     <div class="flex items-center gap-1 mr-2">
       <button
-        onclick={() => { canvas.clearMask(); canvas.clearStaging(); }}
+        onclick={() => canvas.clearMask()}
         class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 transition-colors"
         title={locale.t('canvas.clear_mask')}
       >
         {locale.t('canvas.clear_mask')}
+      </button>
+      <button
+        onclick={() => canvas.clearRasters()}
+        class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 transition-colors"
+        title={locale.t('canvas.clear_rasters')}
+      >
+        {locale.t('canvas.clear_rasters')}
+      </button>
+      <button
+        onclick={() => canvas.clearAllContent()}
+        class="px-2 py-1 text-[10px] rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 transition-colors"
+        title={locale.t('canvas.clear_content')}
+      >
+        {locale.t('canvas.clear_content')}
       </button>
       <button
         onclick={() => canvas.toggleShowOriginal()}

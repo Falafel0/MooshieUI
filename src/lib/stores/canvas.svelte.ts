@@ -841,6 +841,37 @@ class CanvasStore {
     if (clearedIds.length) this.pendingThumbRefresh = clearedIds;
   }
 
+  // Clear raster strokes (and Apply-as-Layer results) on all raster layers, but
+  // keep the background raster's input image. The background layer keeps only its
+  // "background-image" node (the input mirrored from referenceImageToShow);
+  // non-background raster layers are emptied entirely.
+  clearRasters() {
+    if (!this._stageRef) return;
+    const stageLayers = this._stageRef.getLayers?.() ?? [];
+    const clearedIds: string[] = [];
+    for (const layerMeta of this.layers.filter((l) => l.type === "raster")) {
+      const layer = stageLayers.find((l: any) => l.id?.() === layerMeta.id);
+      if (!layer) continue;
+      if (layerMeta.id === this.backgroundLayerId) {
+        for (const child of [...(layer.getChildren?.() ?? [])]) {
+          if (child.name?.() !== "background-image") child.destroy?.();
+        }
+      } else {
+        layer.destroyChildren?.();
+      }
+      layer.batchDraw?.();
+      clearedIds.push(layerMeta.id);
+    }
+    if (clearedIds.length) this.pendingThumbRefresh = clearedIds;
+  }
+
+  // Clear all editable content (masks + raster strokes) while keeping the layer
+  // structure and the background input image intact.
+  clearAllContent() {
+    this.clearMask();
+    this.clearRasters();
+  }
+
   // Composite the editable inpaint mask layer(s) into a tinted, transparent-bg
   // data URL so the mask survives a base swap (layers are rebuilt on swap).
   // Returns null when there is no mask layer or the mask is empty.

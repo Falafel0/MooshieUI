@@ -2521,6 +2521,8 @@ const ko: Record<string, string> = {
   "canvas.layer.raster": "레이어 {n}",
   "canvas.layer.inpaint_result": "인페인트 결과",
   "canvas.clear_mask": "마스크 지우기",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "원본 보기",
   "canvas.show_original_title": "원본 이미지를 표시해 전후 비교",
   "generation.controlnet.no_image_data": "이벤트에 이미지 데이터가 없습니다",

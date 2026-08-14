@@ -2546,6 +2546,8 @@ const ja: Record<string, string> = {
   "canvas.layer.raster": "レイヤー {n}",
   "canvas.layer.inpaint_result": "インペイント結果",
   "canvas.clear_mask": "マスクをクリア",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "元画像を表示",
   "canvas.show_original_title": "元画像を表示して前後を比較",
   "generation.controlnet.no_image_data": "イベントに画像データがありません",

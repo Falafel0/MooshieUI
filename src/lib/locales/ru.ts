@@ -2521,6 +2521,8 @@ const ru: Record<string, string> = {
   "canvas.layer.raster": "Слой {n}",
   "canvas.layer.inpaint_result": "Результат инпейнтинга",
   "canvas.clear_mask": "Очистить маску",
+  "canvas.clear_rasters": "Очистить растры",
+  "canvas.clear_content": "Очистить содержимое",
   "canvas.show_original": "Оригинал",
   "canvas.show_original_title": "Показать исходное изображение для сравнения до/после",
   "generation.controlnet.no_image_data": "В событии нет данных изображения",

@@ -1770,6 +1770,8 @@ const en: Record<string, string> = {
   "canvas.zoom_out": "Zoom out",
   "canvas.reset_zoom": "Reset zoom",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Show Original",
   "canvas.show_original_title": "Show the original image to compare before/after",
   "canvas.staging": "Staging",

@@ -2524,6 +2524,8 @@ const de: Record<string, string> = {
   "canvas.layer.raster": "Ebene {n}",
   "canvas.layer.inpaint_result": "Inpaint-Ergebnis",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Original zeigen",
   "canvas.show_original_title": "Originalbild zum Vorher/Nachher-Vergleich anzeigen",
   "generation.controlnet.no_image_data": "Keine Bilddaten im Ereignis",

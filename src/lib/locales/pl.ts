@@ -2588,6 +2588,8 @@ const pl: Record<string, string> = {
   "canvas.layer.raster": "Warstwa {n}",
   "canvas.layer.inpaint_result": "Wynik inpaint",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Pokaż oryginał",
   "canvas.show_original_title": "Pokaż oryginalny obraz, aby porównać przed/po",
   "generation.controlnet.no_image_data": "Brak danych obrazu w zdarzeniu",

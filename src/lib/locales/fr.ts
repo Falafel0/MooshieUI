@@ -2547,6 +2547,8 @@ const fr: Record<string, string> = {
   "canvas.layer.raster": "Calque {n}",
   "canvas.layer.inpaint_result": "Résultat d'inpaint",
   "canvas.clear_mask": "Clear Mask",
+  "canvas.clear_rasters": "Clear Rasters",
+  "canvas.clear_content": "Clear Content",
   "canvas.show_original": "Voir l'original",
   "canvas.show_original_title": "Afficher l'image originale pour comparer avant/après",
   "generation.controlnet.no_image_data": "Aucune donnée d'image dans l'événement",
