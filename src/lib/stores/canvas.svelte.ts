@@ -98,38 +98,6 @@ function loadImageDataUrl(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// Feather a white-on-black mask's luminance (red channel) with a separable box
-// blur so the inpaint result's alpha edge is a soft gradient instead of a hard
-// binary cut (which leaves a visible seam). The mask is white(255)=keep /
-// black(0)=transparent; only the red channel carries the luminance.
-function featherMaskLuminance(data: Uint8ClampedArray, width: number, height: number, radius: number) {
-  if (radius <= 0 || width <= 0 || height <= 0) return;
-  const src = new Float32Array(width * height);
-  for (let i = 0; i < src.length; i++) src[i] = data[i << 2];
-  const tmp = new Float32Array(src.length);
-  // Horizontal box blur
-  for (let y = 0; y < height; y++) {
-    const row = y * width;
-    for (let x = 0; x < width; x++) {
-      const x0 = Math.max(0, x - radius);
-      const x1 = Math.min(width - 1, x + radius);
-      let sum = 0;
-      for (let xx = x0; xx <= x1; xx++) sum += src[row + xx];
-      tmp[row + x] = sum / (x1 - x0 + 1);
-    }
-  }
-  // Vertical box blur, writing the feathered luminance back to the red channel.
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const y0 = Math.max(0, y - radius);
-      const y1 = Math.min(height - 1, y + radius);
-      let sum = 0;
-      for (let yy = y0; yy <= y1; yy++) sum += tmp[yy * width + x];
-      data[(y * width + x) << 2] = sum / (y1 - y0 + 1);
-    }
-  }
-}
-
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -220,8 +188,6 @@ class CanvasStore {
   // applyInpaintAsLayer so a mask edited AFTER generation doesn't change the
   // alpha region of the applied result.
   pendingResultMaskUrl = $state<string | null>(null);
-  // Feather radius captured when the pending result was generated (default 16px).
-  pendingResultFeather = $state(16);
   // While a finished inpaint result is being previewed, the editable mask strokes
   // are hidden so the clean result is visible. This flips true once the user starts
   // painting more mask, bringing the mask back so they can see what they're editing.
@@ -256,14 +222,6 @@ class CanvasStore {
   // Derived
   get activeLayer(): CanvasLayer | null {
     return this.layers.find((l) => l.id === this.activeLayerId) ?? null;
-  }
-
-  // Feather radius of the active mask layer (fallback to the topmost mask, then 4).
-  get activeMaskFeather(): number {
-    const active = this.activeLayer;
-    if (active && active.type === "mask" && active.feather != null) return active.feather;
-    const masks = this.layers.filter((l) => l.type === "mask");
-    return masks[masks.length - 1]?.feather ?? 16;
   }
 
   get visibleLayers(): CanvasLayer[] {
@@ -376,8 +334,12 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 16;
     this.maskEditedSinceResult = false;
+  }
+
+  // Dismiss the pending inpaint result without accepting or applying it.
+  dismissInpaintResult() {
+    this.clearPendingInpaintResult();
   }
 
   setInpaintOriginalSource(source: {
@@ -477,7 +439,6 @@ class CanvasStore {
     // Capture the mask that produced this result, so applyInpaintAsLayer uses it
     // even if the user edits the mask afterward.
     this.pendingResultMaskUrl = this.persistedMaskPreviewUrl;
-    this.pendingResultFeather = this.activeMaskFeather;
   }
 
   // Accept the pending inpaint result as the NEW BACKGROUND (base): checkpoint the
@@ -526,7 +487,6 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 16;
 
     // Clear the consumed mask (it applied to the old base) but KEEP the raster
     // layer stack — the new base simply becomes the background behind them.
@@ -548,7 +508,6 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
-    this.pendingResultFeather = 16;
     this.maskEditedSinceResult = false;
 
     const layerId = this.addLayer("raster", "Inpaint result");
@@ -574,7 +533,6 @@ class CanvasStore {
     // softens the result).
     const resultW = this.pendingResultWidth;
     const resultH = this.pendingResultHeight;
-    const feather = this.pendingResultFeather;
     this.pendingResultPreviewUrl = null;
     this.pendingResultOwned = false;
     this.pendingResultInputName = null;
@@ -623,9 +581,6 @@ class CanvasStore {
           if (mctx) {
             mctx.drawImage(maskImg, 0, 0, w, h);
             const maskData = mctx.getImageData(0, 0, w, h);
-            // Feather the mask edge so the result alpha is a soft gradient, not a
-            // hard binary cut (otherwise the inpainted region shows a visible seam).
-            featherMaskLuminance(maskData.data, w, h, feather);
             const outData = ctx.getImageData(0, 0, w, h);
             // Mask is white-on-black: white (255) = keep, black (0) = transparent.
             for (let i = 0; i < maskData.data.length; i += 4) {
@@ -1277,7 +1232,6 @@ class CanvasStore {
       if (!mctx) return null;
       mctx.drawImage(maskImg, 0, 0, w, h);
       const maskData = mctx.getImageData(0, 0, w, h);
-      featherMaskLuminance(maskData.data, w, h, this.activeMaskFeather);
 
       const outData = ctx.getImageData(0, 0, w, h);
       for (let i = 0; i < maskData.data.length; i += 4) {

@@ -1537,6 +1537,7 @@ const ko: Record<string, string> = {
   "canvas.mask_device": "Device",
   "canvas.mask_area_mask_only": "Mask only (crop→sample→stitch)",
   "canvas.mask_differential_diffusion": "Differential diffusion",
+  "canvas.dismiss_inpaint_result": "해제",
   "canvas.send_to_mask": "마스크로 보내기",
   "canvas.send_to_mask_title": "획을 마스크 레이어로 이동",
   "canvas.delete_layer": "레이어 삭제",

@@ -1562,6 +1562,7 @@ const fr: Record<string, string> = {
   "canvas.mask_device": "Device",
   "canvas.mask_area_mask_only": "Mask only (crop→sample→stitch)",
   "canvas.mask_differential_diffusion": "Differential diffusion",
+  "canvas.dismiss_inpaint_result": "Rejeter",
   "canvas.send_to_mask": "Envoyer vers masque",
   "canvas.send_to_mask_title": "Déplacer les traits vers le calque de masque",
   "canvas.delete_layer": "Supprimer le calque",

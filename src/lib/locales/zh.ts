@@ -1537,6 +1537,7 @@ const zh: Record<string, string> = {
   "canvas.mask_device": "Device",
   "canvas.mask_area_mask_only": "Mask only (crop→sample→stitch)",
   "canvas.mask_differential_diffusion": "Differential diffusion",
+  "canvas.dismiss_inpaint_result": "放弃",
   "canvas.send_to_mask": "发送到蒙版",
   "canvas.send_to_mask_title": "将笔触移动到蒙版图层",
   "canvas.delete_layer": "删除图层",

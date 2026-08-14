@@ -128,6 +128,13 @@
           >
             {locale.t('canvas.accept_as_full_layer')}
           </button>
+          <button
+            onclick={() => canvas.dismissInpaintResult()}
+            class="text-xs font-medium px-4 py-1.5 rounded-full border border-neutral-500 bg-neutral-700/25 text-neutral-300 hover:border-neutral-400 hover:bg-neutral-600/40"
+            title={locale.t('canvas.dismiss_inpaint_result')}
+          >
+            {locale.t('canvas.dismiss_inpaint_result')}
+          </button>
         </div>
       </div>
     {/if}

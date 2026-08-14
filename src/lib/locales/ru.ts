@@ -1537,6 +1537,7 @@ const ru: Record<string, string> = {
   "canvas.mask_device": "Device",
   "canvas.mask_area_mask_only": "Только маска (crop→sample→stitch)",
   "canvas.mask_differential_diffusion": "Дифференциальная диффузия",
+  "canvas.dismiss_inpaint_result": "Отклонить",
   "canvas.send_to_mask": "В маску",
   "canvas.send_to_mask_title": "Перенести штрихи в слой маски",
   "canvas.delete_layer": "Удалить слой",
