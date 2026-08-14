@@ -45,6 +45,30 @@ const GGUF_PACKAGES: &[RequiredCustomNodePackage] = &[RequiredCustomNodePackage 
     requirements_file: "requirements.txt",
 }];
 
+// Mask-only inpaint crops to the mask bounding box and stitches the sample back
+// in via ComfyUI-Inpaint-CropAndStitch (InpaintCropImproved -> sample -> Stitch).
+const INPAINT_CROP_STITCH_PACKAGES: &[RequiredCustomNodePackage] = &[RequiredCustomNodePackage {
+    name: "ComfyUI-Inpaint-CropAndStitch",
+    git_url: "https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git",
+    verify_nodes: &["InpaintCropImproved", "InpaintStitchImproved"],
+    // Ships no requirements.txt; numpy/scipy/torch come from ComfyUI core.
+    requirements_file: "requirements.txt",
+}];
+
+// Multi-artist mixing for Anima through cross-attention or post-adapter embedding
+// projection (AnimaArtistPack / AnimaArtistCrossAttn / AnimaArtistAdapterMixer).
+const ANIMA_ARTIST_MIXER_PACKAGES: &[RequiredCustomNodePackage] = &[RequiredCustomNodePackage {
+    name: "Anima-Artist-Mixer",
+    git_url: "https://github.com/An1X3R/Anima-Artist-Mixer.git",
+    verify_nodes: &[
+        "AnimaArtistPack",
+        "AnimaArtistCrossAttn",
+        "AnimaArtistAdapterMixer",
+    ],
+    // No runtime deps beyond torch/comfy; the clone is the entire install.
+    requirements_file: "requirements.txt",
+}];
+
 // Anima ControlNet-LLLite is deliberately absent: ComfyUI ships
 // `ModelPatchLoader` + `AnimaLLLiteApply` in core (comfy_extras/nodes_model_patch.py)
 // since v0.29.0, and `load_custom_node` ignores custom classes that shadow core
@@ -562,6 +586,104 @@ pub async fn ensure_required_gguf_nodes(
         log::warn!(
             "Some GGUF custom node packages could not be installed ({}). \
              GGUF (.gguf) models are unavailable until these install.",
+            failures.join("; ")
+        );
+    }
+    Ok(())
+}
+
+/// Ensure ComfyUI-Inpaint-CropAndStitch is present for mask-only inpaint.
+/// Failures are logged as warnings and do not block core startup.
+pub async fn ensure_required_inpaint_crop_stitch_nodes(
+    comfyui_path: &str,
+    venv_path: &str,
+    network_proxy: Option<&str>,
+    pip_index_url: Option<&str>,
+) -> Result<(), String> {
+    let custom_nodes = Path::new(comfyui_path).join("custom_nodes");
+    std::fs::create_dir_all(&custom_nodes).map_err(|e| {
+        format!(
+            "Failed to create ComfyUI custom_nodes directory at '{}': {}",
+            custom_nodes.display(),
+            e
+        )
+    })?;
+
+    let mut failures = Vec::new();
+    for package in INPAINT_CROP_STITCH_PACKAGES {
+        if let Err(e) = ensure_custom_node_package(
+            &custom_nodes,
+            venv_path,
+            network_proxy,
+            pip_index_url,
+            *package,
+        )
+        .await
+        {
+            log::warn!(
+                "Inpaint Crop-and-Stitch custom node '{}' setup failed (optional): {}",
+                package.name,
+                e
+            );
+            failures.push(format!("{}: {}", package.name, e));
+        }
+    }
+
+    if failures.is_empty() {
+        log::info!("Ensured required Inpaint Crop-and-Stitch custom node packages");
+    } else {
+        log::warn!(
+            "Some Inpaint Crop-and-Stitch custom node packages could not be installed ({}). \
+             mask_only inpaint is unavailable until these install.",
+            failures.join("; ")
+        );
+    }
+    Ok(())
+}
+
+/// Ensure Anima-Artist-Mixer is present for multi-artist Anima mixing.
+/// Failures are logged as warnings and do not block core startup.
+pub async fn ensure_required_anima_artist_mixer_nodes(
+    comfyui_path: &str,
+    venv_path: &str,
+    network_proxy: Option<&str>,
+    pip_index_url: Option<&str>,
+) -> Result<(), String> {
+    let custom_nodes = Path::new(comfyui_path).join("custom_nodes");
+    std::fs::create_dir_all(&custom_nodes).map_err(|e| {
+        format!(
+            "Failed to create ComfyUI custom_nodes directory at '{}': {}",
+            custom_nodes.display(),
+            e
+        )
+    })?;
+
+    let mut failures = Vec::new();
+    for package in ANIMA_ARTIST_MIXER_PACKAGES {
+        if let Err(e) = ensure_custom_node_package(
+            &custom_nodes,
+            venv_path,
+            network_proxy,
+            pip_index_url,
+            *package,
+        )
+        .await
+        {
+            log::warn!(
+                "Anima Artist Mixer custom node '{}' setup failed (optional): {}",
+                package.name,
+                e
+            );
+            failures.push(format!("{}: {}", package.name, e));
+        }
+    }
+
+    if failures.is_empty() {
+        log::info!("Ensured required Anima Artist Mixer custom node packages");
+    } else {
+        log::warn!(
+            "Some Anima Artist Mixer custom node packages could not be installed ({}). \
+             Anima multi-artist mixing is unavailable until these install.",
             failures.join("; ")
         );
     }
