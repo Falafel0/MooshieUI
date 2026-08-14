@@ -11,7 +11,7 @@
     // blurring the RGB content. Konva's built-in Blur blurs the whole layer,
     // which makes the entire image look soft instead of just feathering the edge.
     (Konva.Filters as any).Feather = function featherFilter(imageData: ImageData) {
-      const radius = (this as any).featherRadius?.() ?? 0;
+      const radius = this.getAttr("featherRadius") ?? 0;
       if (!radius || radius <= 0) return;
       const data = imageData.data;
       const width = imageData.width;
@@ -48,8 +48,8 @@
     function applyRasterFeather(kLayer: Konva.Layer, layer: { type: string; feather?: number }) {
       const feather = layer.type === "raster" ? (layer.feather ?? 0) : 0;
       if (feather > 0) {
-        (kLayer as any).featherRadius(feather);
-        kLayer.cache();
+        kLayer.setAttr("featherRadius", feather);
+                kLayer.cache();
         kLayer.filters([(Konva.Filters as any).Feather]);
       } else {
         kLayer.clearCache();
