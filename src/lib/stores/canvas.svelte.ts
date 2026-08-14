@@ -404,8 +404,9 @@ class CanvasStore {
     generation.inputImage = source.uploadedInputName;
     generation.width = source.width;
     generation.height = source.height;
-    this.clearMask();
-    this.initCanvas(source.width, source.height);
+    // Keep the layer stack: the new image becomes the background (re-stamped via
+    // the referenceImageToShow effect), masks + raster layers are preserved.
+    this.resizeCanvas(source.width, source.height);
   }
 
   setPreparedInpaintOverride(source: {
@@ -445,12 +446,11 @@ class CanvasStore {
     generation.width = source.width;
     generation.height = source.height;
 
-    // Rebuild layers for the new base, then re-hydrate the mask onto the fresh
-    // mask layer. Clear the persisted (non-editable) overlay so the mask isn't
-    // drawn twice.
+    // Keep the layer stack (including the mask) across the base swap — the new
+    // image becomes the background via the referenceImageToShow effect. Only the
+    // persisted (non-editable) overlay is cleared so the mask isn't drawn twice.
     this.persistedMaskPreviewUrl = null;
-    this.initCanvas(source.width, source.height);
-    this.pendingMaskRestoreUrl = outgoingMask;
+    this.resizeCanvas(source.width, source.height);
   }
 
   // Called on inpaint completion. Holds the result for DISPLAY ONLY: it becomes
