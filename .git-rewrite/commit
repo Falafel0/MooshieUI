@@ -1,0 +1,6 @@
+tree b369721b370b3b7293437282ba93823c53e1a368
+parent c1764729392cc99921b64ca029112366aaca3274
+author Mooshieblob1 <blob@mooshieblob.com> 1773748019 +0800
+committer Mooshieblob1 <blob@mooshieblob.com> 1773748019 +0800
+
+chore: bump version to 0.2.0 in package.json, Cargo.toml, and tauri.conf.json

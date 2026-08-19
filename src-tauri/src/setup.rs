@@ -1412,6 +1412,39 @@ fn step_install_custom_nodes(base: &Path) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to write blueprint: {}", e))?;
 
+    // Deploy Anima Artist Mixer custom node package
+    deploy_anima_artist_mixer(&custom_nodes)?;
+
+    Ok(())
+}
+
+fn deploy_anima_artist_mixer(custom_nodes: &Path) -> Result<(), String> {
+    let target_dir = custom_nodes.join("anima_artist_mixer");
+    std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+
+    // List of files to deploy (embedded at compile time)
+    let files = [
+        ("__init__.py", include_str!("../../comfyui-nodes/anima_artist_mixer/__init__.py")),
+        ("adapter_anchor.py", include_str!("../../comfyui-nodes/anima_artist_mixer/adapter_anchor.py")),
+        ("alignment.py", include_str!("../../comfyui-nodes/anima_artist_mixer/alignment.py")),
+        ("anchor.py", include_str!("../../comfyui-nodes/anima_artist_mixer/anchor.py")),
+        ("constants.py", include_str!("../../comfyui-nodes/anima_artist_mixer/constants.py")),
+        ("embedding.py", include_str!("../../comfyui-nodes/anima_artist_mixer/embedding.py")),
+        ("math_utils.py", include_str!("../../comfyui-nodes/anima_artist_mixer/math_utils.py")),
+        ("nodes_core.py", include_str!("../../comfyui-nodes/anima_artist_mixer/nodes_core.py")),
+        ("nodes_embedding.py", include_str!("../../comfyui-nodes/anima_artist_mixer/nodes_embedding.py")),
+        ("nodes_ui.py", include_str!("../../comfyui-nodes/anima_artist_mixer/nodes_ui.py")),
+        ("parsing.py", include_str!("../../comfyui-nodes/anima_artist_mixer/parsing.py")),
+        ("patching.py", include_str!("../../comfyui-nodes/anima_artist_mixer/patching.py")),
+        ("wrapper.py", include_str!("../../comfyui-nodes/anima_artist_mixer/wrapper.py")),
+        ("nodes.py", include_str!("../../comfyui-nodes/anima_artist_mixer/nodes.py")),
+    ];
+
+    for (name, content) in files {
+        std::fs::write(target_dir.join(name), content)
+            .map_err(|e| format!("Failed to write anima_artist_mixer/{}: {}", name, e))?;
+    }
+
     Ok(())
 }
 

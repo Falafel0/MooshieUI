@@ -204,14 +204,15 @@ fn build_kontext(params: &GenerationParams, seed: i64) -> WorkflowResult {
     let vae_source = ml.vae_source;
 
     // Base positive conditioning (plain text encode; no schedule segments in edit mode).
-    let (pos_base, nid) = build_scheduled_conditioning(
-        &mut workflow,
-        next_id,
-        &clip_source,
-        &params.positive_prompt,
-        &[],
-    );
-    next_id = nid;
+        let (pos_base, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.positive_prompt,
+            &[],
+            params.steps,
+        );
+        next_id = nid;
 
     let image_name = reference_images(params)
         .first()

@@ -18,24 +18,26 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     let vae_source = ml.vae_source;
 
     // Positive conditioning (with optional timestep scheduling)
-    let (pos_source, nid) = build_scheduled_conditioning(
-        &mut workflow,
-        next_id,
-        &clip_source,
-        &params.positive_prompt,
-        &params.positive_segments,
-    );
-    next_id = nid;
+        let (pos_source, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.positive_prompt,
+            &params.positive_segments,
+            params.steps,
+        );
+        next_id = nid;
 
-    // Negative conditioning (with optional timestep scheduling)
-    let (neg_source, nid) = build_scheduled_conditioning(
-        &mut workflow,
-        next_id,
-        &clip_source,
-        &params.negative_prompt,
-        &params.negative_segments,
-    );
-    next_id = nid;
+        // Negative conditioning (with optional timestep scheduling)
+        let (neg_source, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.negative_prompt,
+            &params.negative_segments,
+            params.steps,
+        );
+        next_id = nid;
 
     // Load input image
     let load_img_id = next_id.to_string();
@@ -219,16 +221,24 @@ pub fn build_crop_upscale(params: &GenerationParams, seed: i64) -> WorkflowResul
     let vae_source = ml.vae_source;
 
     // Positive / negative conditioning
-    let (pos_source, nid) = build_scheduled_conditioning(
-        &mut workflow, next_id, &clip_source,
-        &params.positive_prompt, &params.positive_segments,
-    );
-    next_id = nid;
-    let (neg_source, nid) = build_scheduled_conditioning(
-        &mut workflow, next_id, &clip_source,
-        &params.negative_prompt, &params.negative_segments,
-    );
-    next_id = nid;
+        let (pos_source, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.positive_prompt,
+            &params.positive_segments,
+            params.steps,
+        );
+        next_id = nid;
+        let (neg_source, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.negative_prompt,
+            &params.negative_segments,
+            params.steps,
+        );
+        next_id = nid;
 
     // Load input image
     let load_img_id = next_id.to_string();

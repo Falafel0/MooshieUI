@@ -25,6 +25,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         &clip_source,
         &params.positive_prompt,
         &params.positive_segments,
+        params.steps,
     );
     next_id = nid;
 
@@ -102,6 +103,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         &clip_source,
         &params.negative_prompt,
         &params.negative_segments,
+        params.steps,
     );
     next_id = nid;
 

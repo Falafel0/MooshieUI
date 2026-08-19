@@ -28,6 +28,8 @@ export interface PromptSegment {
   text: string;
   start: number;
   end: number;
+  /** For alternating schedule (`<alt:N>...`): the step interval for each tag. */
+  altInterval?: number;
 }
 
 /** A <segment:...> auto-refinement region parsed from the positive prompt. */

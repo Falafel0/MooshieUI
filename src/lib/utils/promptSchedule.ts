@@ -20,6 +20,7 @@ export {
  * - <from:0.5>text</from>  — apply from 50% to 100%
  * - <to:0.8>text</to>      — apply from 0% to 80%
  * - <range:0.2:0.8>text</range> — apply from 20% to 80%
+ * - <alt:5>tag1, tag2, tag3</alt> — alternate tags every 5 steps
  *
  * SwarmUI syntax:
  * - <fromto[0.5]:before, after>  — "before" from 0% to 50%, "after" from 50% to 100%
@@ -75,42 +76,66 @@ export function parseScheduledPrompt(raw: string): ParsedPrompt {
     lastIndex = matchStart + fullMatch.length;
 
     // Determine which syntax matched
-    if (match[1]) {
-      // MooshieUI XML syntax: groups 1-4
-      const type = match[1];
-      const val1Str = match[2];
-      const val2Str = match[3];
-      const innerText = match[4];
+        if (match[1]) {
+          // MooshieUI XML syntax: groups 1-4
+          const type = match[1];
+          const val1Str = match[2];
+          const val2Str = match[3];
+          const innerText = match[4];
 
-      const text = innerText.trim();
-      if (!text) {
-        baseText += fullMatch;
-        continue;
-      }
+          const text = innerText.trim();
+          if (!text) {
+            baseText += fullMatch;
+            continue;
+          }
 
-      const val1 = parseFloat(val1Str);
-      let start: number;
-      let end: number;
+          if (type === "alt") {
+                      // Alternating syntax: <alt:N>tag1, tag2, tag3</alt>
+                      const interval = parseInt(val1Str, 10);
+                      if (isNaN(interval) || interval < 1) {
+                        baseText += fullMatch;
+                        continue;
+                      }
+                      // Split by comma, trim each tag
+                      const tags = text.split(",").map(t => t.trim()).filter(t => t.length > 0);
+                      if (tags.length === 0) {
+                        baseText += fullMatch;
+                        continue;
+                      }
+                      // Create a segment for each tag with the interval info
+                      const tagsCount = tags.length;
+                      for (let i = 0; i < tagsCount; i++) {
+                        const start = i / tagsCount;
+                        const end = (i + 1) / tagsCount;
+                        segments.push({ text: tags[i], start, end, altInterval: interval });
+                      }
+                      // Do NOT add innerText to baseText
+                      continue;
+                    }
 
-      if (type === "from") {
-        start = val1;
-        end = 1.0;
-      } else if (type === "to") {
-        start = 0.0;
-        end = val1;
-      } else {
-        start = val1;
-        end = val2Str !== undefined ? parseFloat(val2Str) : 1.0;
-      }
+          const val1 = parseFloat(val1Str);
+          let start: number;
+          let end: number;
 
-      if (isNaN(start) || isNaN(end) || start < 0 || start > 1 || end < 0 || end > 1 || start >= end) {
-        baseText += fullMatch;
-        continue;
-      }
+          if (type === "from") {
+            start = val1;
+            end = 1.0;
+          } else if (type === "to") {
+            start = 0.0;
+            end = val1;
+          } else {
+            start = val1;
+            end = val2Str !== undefined ? parseFloat(val2Str) : 1.0;
+          }
 
-      segments.push({ text, start, end });
-      // Do NOT add innerText to baseText — it should only apply during [start, end]
-    } else if (match[5]) {
+          if (isNaN(start) || isNaN(end) || start < 0 || start > 1 || end < 0 || end > 1 || start >= end) {
+            baseText += fullMatch;
+            continue;
+          }
+
+          segments.push({ text, start, end });
+          // Do NOT add innerText to baseText — it should only apply during [start, end]
+        } else if (match[5]) {
       // SwarmUI fromto syntax: groups 5-6
       const timestepStr = match[5];
       const content = match[6];
@@ -176,6 +201,11 @@ const TAG_COLORS: Record<string, { bg: string; border: string; glow: string }> =
     glow: "0 0 10px rgba(255, 204, 0, 0.30), 0 0 4px rgba(255, 204, 0, 0.15)",
   },
   range: {
+    bg: "rgba(255, 204, 0, 0.10)",
+    border: "rgba(255, 204, 0, 0.40)",
+    glow: "0 0 10px rgba(255, 204, 0, 0.30), 0 0 4px rgba(255, 204, 0, 0.15)",
+  },
+  alt: {
     bg: "rgba(255, 204, 0, 0.10)",
     border: "rgba(255, 204, 0, 0.40)",
     glow: "0 0 10px rgba(255, 204, 0, 0.30), 0 0 4px rgba(255, 204, 0, 0.15)",

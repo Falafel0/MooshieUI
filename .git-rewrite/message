@@ -1,0 +1,7 @@
+fix: CI build failures — add icon.ico, fix bundle category, fix identifier
+
+- Generate icon.ico from icon.png (required for Windows resource file)
+- Fix bundle category: "Graphics" → "Graphics and Design" (Tauri requirement)
+- Fix identifier: "com.mooshieui.app" → "com.mooshieui.desktop" (.app conflicts on macOS)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

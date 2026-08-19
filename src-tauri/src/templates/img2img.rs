@@ -21,6 +21,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         &clip_source,
         &params.positive_prompt,
         &params.positive_segments,
+        params.steps,
     );
     next_id = nid;
 
@@ -31,6 +32,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         &clip_source,
         &params.negative_prompt,
         &params.negative_segments,
+        params.steps,
     );
     next_id = nid;
 
@@ -61,45 +63,25 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
             positive_source: pos_source,
             negative_source: neg_source,
             vae_source,
-            // Empty sampler_id — no main sampler exists. inject_*/controlnet
-            // rewiring is keyed on `workflow.get_mut(&sampler_id)` and a
-            // missing key is a safe no-op.
-            sampler_id: String::new(),
+            sampler_id: "".to_string(),
         };
     }
 
-    // Resize input image to target dimensions (avoids VRAM issues with large images)
-    let resize_id = next_id.to_string();
+    // VAE Encode
+    let vae_encode_id = next_id.to_string();
     workflow.insert(
-        resize_id.clone(),
-        json!({
-            "class_type": "ImageScale",
-            "inputs": {
-                "image": [load_img_id, 0],
-                "width": params.width,
-                "height": params.height,
-                "upscale_method": "lanczos",
-                "crop": "disabled"
-            }
-        }),
-    );
-    next_id += 1;
-
-    // VAE Encode the resized image
-    let encode_id = next_id.to_string();
-    workflow.insert(
-        encode_id.clone(),
+        vae_encode_id.clone(),
         json!({
             "class_type": "VAEEncode",
             "inputs": {
-                "pixels": [resize_id, 0],
-                "vae": [vae_source.0.clone(), vae_source.1]
+                "vae": [vae_source.0.clone(), vae_source.1],
+                "pixels": [load_img_id, 0]
             }
         }),
     );
     next_id += 1;
 
-    // KSampler with denoise < 1.0
+    // KSampler (img2img)
     let sampler_id = next_id.to_string();
     workflow.insert(
         sampler_id.clone(),
@@ -109,7 +91,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
                 "model": [model_source.0.clone(), model_source.1],
                 "positive": [pos_source.0.clone(), pos_source.1],
                 "negative": [neg_source.0.clone(), neg_source.1],
-                "latent_image": [encode_id, 0],
+                "latent_image": [vae_encode_id, 0],
                 "seed": seed,
                 "steps": params.steps,
                 "cfg": params.cfg,
@@ -121,7 +103,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     );
     next_id += 1;
 
-    // VAE Decode — VAEDecodeTiled for Mugen (Flux2VAE SDXL), VAEDecode otherwise
+    // VAE Decode
     let (decode_id, next_id) =
         insert_vae_decode(&mut workflow, next_id, &sampler_id, &vae_source, params);
 

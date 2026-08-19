@@ -818,8 +818,11 @@ fn prompt_contains_lora_tag(prompt: &str, lora_name: &str) -> bool {
 /// When `segments` is empty, this creates a single `CLIPTextEncode` and returns its output —
 /// identical to the previous behavior with zero overhead.
 ///
-/// When segments are present, each segment gets its own `CLIPTextEncode` → `ConditioningSetTimestepRange`,
-/// then all are chained together with `ConditioningCombine`.
+/// When segments are present without `alt_interval`, each segment gets its own `CLIPTextEncode`
+/// → `ConditioningSetTimestepRange`, then all are chained together with `ConditioningCombine`.
+///
+/// When segments have `alt_interval` (alternating schedule), the cycle of tags is repeated
+/// across the full generation steps, with each tag active for `interval` steps per cycle.
 ///
 /// Returns `(conditioning_source, next_id)`.
 pub fn build_scheduled_conditioning(
@@ -828,6 +831,7 @@ pub fn build_scheduled_conditioning(
     clip_source: &(String, u32),
     base_prompt: &str,
     segments: &[PromptSegment],
+    total_steps: u32,
 ) -> ((String, u32), u32) {
     // Base prompt — always encoded (may be empty if user put everything in segments)
     let base_id = next_id.to_string();
@@ -847,6 +851,14 @@ pub fn build_scheduled_conditioning(
         return ((base_id, 0), next_id);
     }
 
+    // Check if this is an alternating schedule (has alt_interval)
+    let has_alt = segments.iter().any(|s| s.alt_interval.is_some());
+
+    if has_alt {
+        return build_alternating_conditioning(workflow, next_id, clip_source, base_prompt, segments, total_steps);
+    }
+
+    // Regular scheduling (from/to/range)
     // Start the combine chain with the base conditioning
     let mut combined_source = (base_id, 0u32);
 
@@ -896,6 +908,119 @@ pub fn build_scheduled_conditioning(
         next_id += 1;
     }
 
+    (combined_source, next_id)
+}
+
+/// Build conditioning for alternating schedule (`<alt:N>tag1, tag2, tag3</alt>`).
+/// The tags cycle every N steps across the full generation.
+fn build_alternating_conditioning(
+    workflow: &mut serde_json::Map<String, Value>,
+    mut next_id: u32,
+    clip_source: &(String, u32),
+    base_prompt: &str,
+    segments: &[PromptSegment],
+    total_steps: u32,
+) -> ((String, u32), u32) {
+    // All alternating segments should have the same interval
+    let interval = segments.iter()
+        .find_map(|s| s.alt_interval)
+        .unwrap_or(1) as u32;
+    
+    let tags_count = segments.len() as u32;
+    let cycle_steps = interval * tags_count;
+    
+    if cycle_steps == 0 {
+        return ((base_prompt.to_string(), 0), next_id);
+    }
+    
+    // Encode base prompt
+    let base_id = next_id.to_string();
+    workflow.insert(
+        base_id.clone(),
+        json!({
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "clip": [clip_source.0, clip_source.1],
+                "text": base_prompt
+            }
+        }),
+    );
+    next_id += 1;
+    
+    // Start the combine chain with the base conditioning
+    let mut combined_source = (base_id, 0u32);
+    
+    // Calculate how many full cycles we need
+    let num_cycles = ((total_steps as f64) / (cycle_steps as f64)).ceil() as u32;
+    
+    // For each cycle
+    for cycle in 0..num_cycles {
+        let cycle_start_step = cycle * cycle_steps;
+        let cycle_end_step = ((cycle + 1) * cycle_steps).min(total_steps);
+        
+        // For each tag in the cycle
+        for (tag_idx, segment) in segments.iter().enumerate() {
+            let tag_interval_start = cycle_start_step + (tag_idx as u32 * interval);
+            let tag_interval_end = (cycle_start_step + ((tag_idx + 1) as u32 * interval)).min(cycle_end_step);
+            
+            if tag_interval_start >= tag_interval_end || tag_interval_start >= total_steps {
+                continue;
+            }
+            
+            // Normalize to 0-1 range for ComfyUI
+            let start_norm = tag_interval_start as f64 / total_steps as f64;
+            let end_norm = tag_interval_end as f64 / total_steps as f64;
+            
+            if start_norm >= end_norm {
+                continue;
+            }
+            
+            // Encode segment text
+            let seg_clip_id = next_id.to_string();
+            workflow.insert(
+                seg_clip_id.clone(),
+                json!({
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {
+                        "clip": [clip_source.0, clip_source.1],
+                        "text": segment.text
+                    }
+                }),
+            );
+            next_id += 1;
+
+            // Set timestep range on the segment conditioning
+            let range_id = next_id.to_string();
+            workflow.insert(
+                range_id.clone(),
+                json!({
+                    "class_type": "ConditioningSetTimestepRange",
+                    "inputs": {
+                        "conditioning": [seg_clip_id, 0],
+                        "start": start_norm,
+                        "end": end_norm
+                    }
+                }),
+            );
+            next_id += 1;
+
+            // Combine with running chain
+            let combine_id = next_id.to_string();
+            workflow.insert(
+                combine_id.clone(),
+                json!({
+                    "class_type": "ConditioningCombine",
+                    "inputs": {
+                        "conditioning_1": [combined_source.0, combined_source.1],
+                        "conditioning_2": [range_id, 0]
+                    }
+                }),
+            );
+            combined_source = (combine_id, 0);
+            next_id += 1;
+        }
+    }
+    
     (combined_source, next_id)
 }
 

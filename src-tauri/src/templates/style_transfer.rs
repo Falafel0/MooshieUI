@@ -24,22 +24,24 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     let vae_source = ml.vae_source;
 
     let (pos_source, nid) = build_scheduled_conditioning(
-        &mut workflow,
-        next_id,
-        &clip_source,
-        &params.positive_prompt,
-        &params.positive_segments,
-    );
-    next_id = nid;
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.positive_prompt,
+            &params.positive_segments,
+            params.steps,
+        );
+        next_id = nid;
 
-    let (neg_source, nid) = build_scheduled_conditioning(
-        &mut workflow,
-        next_id,
-        &clip_source,
-        &params.negative_prompt,
-        &params.negative_segments,
-    );
-    next_id = nid;
+        let (neg_source, nid) = build_scheduled_conditioning(
+            &mut workflow,
+            next_id,
+            &clip_source,
+            &params.negative_prompt,
+            &params.negative_segments,
+            params.steps,
+        );
+        next_id = nid;
 
     // Load style reference image
     let load_image_id = next_id.to_string();
