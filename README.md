@@ -1,4 +1,10 @@
-# MooshieUI
+# MooshieUI <sup>форк</sup>
+
+> **Это форк [MooshieUI](https://github.com/Mooshieblob1/MooshieUI) от [Falafel0](https://github.com/Falafel0).**
+> Следит за апстримом, добавляя продвинутые возможности для prompt-инжиниринга и canvas/inpaint.
+
+[![Fork](https://img.shields.io/badge/fork-Falafel0%2FMooshieUI-blue?logo=github)](https://github.com/Falafel0/MooshieUI)
+[![Upstream](https://img.shields.io/badge/upstream-Mooshieblob1%2FMooshieUI-555?logo=github)](https://github.com/Mooshieblob1/MooshieUI)
 
 MooshieUI is a beginner-friendly interface for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that runs in two modes:
 - **Desktop app** via Tauri (Windows/Linux, macOS source build)
@@ -24,6 +30,25 @@ Built with **Svelte 5** + **Rust**, it hides ComfyUI's node-graph complexity beh
 </p>
 
 ![MooshieUI Screenshot](docs/screenshot.avif)
+
+---
+
+## 🍴 Что добавляет форк
+
+### Prompt-инжиниринг (v2.2.0)
+- **[A|B|C] — чередование (prompt scheduling)**: синтаксис `[red hair|blue hair|green hair]` циклически перебирает варианты по шагам генерации. В отличие от простого `(A|B)` (random pick), scheduling даёт контролируемое смешивание концептов.
+- **(A|B) — случайный выбор**: синтаксис `(detailed|sketch)` выбирает один вариант при старте.
+- **Веса до ±4.0**: диапазон расширен с ±2.0 до ±4.0 — `(tag:3.5)` для сверхсильного акцента, `[tag:-3.0]` для жёсткого подавления.
+
+### Canvas & Inpaint (v2.1.0)
+- **Per-layer inpaint**: каждая маска и слой с собственными настройками (denoise, prompt, differential diffusion).
+- **Diff-based Apply-as-Layer** + **Edge Feather** + **Diff Tolerance** (глобальные контролы растушёвки).
+- **Resize без сброса** слоёв + **Canvas без входного изображения** (txt2img fallback).
+
+### Инфраструктура
+- Автоустановка `Inpaint-CropAndStitch` и `Anima-Artist-Mixer`.
+- Собственный updater endpoint → релизы из этого форка.
+- Апстрим v2.1.4 влит (torch CPU fallback, apostrophe fix, deps).
 
 ---
 
@@ -69,7 +94,7 @@ See the [Wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for the full feat
 
 ### Desktop (Windows/Linux)
 
-1. Download a release from [Releases](https://github.com/Mooshieblob1/MooshieUI/releases).
+1. Download a release from **[Releases (форк)](https://github.com/Falafel0/MooshieUI/releases)** (или [апстрим](https://github.com/Mooshieblob1/MooshieUI/releases) для vanilla-версии).
 2. Run the app. The setup wizard downloads uv, Python, ComfyUI, and PyTorch (NVIDIA, AMD, or Intel Arc GPU auto-detected) and installs MooshieUI's custom nodes - no Python or pip setup required.
 3. Start generating; ComfyUI launches automatically.
 
