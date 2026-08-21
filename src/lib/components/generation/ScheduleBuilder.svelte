@@ -50,32 +50,32 @@
   const swapSeparator = $derived<"||" | "|" | ",">(swapSeparatorOverride ?? autoSeparator);
 
   const output = $derived.by(() => {
-      if (mode === "fromto") {
-        const before = swapBefore.trim();
-        const after = swapAfter.trim();
-        if (!before || !after) return "";
-        const sep = swapSeparator === "," ? ", " : ` ${swapSeparator} `;
-        return `<fromto[${fmt(swapPivot)}]:${before}${sep}${after}>`;
-      }
-      if (mode === "alt") {
-        const tagsText = altTags.trim();
-        if (!tagsText) return "";
-        const interval = Math.max(1, Math.floor(altInterval));
-        const tags = tagsText.split(",").map(t => t.trim()).filter(t => t.length > 0);
-        if (tags.length === 0) return "";
-        return `<alt:${interval}>${tags.join(", ")}</alt>`;
-      }
-      const text = schedText.trim();
-      if (!text) return "";
-      if (mode === "from") return `<from:${fmt(schedStart)}>${text}</from>`;
-      if (mode === "to") return `<to:${fmt(schedEnd)}>${text}</to>`;
-      if (mode === "range") {
-        const lo = Math.min(schedStart, schedEnd);
-        const hi = Math.max(schedStart, schedEnd);
-        return `<range:${fmt(lo)}:${fmt(hi)}>${text}</range>`;
-      }
-      return "";
-    });
+    if (mode === "fromto") {
+      const before = swapBefore.trim();
+      const after = swapAfter.trim();
+      if (!after) return "";
+      const sep = swapSeparator === "," ? ", " : ` ${swapSeparator} `;
+      return `<fromto[${fmt(swapPivot)}]:${before}${sep}${after}>`;
+    }
+    if (mode === "alt") {
+      const tagsText = altTags.trim();
+      if (!tagsText) return "";
+      const interval = Math.max(1, Math.floor(altInterval));
+      const tags = tagsText.split(",").map(t => t.trim()).filter(t => t.length > 0);
+      if (tags.length === 0) return "";
+      return `<alt:${interval}>${tags.join(", ")}</alt>`;
+    }
+    const text = schedText.trim();
+    if (!text) return "";
+    if (mode === "from") return `<from:${fmt(schedStart)}>${text}</from>`;
+    if (mode === "to") return `<to:${fmt(schedEnd)}>${text}</to>`;
+    if (mode === "range") {
+      const lo = Math.min(schedStart, schedEnd);
+      const hi = Math.max(schedStart, schedEnd);
+      return `<range:${fmt(lo)}:${fmt(hi)}>${text}</range>`;
+    }
+    return "";
+  });
 
   const description = $derived.by(() => {
       if (mode === "fromto") {
