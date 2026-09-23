@@ -18,6 +18,8 @@ The context eye toggles the selected mask's affected bounds and padding guides. 
 
 A completed result is a preview until explicitly applied. Replace the base to continue from it, insert the full result as a raster layer, or insert only the processed mask area. Dismissing the preview retains the current base. Mask-area insertion uses the submission's affected area, including growth and feathering, rather than a mask edited after submission.
 
+Replacing the base hides the raster layers already included in that submission, preventing their pixels and opacity from being applied twice. The layers remain editable in the stack. Undoing the base replacement restores their visibility. Raster layers added after submission remain visible.
+
 The queue tracks source versions and submission order. Canceling a regional chain stops subsequent steps. Changing the base invalidates pending result attachment; a slower old result cannot overwrite a newer accepted preview. Results remain available through the gallery independently of canvas application.
 
 Layer nodes and viewport survive mode changes and canvas remounts within the current session. This is not a saved layered project format: export work before closing or reloading the application.

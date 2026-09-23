@@ -59,6 +59,7 @@ export interface InpaintBaseSnapshot {
   width: number;
   height: number;
   maskSnapshotUrl: string | null;
+  rasterVisibility?: Record<string, boolean>;
   owned: boolean;
 }
 
@@ -96,6 +97,7 @@ class CanvasStore {
   baseColor = $state("#808080");
   selectedWorkspaceSection = $state<"base" | "layers" | "control">("layers");
   lastSubmittedMaskUrl: string | null = null;
+  lastSubmittedRasterLayerIds: string[] = [];
   private detachedLayers = new Map<string, any>();
 
   retainLayerNodes() {
@@ -168,6 +170,7 @@ class CanvasStore {
   pendingResultWidth = $state<number | null>(null);
   pendingResultHeight = $state<number | null>(null);
   pendingResultMaskUrl = $state<string | null>(null);
+  pendingResultRasterLayerIds: string[] = [];
   insertingResult = $state(false);
   private inpaintResults = new InpaintResultRegistry();
   // While a finished inpaint result is being previewed, the editable mask strokes
@@ -305,6 +308,7 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
+    this.pendingResultRasterLayerIds = [];
     this.maskEditedSinceResult = false;
   }
 
@@ -398,6 +402,7 @@ class CanvasStore {
     uploadedInputName: string | null;
     owned: boolean;
     maskUrl?: string | null;
+    rasterLayerIds?: string[];
   }) {
     // A superseded re-roll: revoke the previous pending preview before replacing.
     this.clearPendingInpaintResult();
@@ -407,6 +412,7 @@ class CanvasStore {
     this.pendingResultWidth = source.width;
     this.pendingResultHeight = source.height;
     this.pendingResultMaskUrl = source.maskUrl ?? null;
+    this.pendingResultRasterLayerIds = source.rasterLayerIds ?? [];
   }
 
   // Promote the pending inpaint result to be the new base: checkpoint the current
@@ -418,6 +424,8 @@ class CanvasStore {
       return;
     }
 
+    const bakedLayers = new Set(this.pendingResultRasterLayerIds);
+    const rasterVisibility = Object.fromEntries(this.layers.filter(layer => bakedLayers.has(layer.id)).map(layer => [layer.id, layer.visible]));
     const outgoingMask = this.snapshotInpaintMask();
     this.inpaintBaseHistory = [
       ...this.inpaintBaseHistory,
@@ -427,6 +435,7 @@ class CanvasStore {
         width: generation.width,
         height: generation.height,
         maskSnapshotUrl: outgoingMask,
+        rasterVisibility,
         // Only a prepared preview is an owned object URL; the session-original
         // referenceImageUrl is owned elsewhere and must not be revoked here.
         owned: this.preparedInpaintPreviewUrl ? this.preparedInpaintOwned : false,
@@ -449,6 +458,10 @@ class CanvasStore {
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
     this.pendingResultMaskUrl = null;
+    this.pendingResultRasterLayerIds = [];
+    // These pixels are already in the generated base. Keep the editable layers
+    // available, but hide them to avoid applying their opacity a second time.
+    this.layers = this.layers.map(layer => bakedLayers.has(layer.id) ? { ...layer, visible: false } : layer);
 
     // Applying a base never removes layer objects. The same mask/region can be
     // refined or disabled explicitly after inspecting the result.
@@ -544,6 +557,10 @@ class CanvasStore {
     }
 
     generation.inputImage = entry.uploadedInputName;
+    if (entry.rasterVisibility) {
+      this.layers = this.layers.map(layer => layer.id in entry.rasterVisibility!
+        ? { ...layer, visible: entry.rasterVisibility![layer.id] } : layer);
+    }
     generation.width = entry.width;
     generation.height = entry.height;
 
@@ -1232,7 +1249,7 @@ class CanvasStore {
       context.putImageData(image, 0, 0);
       maskUrl = mask.toDataURL("image/png");
     }
-    return this.inpaintResults.capture(this.inpaintSourceVersion, maskUrl);
+    return this.inpaintResults.capture(this.inpaintSourceVersion, maskUrl, this.lastSubmittedRasterLayerIds);
   }
 
   registerInpaintPrompt(promptId: string, snapshot = this.captureInpaintSubmission()) {
@@ -1320,6 +1337,7 @@ class CanvasStore {
       }
     };
     const rasterCanvas = getRasterComposite();
+    this.lastSubmittedRasterLayerIds = this.layers.filter(layer => layer.type === 'raster' && layer.visible && layer.opacity > 0).map(layer => layer.id);
     let maskCanvas = getMaskCanvas();
     const isInpainting = generation.mode === "inpainting";
 

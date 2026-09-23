@@ -5,6 +5,7 @@ export interface InpaintResultSnapshot {
   valid: boolean;
   claimed: boolean;
   accepted: boolean;
+  rasterLayerIds: string[];
 }
 
 /** Tracks both queued prompts and asynchronous result preparation. */
@@ -14,8 +15,8 @@ export class InpaintResultRegistry {
   private pending = new Set<InpaintResultSnapshot>();
   private prompts = new Map<string, InpaintResultSnapshot>();
 
-  capture(sourceVersion: number, maskUrl: string | null): InpaintResultSnapshot {
-    const snapshot = { sourceVersion, maskUrl, sequence: ++this.sequence, valid: true, claimed: false, accepted: false };
+  capture(sourceVersion: number, maskUrl: string | null, rasterLayerIds: string[] = []): InpaintResultSnapshot {
+    const snapshot = { sourceVersion, maskUrl, rasterLayerIds: [...rasterLayerIds], sequence: ++this.sequence, valid: true, claimed: false, accepted: false };
     this.pending.add(snapshot);
     return snapshot;
   }

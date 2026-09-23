@@ -2104,6 +2104,7 @@
         uploadedInputName: response.name,
         owned: true,
         maskUrl: snapshot.maskUrl,
+        rasterLayerIds: snapshot.rasterLayerIds,
       });
     } catch (e) {
       console.error("Failed to prepare latest inpaint result:", e);
