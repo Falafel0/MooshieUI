@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { canvas } from "../../stores/canvas.svelte.js";
+  import { canvas, isMaskLayer } from "../../stores/canvas.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -8,6 +8,7 @@
   import CanvasStage from "./CanvasStage.svelte";
   import CanvasStatusBar from "./CanvasStatusBar.svelte";
   import CanvasStagingStrip from "./staging/CanvasStagingStrip.svelte";
+  import { Eye, EyeOff, X } from "@lucide/svelte";
 
   interface Props {
     showInpaintPreviewOverlay?: boolean;
@@ -16,6 +17,9 @@
   let { showInpaintPreviewOverlay = true }: Props = $props();
 
   let stageRef: CanvasStage | undefined = $state();
+  const activeContextLayer = $derived(isMaskLayer(canvas.activeLayer) ? canvas.activeLayer : null);
+  const activeContextSettings = $derived(activeContextLayer?.inpaintSettings ?? generation.inpaintSettings);
+  const activeContextGrow = $derived(activeContextLayer?.maskGrow ?? generation.growMaskBy);
 
   onMount(() => {
     // Initialize canvas with generation dimensions if not already set
@@ -36,7 +40,7 @@
     }
 
     if (canvas.canvasWidth !== width || canvas.canvasHeight !== height) {
-      canvas.initCanvas(width, height);
+      canvas.resizeCanvas(width, height);
     }
   });
 
@@ -54,6 +58,30 @@
   <CanvasToolbar />
   <div class="flex-1 min-h-0 relative">
     <CanvasStage bind:this={stageRef} />
+
+    {#if (canvas.selectedWorkspaceSection === 'layers' && activeContextLayer) || canvas.selectedWorkspaceSection === 'control'}
+      <div class="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 overflow-hidden rounded-md border border-neutral-700/70 bg-neutral-950/82 p-1 text-[10px] text-neutral-300 shadow-lg backdrop-blur-md">
+        {#if activeContextLayer}
+          <span class="h-2 w-2 shrink-0 rounded-full {activeContextLayer.type === 'region' ? 'bg-violet-400' : 'bg-rose-400'}"></span>
+          <strong class="max-w-32 truncate px-0.5 font-medium text-neutral-100">{activeContextLayer.name}</strong>
+          <span class="rounded bg-neutral-800 px-1.5 py-0.5">↗ {activeContextGrow}px</span>
+          <span class="rounded bg-neutral-800 px-1.5 py-0.5">◌ {activeContextSettings.mask_blur}px</span>
+          {#if activeContextSettings.area === 'masked'}<span class="rounded bg-neutral-800 px-1.5 py-0.5">□ +{activeContextSettings.padding}px</span>{/if}
+          <span class="rounded bg-neutral-800 px-1.5 py-0.5">{activeContextLayer.type === 'region' ? (activeContextLayer.regionalStrength ?? 1).toFixed(2) : (activeContextLayer.denoise ?? generation.denoise).toFixed(2)}</span>
+        {:else}
+          <span class="h-2 w-2 shrink-0 rounded-full bg-cyan-400"></span>
+          <strong class="font-medium text-neutral-100">ControlNet</strong>
+          <span class="rounded bg-neutral-800 px-1.5 py-0.5">{generation.controlnetStrength.toFixed(2)}</span>
+          <span class="relative h-1.5 w-24 overflow-hidden rounded-full bg-neutral-700" title={`${Math.round(generation.controlnetStartPercent * 100)}–${Math.round(generation.controlnetEndPercent * 100)}%`}>
+            <span class="absolute inset-y-0 rounded-full bg-cyan-400" style={`left:${generation.controlnetStartPercent * 100}%;right:${100 - generation.controlnetEndPercent * 100}%`}></span>
+          </span>
+          <span class="tabular-nums text-neutral-400">{Math.round(generation.controlnetStartPercent * 100)}–{Math.round(generation.controlnetEndPercent * 100)}%</span>
+        {/if}
+        <button type="button" class="pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-white" onclick={() => canvas.showLayerContext = !canvas.showLayerContext} title={locale.t(canvas.showLayerContext ? 'canvas.hide_context_preview' : 'canvas.show_context_preview')}>
+          {#if canvas.showLayerContext}<Eye size={13} />{:else}<EyeOff size={13} />{/if}
+        </button>
+      </div>
+    {/if}
 
     {#if showInpaintPreviewOverlay && generation.mode === "inpainting" && progress.isGenerating}
       <div class="absolute inset-0 z-20 pointer-events-none">
@@ -99,15 +127,18 @@
 
     {#if canvas.canApplyInpaintResult && !progress.isGenerating}
       <div class="absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 pointer-events-none">
-        <div class="pointer-events-auto flex items-center gap-3 rounded-full border border-neutral-700/80 bg-neutral-950/90 py-1.5 pl-4 pr-1.5 shadow-2xl backdrop-blur-sm">
+        <div class="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-950/90 p-1.5 pl-3 shadow-2xl backdrop-blur-sm">
           <span class="text-xs text-neutral-300">{locale.t('canvas.inpaint_result_ready')}</span>
           <button
             onclick={() => canvas.applyInpaintResult()}
-            class="text-xs font-medium px-4 py-1.5 rounded-full border border-emerald-500 bg-emerald-600/25 text-emerald-100 hover:border-emerald-400 hover:bg-emerald-600/40"
+            class="h-7 rounded-md border border-emerald-500 bg-emerald-600/25 px-3 text-xs font-medium text-emerald-100 hover:border-emerald-400 hover:bg-emerald-600/40"
             title={locale.t('canvas.apply_inpaint_title')}
           >
-            {locale.t('canvas.accept')}
+            {locale.t('canvas.result_base')}
           </button>
+          <button type="button" onclick={() => canvas.insertInpaintResult(false)} class="h-7 rounded-md border border-neutral-600 px-2.5 text-xs text-neutral-200 hover:border-neutral-400">{locale.t('canvas.result_full')}</button>
+          <button type="button" onclick={() => canvas.insertInpaintResult(true)} class="h-7 rounded-md border border-neutral-600 px-2.5 text-xs text-neutral-200 hover:border-neutral-400">{locale.t('canvas.result_masked')}</button>
+          <button type="button" onclick={() => canvas.dismissInpaintResult()} class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200" title={locale.t('canvas.dismiss')}><X size={14} /></button>
         </div>
       </div>
     {/if}

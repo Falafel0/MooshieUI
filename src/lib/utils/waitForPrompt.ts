@@ -9,9 +9,11 @@ function sleep(ms: number): Promise<void> {
 export async function waitForPromptCompletion(
   promptId: string,
   timeoutMs = 600_000,
+  shouldCancel?: () => boolean,
 ): Promise<void> {
   const start = Date.now();
   while (progress.pendingPrompts.some((p) => p.promptId === promptId)) {
+    if (shouldCancel?.()) throw new Error("Generation cancelled");
     if (Date.now() - start > timeoutMs) {
       throw new Error(`Generation timed out (${promptId})`);
     }
@@ -36,7 +38,9 @@ async function tryRecoverPromptOutput(promptId: string): Promise<string | null> 
 export async function waitForPromptOutput(
   promptId: string,
   timeoutMs = 600_000,
+  shouldCancel?: () => boolean,
 ): Promise<string> {
+  if (shouldCancel?.()) throw new Error("Generation cancelled");
   const existing = progress.getPromptOutputTemp(promptId);
   if (existing) return existing;
 
@@ -44,6 +48,7 @@ export async function waitForPromptOutput(
   let lastRecoverAttempt = 0;
 
   while (Date.now() - start < timeoutMs) {
+    if (shouldCancel?.()) throw new Error("Generation cancelled");
     const registered = progress.getPromptOutputTemp(promptId);
     if (registered) return registered;
 

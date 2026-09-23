@@ -1394,7 +1394,190 @@ class MooshieMusicLoadAudio:
                 pass
 
 
+# Inpainting workspace nodes. Kept self-contained for CPU regression tests.
+def _inpaint_options(settings):
+    defaults = dict(resize_mode="resize", mask_blur=4, invert_mask=False,
+                    masked_content="original", area="whole", padding=32, soft=False,
+                    schedule_bias=1, preservation=.5, transition_contrast=4,
+                    mask_influence=0, difference_threshold=.5, difference_contrast=2)
+    defaults.update(json.loads(settings or "{}"))
+    return defaults
+
+
+def _inpaint_resize(tensor, width, height, mode="bilinear"):
+    return torch.nn.functional.interpolate(tensor, size=(height, width), mode=mode,
+                                           **({"align_corners": False} if mode == "bilinear" else {}))
+
+
+class MooshieInpaintPrepare:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("IMAGE",), "mask": ("MASK",),
+                "width": ("INT", {"default": 1024, "min": 64, "max": 16384}),
+                "height": ("INT", {"default": 1024, "min": 64, "max": 16384}),
+                "grow": ("INT", {"default": 0, "min": 0, "max": 256}),
+                "settings": ("STRING", {"default": "{}"})}}
+    RETURN_TYPES = ("IMAGE", "MASK", "MOOSHIE_INPAINT_CONTEXT")
+    FUNCTION = "prepare"
+    CATEGORY = "mooshie/inpainting"
+
+    def prepare(self, image, mask, width, height, grow, settings):
+        opts = _inpaint_options(settings)
+        image = image[..., :3]
+        b, ih, iw, _ = image.shape
+        # Match mask coordinates to the source image before applying one shared resize.
+        mask = _inpaint_resize(mask.reshape(-1, 1, *mask.shape[-2:]).to(image.device), iw, ih)
+        if mask.shape[0] == 1 and b > 1:
+            mask = mask.expand(b, -1, -1, -1)
+        rgb = image.movedim(-1, 1)
+        mode = opts["resize_mode"]
+        if mode in ("crop", "fill"):
+            scale = (max if mode == "crop" else min)(width / iw, height / ih)
+            rw, rh = max(1, round(iw * scale)), max(1, round(ih * scale))
+            rgb = _inpaint_resize(rgb, rw, rh)
+            mask = _inpaint_resize(mask, rw, rh)
+            if mode == "crop":
+                x, y = (rw-width)//2, (rh-height)//2
+                rgb, mask = rgb[:, :, y:y+height, x:x+width], mask[:, :, y:y+height, x:x+width]
+            else:
+                px, py = width-rw, height-rh
+                padding = (px//2, px-px//2, py//2, py-py//2)
+                rgb = torch.nn.functional.pad(rgb, padding, mode="replicate")
+                mask = torch.nn.functional.pad(mask, padding)
+        else:
+            rgb, mask = _inpaint_resize(rgb, width, height), _inpaint_resize(mask, width, height)
+        mask = mask.clamp(0, 1)
+        if opts["invert_mask"]:
+            mask = 1-mask
+        grow = max(0, min(256, int(grow)))
+        if grow:
+            mask = torch.nn.functional.max_pool2d(mask, 2*grow+1, stride=1, padding=grow)
+        sigma = max(0, min(64, float(opts["mask_blur"])))
+        if sigma:
+            radius = max(1, int(3*sigma))
+            grid = torch.arange(-radius, radius+1, device=mask.device, dtype=mask.dtype)
+            kernel = torch.exp(-grid.square()/(2*sigma*sigma))
+            kernel /= kernel.sum()
+            mask = torch.nn.functional.conv2d(torch.nn.functional.pad(mask, (radius,radius,0,0), mode="replicate"), kernel.view(1,1,1,-1))
+            mask = torch.nn.functional.conv2d(torch.nn.functional.pad(mask, (0,0,radius,radius), mode="replicate"), kernel.view(1,1,-1,1))
+        base = rgb.movedim(1, -1)
+        x, y, cw, ch = 0, 0, width, height
+        if opts["area"] == "masked":
+            points = (mask.amax(dim=(0,1)) > .001).nonzero()
+            if points.numel():
+                pad = max(0, min(256, int(opts["padding"])))
+                y, x = [max(0, int(v)-pad) for v in points.amin(dim=0)]
+                bottom, right = [int(v)+pad+1 for v in points.amax(dim=0)]
+                cw, ch = min(width, right)-x, min(height, bottom)-y
+        context = {"base": base, "mask": mask.movedim(1,-1), "box": (x,y,cw,ch), "settings": opts}
+        cropped_rgb = rgb[:, :, y:y+ch, x:x+cw]
+        cropped_mask = mask[:, :, y:y+ch, x:x+cw]
+        sample_mask = _inpaint_resize(cropped_mask, width, height).squeeze(1)
+        if opts["soft"]:
+            sample_mask = sample_mask.pow(max(.01, min(8, float(opts["schedule_bias"]))))
+        # Latent resize encodes native crop pixels, then resizes the latent in the encoder.
+        pixels = cropped_rgb if mode == "latent" else _inpaint_resize(cropped_rgb, width, height)
+        if mode == "latent" and opts["area"] == "whole":
+            pixels = image.movedim(-1,1)
+        if opts["masked_content"] == "fill":
+            fill_mask = _inpaint_resize(cropped_mask, pixels.shape[-1], pixels.shape[-2])
+            pixels = pixels*(1-fill_mask) + .5*fill_mask
+        return pixels.movedim(1,-1), sample_mask, context
+
+
+class MooshieInpaintEncode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"pixels": ("IMAGE",), "mask": ("MASK",), "vae": ("VAE",),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "settings": ("STRING", {"default": "{}"})}}
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "encode"
+    CATEGORY = "mooshie/inpainting"
+
+    def encode(self, pixels, mask, vae, seed, settings):
+        opts = _inpaint_options(settings)
+        ratio = getattr(vae, "downscale_ratio", 8)
+        if not isinstance(ratio, (int,float)):
+            ratio = 8
+        # Tiny masked crops in latent-resize mode must still be encodable.
+        minimum = max(8, int(ratio))
+        if pixels.shape[1] < minimum or pixels.shape[2] < minimum:
+            pixels = _inpaint_resize(pixels.movedim(-1, 1),
+                                     max(minimum, pixels.shape[2]),
+                                     max(minimum, pixels.shape[1])).movedim(1, -1)
+        samples = vae.encode(pixels[..., :3])
+        lh, lw = max(1, round(mask.shape[-2]/ratio)), max(1, round(mask.shape[-1]/ratio))
+        if samples.shape[-2:] != (lh,lw):
+            samples = _inpaint_resize(samples, lw, lh)
+        latent_mask = _inpaint_resize(mask.unsqueeze(1).to(samples.device), lw, lh)
+        if opts["masked_content"] == "nothing":
+            samples = samples*(1-latent_mask)
+        elif opts["masked_content"] == "noise":
+            generator = torch.Generator(device="cpu").manual_seed(seed)
+            noise = torch.randn(samples.shape, generator=generator, dtype=samples.dtype).to(samples.device)
+            samples = samples*(1-latent_mask) + noise*latent_mask
+        return ({"samples": samples, "noise_mask": mask},)
+
+
+class MooshieInpaintComposite:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("IMAGE",), "context": ("MOOSHIE_INPAINT_CONTEXT",)}}
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "composite"
+    CATEGORY = "mooshie/inpainting"
+
+    def composite(self, image, context):
+        base, mask, opts = context["base"], context["mask"], context["settings"]
+        x,y,w,h = context["box"]
+        patch = _inpaint_resize(image[..., :3].movedim(-1,1), w,h).movedim(1,-1).to(base.device)
+        if base.shape[0] == 1 and patch.shape[0] > 1:
+            base = base.expand(patch.shape[0], -1,-1,-1)
+            mask = mask.expand(patch.shape[0], -1,-1,-1)
+        original = base[:, y:y+h, x:x+w]
+        alpha = mask[:, y:y+h, x:x+w].clamp(0,1)
+        if opts["soft"]:
+            preserve = max(0, min(1, float(opts["preservation"])))
+            contrast = max(.01, min(16, float(opts["transition_contrast"])))
+            alpha = alpha.pow(1 + preserve*contrast)
+            difference = (patch-original).abs().mean(dim=-1, keepdim=True)
+            threshold = max(0, min(1, float(opts["difference_threshold"])))
+            sharpness = max(.01, min(16, float(opts["difference_contrast"])))
+            influence = max(0, min(1, float(opts["mask_influence"])))
+            gate = torch.sigmoid((difference - threshold*(1-influence*alpha))*sharpness*8)
+            alpha = alpha*((1-preserve) + preserve*gate)
+        result = base.clone()
+        result[:, y:y+h, x:x+w] = original*(1-alpha) + patch*alpha
+        return (result.clamp(0,1),)
+
+
+class MooshieInpaintControl:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("IMAGE",), "context": ("MOOSHIE_INPAINT_CONTEXT",)}}
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "align"
+    CATEGORY = "mooshie/inpainting"
+
+    def align(self, image, context):
+        _, height, width, _ = context["base"].shape
+        opts = dict(context["settings"], area="whole", mask_blur=0, invert_mask=False,
+                    masked_content="original", soft=False)
+        if opts["resize_mode"] == "latent":
+            opts["resize_mode"] = "resize"
+        mask = torch.ones(image.shape[:3], device=image.device)
+        pixels, _, _ = MooshieInpaintPrepare().prepare(image, mask, width, height, 0, json.dumps(opts))
+        x,y,w,h = context["box"]
+        cropped = pixels[:,y:y+h,x:x+w].movedim(-1,1)
+        return (_inpaint_resize(cropped,width,height).movedim(1,-1),)
+
+
 NODE_CLASS_MAPPINGS = {
+    "MooshieInpaintControl": MooshieInpaintControl,
+    "MooshieInpaintPrepare": MooshieInpaintPrepare,
+    "MooshieInpaintEncode": MooshieInpaintEncode,
+    "MooshieInpaintComposite": MooshieInpaintComposite,
     "MooshieYuE2Plan": MooshieYuE2Plan,
     "MooshieYuE2Music": MooshieYuE2Music,
     "MooshieMusicLoadAudio": MooshieMusicLoadAudio,
@@ -1415,6 +1598,10 @@ NODE_CLASS_MAPPINGS.update(H3_DRAFT_NODES)
 register_h3_draft_routes()
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MooshieInpaintControl": "Mooshie Inpaint Control",
+    "MooshieInpaintPrepare": "Mooshie Inpaint Prepare",
+    "MooshieInpaintEncode": "Mooshie Inpaint Encode",
+    "MooshieInpaintComposite": "Mooshie Inpaint Composite",
     "MooshieYuE2Plan": "Mooshie YuE2 Score and Status",
     "MooshieYuE2Music": "Mooshie YuE2 Music and Status",
     "MooshieMusicLoadAudio": "Mooshie Temporary Cover Audio",

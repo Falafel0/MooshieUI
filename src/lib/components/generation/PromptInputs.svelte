@@ -457,7 +457,7 @@
         {/if}
         <!-- NovelAI has no regional conditioning at all, so the button is gone
              there rather than shown disabled with an "unsupported" toast. -->
-        {#if !isVideoMode && !generation.isNovelAi}
+        {#if !isVideoMode && !generation.isNovelAi && generation.mode !== "inpainting"}
           <button
             type="button"
             disabled={!regionalPromptingSupported}

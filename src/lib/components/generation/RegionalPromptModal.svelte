@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import type { RegionalPromptSelection, RegionalPromptShape } from "../../types/index.js";
 
   interface Props {
     onclose: () => void;
+    initialRegions?: RegionalPromptSelection[];
+    onSave?: (regions: RegionalPromptSelection[]) => void;
+    referenceImage?: string | null;
   }
 
   interface NormalizedPoint {
@@ -12,7 +16,7 @@
     y: number;
   }
 
-  let { onclose }: Props = $props();
+  let { onclose, initialRegions = generation.regionalPrompts, onSave, referenceImage = null }: Props = $props();
 
   type CanvasTool = "select" | RegionalPromptShape;
   type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -30,8 +34,8 @@
   const HANDLE_VIS_RADIUS = 0.008;
 
   let activeTool = $state<CanvasTool>("select");
-  let draftRegions = $state<RegionalPromptSelection[]>(generation.regionalPrompts.map(cloneRegion));
-  let selectedRegionId = $state<string | null>(generation.regionalPrompts[0]?.id ?? null);
+  let draftRegions = $state<RegionalPromptSelection[]>(untrack(() => initialRegions.map(cloneRegion)));
+  let selectedRegionId = $state<string | null>(untrack(() => initialRegions[0]?.id ?? null));
   let drawStart = $state<NormalizedPoint | null>(null);
   let drawCurrent = $state<NormalizedPoint | null>(null);
   let drawingPointerId = $state<number | null>(null);
@@ -675,7 +679,7 @@
   }
 
   function commitDraftToStore(): void {
-    generation.regionalPrompts = draftRegions.map((region) => ({
+    const regions = draftRegions.map((region) => ({
       ...region,
       x: clamp01(region.x),
       y: clamp01(region.y),
@@ -684,11 +688,15 @@
       strength: clampStrength(region.strength),
       points: region.points?.map((point) => ({ x: clamp01(point.x), y: clamp01(point.y) })),
     }));
-    generation.saveSettings();
+    if (onSave) onSave(regions);
+    else {
+      generation.regionalPrompts = regions;
+      generation.saveSettings();
+    }
   }
 
   function closeWithDraftSaved(): void {
-    commitDraftToStore();
+    if (!onSave) commitDraftToStore();
     onclose();
   }
 
@@ -868,6 +876,7 @@
             aria-label={locale.t("generation.regional.canvas_aria")}
           >
             <svg class="absolute inset-0 h-full w-full select-none touch-none" viewBox="0 0 1 1" preserveAspectRatio="none">
+              {#if referenceImage}<image href={referenceImage} width="1" height="1" preserveAspectRatio="none" />{/if}
               {#each draftRegions as region (region.id)}
                 {@const selected = region.id === selectedRegionId}
                 {@const snapped = snappedBounds(region)}

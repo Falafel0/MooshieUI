@@ -213,7 +213,7 @@ jobs:
             echo "Release ${TAG} already exists; updating notes and replacing assets."
             gh release edit "${TAG}" \
               --repo "${{ github.repository }}" \
-              --title "MooshieUI ${TAG}" \
+              --title "MooshieUI Fork ${TAG}" \
               --notes-file /tmp/release-body.md
             upload_log="$(mktemp)"
             if ! gh release upload "${TAG}" \
@@ -237,7 +237,8 @@ jobs:
           else
             gh release create "${TAG}" \
               --repo "${{ github.repository }}" \
-              --title "MooshieUI ${TAG}" \
+              --title "MooshieUI Fork ${TAG}" \
+              --latest \
               --notes-file /tmp/release-body.md \
               release-files/*
           fi

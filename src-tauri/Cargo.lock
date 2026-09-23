@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "comfyui-desktop"
-version = "2.3.6"
+version = "2.3.6-fork.1"
 dependencies = [
  "argon2",
  "axum",
@@ -850,6 +850,7 @@ dependencies = [
  "rmpv",
  "rusqlite",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",

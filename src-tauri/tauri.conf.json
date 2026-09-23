@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerlab/files/main/tauri/tauri.conf.json.schema",
-  "productName": "MooshieUI",
-  "version": "2.3.6",
-  "identifier": "com.mooshieui.desktop",
+  "productName": "MooshieUI Fork",
+  "version": "2.3.6-fork.1",
+  "identifier": "com.falafel0.mooshieui",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "MooshieUI",
+        "title": "MooshieUI Fork",
         "width": 1440,
         "height": 900,
         "minWidth": 900,
@@ -50,9 +50,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/Mooshieblob1/MooshieUI/releases/latest/download/latest.json"
+        "https://github.com/Falafel0/MooshieUI/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2QjY5NzZFRjhDODhFMkYKUldRdmpzajRicGUybGx6Y0V5OWpuZFZSMUZnTnVBdDlwWkZxVURyRGx2d0JZQlI4cVN6OGN2cFcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFOTIyOTVFQzQwRTgzMjAKUldRZ2d3N0VYaW1TcnY5Mk0xckVMcVdrSExlY0hHZEpKalMvZzlaTWg5OXlhZVkzOUxlNUtNREoK",
       "windows": {
         "installMode": "quiet"
       }

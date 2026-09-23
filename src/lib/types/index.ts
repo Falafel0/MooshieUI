@@ -351,6 +351,7 @@ export interface GenerationParams {
   input_image: string | null;
   mask_image: string | null;
   grow_mask_by: number | null;
+  inpaint_settings?: import("../utils/inpaintSettings.js").InpaintSettings;
   upscale_enabled: boolean;
   upscale_method: string;
   upscale_model: string | null;

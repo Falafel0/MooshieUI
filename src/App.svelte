@@ -2080,7 +2080,7 @@
    * Finalize images received via WebSocket during generation.
    * MooshieSaveImage sends PNG bytes directly over WS — no disk round-trip.
    */
-  async function prepareLatestInpaintResult(image: OutputImage, sourceVersion: number) {
+  async function prepareLatestInpaintResult(image: OutputImage, snapshot: NonNullable<ReturnType<typeof canvas.claimInpaintPrompt>>) {
     try {
       const prepared = await prepareOutputImageForEditMode(image, "inpainting");
       const normalized = prepared.normalized;
@@ -2090,7 +2090,7 @@
       if (
         generation.mode !== "inpainting" ||
         !canvas.isCanvasMode ||
-        canvas.inpaintSourceVersion !== sourceVersion
+        !canvas.acceptInpaintResult(snapshot)
       ) {
         URL.revokeObjectURL(normalized.previewUrl);
         return;
@@ -2103,9 +2103,12 @@
         height: normalized.height,
         uploadedInputName: response.name,
         owned: true,
+        maskUrl: snapshot.maskUrl,
       });
     } catch (e) {
       console.error("Failed to prepare latest inpaint result:", e);
+    } finally {
+      canvas.finishInpaintResult(snapshot);
     }
   }
 
@@ -2149,8 +2152,8 @@
     gallery.addImages(newImages);
     progress.setLastOutputForMode(mode, newImages[0]?.url ?? null);
     if (mode === "inpainting" && generation.mode === "inpainting" && canvas.isCanvasMode && newImages[0]) {
-      const sourceVersion = canvas.inpaintSourceVersion;
-      void prepareLatestInpaintResult(newImages[0], sourceVersion);
+      const snapshot = canvas.claimInpaintPrompt(promptId);
+      if (snapshot) void prepareLatestInpaintResult(newImages[0], snapshot);
     }
 
     // One size for the batch: every image in a run comes back the same size,
@@ -2816,6 +2819,7 @@
         // Admin/mod cleared the queue — cancel all pending state on this client
         promptLastActivity.clear();
         progress.cancelAll();
+        canvas.invalidateInpaintPrompts();
         artistLocalPreviews.failAll();
         styleCreator.failAll();
         stylesStore.failThumbnail();
@@ -3235,6 +3239,7 @@
           pendingOutputFetches.clear();
           promptLastActivity.clear();
           progress.cancelAll();
+          canvas.invalidateInpaintPrompts();
           artistLocalPreviews.failAll();
           styleCreator.failAll();
           stylesStore.failThumbnail();

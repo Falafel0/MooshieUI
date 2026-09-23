@@ -1,5 +1,7 @@
 # MooshieUI
 
+> **Falafel0 fork — v2.3.6-fork.1.** This fork focuses on a layer-based inpainting workspace and generation-state reliability. Installers, release notes and signed updates come only from [this fork's releases](https://github.com/Falafel0/MooshieUI/releases). The desktop app installs as **MooshieUI Fork**, with a separate application identifier and settings directory. Connect it to an existing ComfyUI server through Settings. See the [fork workspace guide](docs/FORK_WORKSPACE.md).
+
 MooshieUI is a beginner-friendly interface for image, video and music generation through [ComfyUI](https://github.com/comfyanonymous/ComfyUI), with optional image generation through the **NovelAI API** using your own key. It runs in two modes:
 
 - **Desktop app** via Tauri (Windows/Linux; [native Apple Silicon macOS candidates](docs/MACOS.md))
@@ -84,7 +86,7 @@ Controls depend on the selected backend and model. NovelAI offers the three stan
 
 ### Desktop (Windows/Linux)
 
-1. Download a release from [Releases](https://github.com/Mooshieblob1/MooshieUI/releases).
+1. Download a release from [Releases](https://github.com/Falafel0/MooshieUI/releases).
 2. Run the app. The setup wizard downloads uv, Python, ComfyUI, and PyTorch (NVIDIA, AMD, or Intel Arc GPU auto-detected) and installs MooshieUI's custom nodes - no Python or pip setup required. On Windows, it also installs an app-local copy of Git when a working Git installation cannot be found.
 3. Start generating; ComfyUI launches automatically.
 
@@ -113,7 +115,7 @@ Open `http://localhost:3200` (or the host port set by `MOOSHIEUI_PORT`) and sign
 Use Node.js 22.12+ or 24+, stable Rust, and the platform's Tauri v2 build prerequisites. See [CONTRIBUTING.md](CONTRIBUTING.md) for validation and both Rust build targets.
 
 ```bash
-git clone https://github.com/Mooshieblob1/MooshieUI.git
+git clone https://github.com/Falafel0/MooshieUI.git
 cd MooshieUI
 npm install
 npm run tauri dev      # hot-reload dev

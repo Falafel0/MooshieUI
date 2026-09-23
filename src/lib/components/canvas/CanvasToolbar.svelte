@@ -5,7 +5,9 @@
   import { locale } from "../../stores/locale.svelte.js";
   import BrushSettings from "./controls/BrushSettings.svelte";
   import ColorPicker from "./controls/ColorPicker.svelte";
+  import { PaintBucket, Trash2, Undo2, Redo2 } from "@lucide/svelte";
 
+  const editable = $derived(canvas.selectedWorkspaceSection === 'layers' && !!canvas.activeLayer?.visible && !canvas.activeLayer?.locked);
   const tools: { id: ToolType; labelKey: string; hotkey: string; icon: string }[] = [
     {
       id: "brush",
@@ -24,6 +26,10 @@
       labelKey: "canvas.rectangle",
       hotkey: "U",
       icon: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>`,
+    },
+    {
+      id: "ellipseFill",
+      labelKey: "canvas.ellipse", hotkey: "O", icon: '<ellipse cx="12" cy="12" rx="9" ry="7" />',
     },
     {
       id: "lasso",
@@ -80,7 +86,7 @@
     // Delete key — clear active layer
     if (e.key === "Delete") {
       const layer = canvas.activeLayer;
-      if (layer && !layer.locked && canvas.activeLayerId) {
+      if (editable && layer && canvas.activeLayerId) {
         canvasHistory.snapshot(layer.id);
         canvas.clearLayer(layer.id);
       }
@@ -91,6 +97,7 @@
       case "b": canvas.setTool("brush"); break;
       case "e": canvas.setTool("eraser"); break;
       case "u": canvas.setTool("rectFill"); break;
+      case "o": canvas.setTool("ellipseFill"); break;
       case "q": canvas.setTool("lasso"); break;
       case "i": canvas.setTool("eyedropper"); break;
       case "v": canvas.setTool("move"); break;
@@ -105,38 +112,15 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="flex items-center gap-1 px-3 py-1.5 bg-neutral-900 border-b border-neutral-800">
-  {#if generation.mode === "inpainting"}
-    <div class="flex items-center gap-1 mr-2">
-      <button
-        onclick={() => canvas.setInpaintDrawMode("mask")}
-        class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'mask'
-          ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-          : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-        title={locale.t('canvas.inpaint_mask_mode')}
-      >
-        {locale.t('canvas.inpaint_mask')}
-      </button>
-      <button
-        onclick={() => canvas.setInpaintDrawMode("regular")}
-        class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'regular'
-          ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-          : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-        title={locale.t('canvas.regular_inpaint_mode')}
-      >
-        {locale.t('canvas.regular_inpaint')}
-      </button>
-    </div>
-
-    <div class="w-px h-6 bg-neutral-700 mr-2"></div>
-  {/if}
-
+<div class="flex flex-nowrap items-center gap-1 overflow-x-auto px-2 py-1 bg-neutral-900 border-b border-neutral-800 [scrollbar-width:thin]">
   <!-- Tool buttons -->
   <div class="flex items-center gap-0.5">
-    {#each tools as tool}
+    {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.activeLayer?.type === 'raster') as tool}
       <button
+        disabled={!editable && tool.id !== "view"}
+        aria-label={locale.t(tool.labelKey)}
         onclick={() => handleToolClick(tool.id)}
-        class="relative w-8 h-8 flex items-center justify-center rounded-md transition-colors {canvas.activeTool === tool.id
+        class="disabled:opacity-30 relative w-8 h-8 flex items-center justify-center rounded-md transition-colors {canvas.activeTool === tool.id
           ? 'bg-indigo-600 text-white'
           : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'}"
         title="{locale.t(tool.labelKey)} ({tool.hotkey})"
@@ -148,64 +132,41 @@
     {/each}
   </div>
 
-  <div class="w-px h-6 bg-neutral-700 mx-2"></div>
+  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
 
-  <BrushSettings />
+  {#if editable && ['brush','eraser','rectFill','ellipseFill','lasso'].includes(canvas.activeTool)}<BrushSettings />{/if}
 
-  <div class="w-px h-6 bg-neutral-700 mx-2"></div>
+  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
 
-  <ColorPicker />
+  {#if editable && canvas.activeLayer?.type === 'raster'}<ColorPicker />{/if}
+  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId); canvas.fillActiveLayer(); }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-30" aria-label={locale.t('canvas.fill_layer')} title={locale.t('canvas.fill_layer')}><PaintBucket size={16} /></button>
+  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) { canvasHistory.snapshot(canvas.activeLayerId); canvas.clearLayer(canvas.activeLayerId); } }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30" aria-label={locale.t('canvas.clear_layer')} title={locale.t('canvas.clear_layer')}><Trash2 size={16} /></button>
 
-  <div class="w-px h-6 bg-neutral-700 mx-2"></div>
+  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
 
   <div class="flex items-center gap-1">
     <button
       onclick={() => canvasHistory.undo()}
       disabled={!canvasHistory.canUndo}
-      class="px-2 py-1 text-[10px] rounded border transition-colors {canvasHistory.canUndo
-        ? 'border-neutral-700 text-neutral-300 hover:border-indigo-500 hover:text-indigo-300'
-        : 'border-neutral-800 text-neutral-600 cursor-not-allowed'}"
+      class="h-8 w-8 shrink-0 flex items-center justify-center rounded transition-colors {canvasHistory.canUndo
+        ? 'text-neutral-300 hover:bg-neutral-800 hover:text-indigo-300'
+        : 'text-neutral-600 cursor-not-allowed'}"
+      aria-label={locale.t('canvas.undo')}
       title={locale.t('canvas.undo') + ' (Ctrl+Z)'}
     >
-      {locale.t('canvas.undo')}
+      <Undo2 size={16} />
     </button>
     <button
       onclick={() => canvasHistory.redo()}
       disabled={!canvasHistory.canRedo}
-      class="px-2 py-1 text-[10px] rounded border transition-colors {canvasHistory.canRedo
-        ? 'border-neutral-700 text-neutral-300 hover:border-indigo-500 hover:text-indigo-300'
-        : 'border-neutral-800 text-neutral-600 cursor-not-allowed'}"
+      class="h-8 w-8 shrink-0 flex items-center justify-center rounded transition-colors {canvasHistory.canRedo
+        ? 'text-neutral-300 hover:bg-neutral-800 hover:text-indigo-300'
+        : 'text-neutral-600 cursor-not-allowed'}"
+      aria-label={locale.t('canvas.redo')}
       title={locale.t('canvas.redo') + ' (Ctrl+Shift+Z / Ctrl+Y)'}
     >
-      {locale.t('canvas.redo')}
+      <Redo2 size={16} />
     </button>
   </div>
 
-  <div class="w-px h-6 bg-neutral-700 mx-2"></div>
-
-  <!-- Zoom controls -->
-  <div class="flex items-center gap-1">
-    <button
-      onclick={() => canvas.zoomOut()}
-      class="w-6 h-6 flex items-center justify-center rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 text-sm"
-      title={locale.t('canvas.zoom_out')}
-    >
-      -
-    </button>
-    <span class="text-xs text-neutral-300 tabular-nums w-10 text-center">{canvas.zoomPercent}%</span>
-    <button
-      onclick={() => canvas.zoomIn()}
-      class="w-6 h-6 flex items-center justify-center rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 text-sm"
-      title={locale.t('canvas.zoom_in')}
-    >
-      +
-    </button>
-    <button
-      onclick={() => canvas.resetZoom()}
-      class="text-[10px] px-1.5 py-0.5 rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-      title={locale.t('canvas.reset_zoom')}
-    >
-      1:1
-    </button>
-  </div>
 </div>

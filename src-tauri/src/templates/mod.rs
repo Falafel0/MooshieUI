@@ -1012,6 +1012,43 @@ fn build_image_stage(params: &GenerationParams, seed: i64) -> WorkflowResult {
         }
     }
 
+    // Align ControlNet hints with the inpaint crop and processed mask.
+    if params.mode == "inpainting" {
+        if let Some(prepare_id) = result
+            .workflow
+            .iter()
+            .find(|(_, node)| node["class_type"] == "MooshieInpaintPrepare")
+            .map(|(id, _)| id.clone())
+        {
+            let controls: Vec<_> = result
+                .workflow
+                .iter()
+                .filter(|(_, node)| {
+                    node["class_type"] == "ControlNetApplyAdvanced"
+                        || node["class_type"] == "AnimaLLLiteApply"
+                })
+                .map(|(id, node)| (id.clone(), node["inputs"]["image"].clone()))
+                .collect();
+            for (id, image) in controls {
+                let align_id = result.next_id.to_string();
+                result.next_id += 1;
+                result.workflow.insert(
+                    align_id.clone(),
+                    json!({
+                        "class_type": "MooshieInpaintControl",
+                        "inputs": { "image": image, "context": [prepare_id.clone(), 2] }
+                    }),
+                );
+                if let Some(node) = result.workflow.get_mut(&id) {
+                    node["inputs"]["image"] = json!([align_id, 0]);
+                    if node["inputs"].get("mask").is_some() {
+                        node["inputs"]["mask"] = json!([prepare_id.clone(), 1]);
+                    }
+                }
+            }
+        }
+    }
+
     // Inject style reference if enabled (IP-Adapter for SD1.5/SDXL, Flux Redux for Flux.1)
     if params.style_ref_enabled && params.mode != "video" && params.mode != "image_edit" {
         if style_ref::family_supports_style_ref(&params.model_architecture) {

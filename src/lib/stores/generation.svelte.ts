@@ -1,3 +1,4 @@
+import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { ipcStore } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
 import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js";
@@ -748,6 +749,7 @@ class GenerationStore {
   denoise = $state(0.7);
   inputImage = $state<string | null>(null);
   maskImage = $state<string | null>(null);
+  inpaintSettings = $state<InpaintSettings>({ ...DEFAULT_INPAINT_SETTINGS });
   growMaskBy = $state(6);
   differentialDiffusion = $state(false);
   upscaleEnabled = $state(false);
@@ -1743,7 +1745,7 @@ class GenerationStore {
   /** Sequential masked inpaint per region (works on Anima + optional SDXL). */
   get supportsRegionalInpaintChain(): boolean {
     if (this.isNovelAi) return false;
-    return this.mode === "txt2img" && (this.isAnima || this.supportsRegionalConditioning);
+    return (this.mode === "txt2img" || this.mode === "inpainting") && (this.isAnima || this.isSdxlLike);
   }
 
   get effectiveRegionalStrategy(): RegionalPromptStrategy {
@@ -2637,6 +2639,7 @@ class GenerationStore {
         if (saved.height) this.height = saved.height;
         if (saved.batchSize) this.batchSize = saved.batchSize;
         if (saved.denoise !== undefined) this.denoise = saved.denoise;
+        if (saved.inpaintSettings !== undefined) this.inpaintSettings = normalizeInpaintSettings(saved.inpaintSettings);
         if (saved.differentialDiffusion !== undefined) this.differentialDiffusion = saved.differentialDiffusion;
         // The parked bucket. The active one is loaded from the flat fields below,
         // which also carries a pre-split store forward: its single prompt lands
@@ -2939,7 +2942,8 @@ class GenerationStore {
         height: this.height,
         batchSize: this.batchSize,
         denoise: this.denoise,
-        differentialDiffusion: this.differentialDiffusion,
+        inpaintSettings: { ...this.inpaintSettings },
+      differentialDiffusion: this.differentialDiffusion,
         upscaleEnabled: this.upscaleEnabled,
         upscaleMethod: this.upscaleMethod,
         upscaleModel: this.upscaleModel,
@@ -3105,6 +3109,7 @@ class GenerationStore {
       batchSize: this.batchSize,
       denoise: this.denoise,
       refineOnly: this.refineOnly,
+      inpaintSettings: { ...this.inpaintSettings },
       differentialDiffusion: this.differentialDiffusion,
       upscaleEnabled: this.upscaleEnabled,
       upscaleMethod: this.upscaleMethod,
@@ -3748,6 +3753,7 @@ class GenerationStore {
       input_image: this.inputImage,
       mask_image: this.maskImage,
       grow_mask_by: this.growMaskBy,
+      inpaint_settings: { ...this.inpaintSettings },
       upscale_enabled: this.upscaleEnabled,
       upscale_method: this.upscaleMethod,
       upscale_model: this.upscaleModel,

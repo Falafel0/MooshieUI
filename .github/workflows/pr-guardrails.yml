@@ -34,6 +34,9 @@ jobs:
       - name: Release artifact checks
         run: python3 -m unittest discover -s scripts -p test_release_artifacts.py
 
+      - name: Inpainting lifecycle and mask regression checks
+        run: node --test tests/inpaint-result-registry.test.mjs tests/inpainting-chain.test.mjs tests/mask-processing.test.mjs
+
       - name: Compute changed files
         run: |
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt

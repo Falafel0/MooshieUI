@@ -157,6 +157,8 @@ pub struct GenerationParams {
     pub input_image: Option<String>,
     pub mask_image: Option<String>,
     pub grow_mask_by: Option<u32>,
+    #[serde(default)]
+    pub inpaint_settings: Option<serde_json::Value>,
     pub upscale_enabled: bool,
     pub upscale_method: String,
     pub upscale_model: Option<String>,

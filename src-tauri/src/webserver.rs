@@ -1204,7 +1204,7 @@ async fn check_update_handler(
     }
 
     let current = env!("CARGO_PKG_VERSION");
-    let url = "https://api.github.com/repos/Mooshieblob1/MooshieUI/releases/latest";
+    let url = "https://api.github.com/repos/Falafel0/MooshieUI/releases/latest";
 
     let resp = state
         .app
@@ -1276,23 +1276,24 @@ async fn check_update_handler(
     }
 }
 
-/// Compare two semver-like version strings. Returns true if `latest` > `current`.
+/// Compare release versions, including numeric prerelease identifiers.
 fn version_newer_than(latest: &str, current: &str) -> bool {
-    let parse =
-        |s: &str| -> Vec<u32> { s.split('.').filter_map(|p| p.parse::<u32>().ok()).collect() };
-    let l = parse(latest);
-    let c = parse(current);
-    for i in 0..l.len().max(c.len()) {
-        let lv = l.get(i).copied().unwrap_or(0);
-        let cv = c.get(i).copied().unwrap_or(0);
-        if lv > cv {
-            return true;
-        }
-        if lv < cv {
-            return false;
-        }
+    match (
+        semver::Version::parse(latest),
+        semver::Version::parse(current),
+    ) {
+        (Ok(latest), Ok(current)) => latest > current,
+        _ => false,
     }
-    false
+}
+
+#[test]
+fn release_versions_compare_prereleases_numerically() {
+    assert!(version_newer_than("2.3.6-fork.10", "2.3.6-fork.2"));
+    assert!(!version_newer_than("2.3.6-fork.1", "2.3.6-fork.2"));
+    assert!(!version_newer_than("2.3.6-fork.1", "2.3.6-fork.1"));
+    assert!(version_newer_than("2.3.6", "2.3.6-rc.1"));
+    assert!(!version_newer_than("garbage", "2.3.6"));
 }
 
 /// SSE endpoint — streams backend events to browser clients.
@@ -4735,7 +4736,7 @@ async fn dispatch_command(
         "fetch_release_notes" => {
             let resp = state
                 .http_client
-                .get("https://api.github.com/repos/Mooshieblob1/MooshieUI/releases")
+                .get("https://api.github.com/repos/Falafel0/MooshieUI/releases")
                 .query(&[("per_page", "20")])
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "MooshieUI-Desktop")
