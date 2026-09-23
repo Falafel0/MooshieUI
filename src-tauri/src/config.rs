@@ -412,8 +412,8 @@ pub fn gallery_dir() -> Option<PathBuf> {
     Some(data_dir.join("gallery"))
 }
 
-const APP_IDENTIFIER: &str = "com.mooshieui.desktop";
-const OLD_APP_IDENTIFIER: &str = "com.comfyui.desktop";
+const APP_IDENTIFIER: &str = "com.falafel0.mooshieui";
+const OLD_APP_IDENTIFIER: &str = "com.falafel0.mooshieui.legacy";
 
 /// The platform-default app data directory (always the same location).
 /// Used to store the bootstrap pointer file that redirects to the real data dir.
@@ -467,7 +467,7 @@ pub fn app_data_dir() -> Option<PathBuf> {
     platform_default_data_dir()
 }
 
-/// Migrate data from the old `com.comfyui.desktop` directory to the new one.
+/// Migrate only earlier fork data; never adopt an upstream managed runtime.
 /// Copies config.json if the new directory doesn't have one yet.
 fn migrate_from_old_data_dir() {
     let data_dir = match dirs::data_dir() {

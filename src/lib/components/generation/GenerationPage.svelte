@@ -27,6 +27,7 @@
   import ProgressBar from "../progress/ProgressBar.svelte";
   import PreviewImage from "../progress/PreviewImage.svelte";
   import CanvasEditor from "../canvas/CanvasEditor.svelte";
+  import InpaintSettings from "../canvas/InpaintSettings.svelte";
   import LayerPanel from "../canvas/layers/LayerPanel.svelte";
   import { canvas } from "../../stores/canvas.svelte.js";
   import { uploadImage, uploadImageBytes, getOutputImage, readClipboardImageSafe } from "../../utils/api.js";
@@ -108,6 +109,7 @@
   let imagePreviewUrl = $state<string | null>(null);
   let maskPreviewUrl = $state<string | null>(null);
   let uploading = $state(false);
+  let rasterImportBusy = $state(false);
   let imageAspect = $state<{ w: number; h: number } | null>(null);
   let dragOver = $state(false);
   let maskDragOver = $state(false);
@@ -308,7 +310,7 @@
     if (section === "imageInputs") return locale.t('generation.image.title');
     if (section === "imageEdit") return locale.t('generation.image_edit.title');
     if (section === "videoSettings") return locale.t('generation.video.title');
-    if (section === "inpaintLayers") return locale.t('generation.inpaint.title');
+    if (section === "inpaintLayers") return locale.t('canvas.workspace_title');
     if (section === "generationSettings") return locale.t('generation.settings.title');
     if (section === "model") return locale.t('generation.model.title');
     if (section === "sampler") return locale.t('generation.sampler.title');
@@ -336,8 +338,9 @@
       return generation.isNovelAi && generation.mode !== "inpainting";
     if (generation.isNovelAi && (section === "controlnet" || section === "styleTransfer"))
       return false;
+    if (section === "controlnet" && generation.mode === "inpainting") return false;
     if (section === "imageInputs")
-      return generation.mode === "img2img" || generation.mode === "inpainting";
+      return generation.mode === "img2img";
     if (section === "imageEdit") return generation.mode === "image_edit";
     if (section === "inpaintLayers") return generation.mode === "inpainting";
     if (section === "generationSettings") return generation.mode === "inpainting";
@@ -362,7 +365,13 @@
   const controlsSide = $derived(leftHasSections ? "left" : "right");
 
   // Sections for rendering — excludes the dragged section so drop zone indices match computeDropTarget
-  const leftRenderSections = $derived(leftSections.filter((id) => id !== draggingSection));
+  const leftRenderSections = $derived.by(() => {
+    const visible = leftSections.filter((id) => id !== draggingSection);
+    if (generation.mode !== 'img2img') return visible;
+    const imageIndex = visible.indexOf('imageInputs');
+    if (imageIndex <= 0) return visible;
+    return ['imageInputs' as SectionId, ...visible.filter((id) => id !== 'imageInputs')];
+  });
   const rightRenderSections = $derived(rightSections.filter((id) => id !== draggingSection));
 
   const COLLAPSE_KEY = `mooshieui.generation.sections.collapsed.v1${storageSuffix}`;
@@ -534,7 +543,7 @@
         const blob = new Blob([buf], { type: "image/png" });
         if (maskPreviewUrl) URL.revokeObjectURL(maskPreviewUrl);
         maskPreviewUrl = URL.createObjectURL(blob);
-        canvas.setPersistedMaskPreview(maskPreviewUrl);
+        await canvas.setPersistedMaskPreview(maskPreviewUrl);
         const response = await uploadImageBytes(Array.from(new Uint8Array(buf)), file.name);
         generation.maskImage = response.name;
       } catch (e) { console.error("Failed to upload mask:", e); } finally { uploading = false; }
@@ -549,7 +558,7 @@
       const blob = new Blob([bytes], { type: "image/png" });
       if (maskPreviewUrl) URL.revokeObjectURL(maskPreviewUrl);
       maskPreviewUrl = URL.createObjectURL(blob);
-      canvas.setPersistedMaskPreview(maskPreviewUrl);
+      await canvas.setPersistedMaskPreview(maskPreviewUrl);
 
       const response = await uploadImage(selected);
       generation.maskImage = response.name;
@@ -598,7 +607,7 @@
       const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
       if (maskPreviewUrl) URL.revokeObjectURL(maskPreviewUrl);
       maskPreviewUrl = URL.createObjectURL(blob);
-      canvas.setPersistedMaskPreview(maskPreviewUrl);
+      await canvas.setPersistedMaskPreview(maskPreviewUrl);
 
       const response = await uploadImageBytes(bytes, file.name || "dropped_mask.png");
       generation.maskImage = response.name;
@@ -613,6 +622,17 @@
   /** Paste an image into the img2img/inpaint input. Prefers the image carried by the
    *  paste event's clipboardData (webkit2gtk populates this on Linux, where the native
    *  clipboard `read_image` is unreliable), falling back to the system clipboard read. */
+  async function pasteRaster(file?: File | null) {
+    let url: string | null = null;
+    try {
+      rasterImportBusy = true;
+      const bytes = file ? new Uint8Array(await file.arrayBuffer()) : new Uint8Array(await readClipboardImageSafe());
+      url = URL.createObjectURL(new Blob([bytes], { type: file?.type || 'image/png' }));
+      await canvas.addRasterImage(url, file?.name || locale.t('canvas.pasted_image'));
+    } catch (error) { console.error(error); gallery.showToast(locale.t('gallery.toast.failed_load'), 'error'); }
+    finally { if (url) URL.revokeObjectURL(url); rasterImportBusy = false; }
+  }
+
   async function handleImagePaste(file?: File | null) {
     try {
       uploading = true;
@@ -640,7 +660,7 @@
       const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
       if (maskPreviewUrl) URL.revokeObjectURL(maskPreviewUrl);
       maskPreviewUrl = URL.createObjectURL(blob);
-      canvas.setPersistedMaskPreview(maskPreviewUrl);
+      await canvas.setPersistedMaskPreview(maskPreviewUrl);
 
       const response = await uploadImageBytes(bytes, "pasted_mask.png");
       generation.maskImage = response.name;
@@ -676,8 +696,9 @@
    *  the source image into a section the user may not have on screen (#398). */
   async function revealImageInputSection() {
     imageSectionOpen = true;
+    layersSectionOpen = true;
     await tick();
-    sectionRefs['imageInputs']?.scrollIntoView({ behavior: "smooth", block: "center" });
+    sectionRefs[generation.mode === "inpainting" ? "inpaintLayers" : "imageInputs"]?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function refineImage(image: OutputImage) {
@@ -1218,17 +1239,15 @@
     bottomHeight = BOTTOM_DEFAULT;
   }
 
-  let prevInpaintMode: boolean | null = $state(null);
+  let wasInpaintingWorkspace = $state(false);
   $effect(() => {
     const isInpainting = generation.mode === "inpainting";
-    // Auto-open the canvas on entering inpainting; auto-close on leaving.
-    // Only act on the transition so a manual toggle within inpainting isn't overridden.
-    if (isInpainting && prevInpaintMode !== true) {
-      canvas.isCanvasMode = true;
-    } else if (!isInpainting && canvas.isCanvasMode) {
-      canvas.isCanvasMode = false;
-    }
-    prevInpaintMode = isInpainting;
+    // Inpainting is one coherent workspace. Keeping the canvas mounted prevents
+    // two divergent sets of masks, previews and result actions.
+    canvas.isCanvasMode = isInpainting;
+    if (isInpainting && canvas.layers.length === 0) canvas.initCanvas(generation.width, generation.height);
+    if (isInpainting && !wasInpaintingWorkspace) bottomCollapsed = true;
+    wasInpaintingWorkspace = isInpainting;
   });
 
   function hasFilePayload(dt: DataTransfer | null): boolean {
@@ -1432,7 +1451,7 @@
       const blob = new Blob([bytes], { type: "image/png" });
       if (maskPreviewUrl) URL.revokeObjectURL(maskPreviewUrl);
       maskPreviewUrl = URL.createObjectURL(blob);
-      canvas.setPersistedMaskPreview(maskPreviewUrl);
+      await canvas.setPersistedMaskPreview(maskPreviewUrl);
       const response = await uploadImage(path);
       generation.maskImage = response.name;
     } catch (e) {
@@ -1471,6 +1490,12 @@
         e.preventDefault();
         e.stopPropagation();
         await handleMaskPaste();
+        return;
+      }
+
+      if (generation.mode === 'inpainting' && canvas.isCanvasMode && canvas.selectedWorkspaceSection === 'layers') {
+        e.preventDefault(); e.stopPropagation();
+        await pasteRaster(getClipboardImageFile(e));
         return;
       }
 
@@ -1621,21 +1646,7 @@
     </div>
   {/snippet}
 
-  {#snippet imageInputsSection()}
-    <div bind:this={sectionRefs['imageInputs']} class="rounded-lg border border-neutral-800 bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'imageInputs' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'}">
-      <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
-        {@render dragHandle("imageInputs")}
-        <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
-          onclick={() => (imageSectionOpen = !imageSectionOpen)}
-          title={imageSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image.title') }) : locale.t('common.expand', { section: locale.t('generation.image.title') })}
-        >
-          <span class="font-medium">{locale.t('generation.image.title')}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {imageSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-      </div>
-      {#if imageSectionOpen}
-        <div class="px-3 pb-2 pt-0.5 space-y-2">
+  {#snippet sourceImageControls()}
           {#if canvas.currentPreparedInputImage}
             <div class="rounded-md border border-amber-700/50 bg-amber-900/20 p-2 flex items-center justify-between gap-2">
               <span class="text-[11px] text-amber-300">{locale.t('generation.image.staged_active')}</span>
@@ -1715,6 +1726,9 @@
             {/if}
           </div>
 
+  {/snippet}
+
+  {#snippet imageSettingsControls()}
           <!-- NovelAI drives img2img with strength and noise instead of denoise. -->
           {#if generation.isNovelAi}
           <NovelAiImageSettings />
@@ -1748,7 +1762,9 @@
             </div>
           {/if}
 
-          {#if generation.mode === "inpainting"}
+  {/snippet}
+
+  {#snippet maskInputControls()}
             <div>
               <div class="flex items-center justify-between mb-1">
                 <p class="text-xs text-neutral-400">{locale.t('generation.inpaint.mask')}</p>
@@ -1824,6 +1840,9 @@
               {/if}
             </div>
 
+  {/snippet}
+
+  {#snippet maskGrowthControls()}
             {#if !generation.isNovelAi}
             <div use:scrollCapture>
               <div class="flex items-center justify-between text-xs mb-0.5">
@@ -1840,7 +1859,25 @@
               />
             </div>
             {/if}
-          {/if}
+  {/snippet}
+
+  {#snippet imageInputsSection()}
+    <div bind:this={sectionRefs['imageInputs']} class="rounded-lg border border-neutral-800 bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'imageInputs' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'}">
+      <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
+        {@render dragHandle("imageInputs")}
+        <button
+          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          onclick={() => (imageSectionOpen = !imageSectionOpen)}
+          title={imageSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image.title') }) : locale.t('common.expand', { section: locale.t('generation.image.title') })}
+        >
+          <span class="font-medium">{locale.t('generation.image.title')}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {imageSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
+      {#if imageSectionOpen}
+        <div class="px-3 pb-2 pt-0.5 space-y-2">
+          {@render sourceImageControls()}
+          {@render imageSettingsControls()}
         </div>
       {/if}
     </div>
@@ -1853,53 +1890,52 @@
         <button
           class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (layersSectionOpen = !layersSectionOpen)}
-          title={layersSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.inpaint.title') }) : locale.t('common.expand', { section: locale.t('generation.inpaint.title') })}
+          title={layersSectionOpen ? locale.t('common.collapse', { section: locale.t('canvas.workspace_title') }) : locale.t('common.expand', { section: locale.t('canvas.workspace_title') })}
         >
-          <span class="font-medium">{locale.t('generation.inpaint.title')}</span>
+          <span class="font-medium">{locale.t('canvas.workspace_title')}</span>
           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {layersSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
       </div>
       {#if layersSectionOpen}
-        <div class="px-3 pb-2 pt-0.5 space-y-2">
-          <div class="grid grid-cols-2 gap-1">
-            <button
-              onclick={() => canvas.setInpaintDrawMode("mask")}
-              class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'mask'
-                ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-              title={locale.t('generation.inpaint.inpaint_mask')}
-            >
-              {locale.t('generation.inpaint.inpaint_mask')}
-            </button>
-            <button
-              onclick={() => canvas.setInpaintDrawMode("regular")}
-              class="px-2 py-1 text-[10px] rounded border transition-colors {canvas.inpaintDrawMode === 'regular'
-                ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'}"
-              title={locale.t('generation.inpaint.regular_inpaint')}
-            >
-              {locale.t('generation.inpaint.regular_inpaint')}
-            </button>
+        <div class="px-2 pb-2 pt-0.5 space-y-1.5">
+          <div class="sticky top-0 z-10 grid grid-cols-3 gap-0.5 rounded-md bg-neutral-950/95 p-0.5">
+            {#each ['base', 'layers', 'control'] as tab}
+              <button type="button" onclick={() => canvas.selectedWorkspaceSection = tab as 'base' | 'layers' | 'control'} aria-pressed={canvas.selectedWorkspaceSection === tab} class="h-7 rounded text-[11px] transition-colors {canvas.selectedWorkspaceSection === tab ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'}">{locale.t('canvas.tab_' + tab)}</button>
+            {/each}
           </div>
-
-          {#if canvas.isCanvasMode}
-            <LayerPanel />
-          {:else}
-            <div class="space-y-2">
-              <p class="text-[11px] text-neutral-500">{locale.t('generation.inpaint.canvas_off')}</p>
-              <button
-                onclick={() => {
-                  canvas.isCanvasMode = true;
-                  if (canvas.layers.length === 0) {
-                    canvas.initCanvas(generation.width, generation.height);
-                  }
-                }}
-                class="w-full px-2 py-1.5 text-[11px] rounded border border-neutral-700 text-neutral-300 hover:border-indigo-500 hover:text-indigo-300 transition-colors"
-                title={locale.t('generation.inpaint.enable_canvas')}
-              >
-                {locale.t('generation.inpaint.enable_canvas')}
-              </button>
+          {#if canvas.selectedWorkspaceSection === 'base'}
+          <div class="flex h-8 items-center justify-between rounded-md border border-neutral-800 px-2">
+            <span class="text-[11px] text-neutral-300">{locale.t('canvas.base_color')}</span>
+            <input type="color" bind:value={canvas.baseColor} class="h-6 w-9 cursor-pointer rounded border-0 bg-transparent p-0" />
+          </div>
+          <details open class="rounded-md border border-neutral-800 p-2">
+            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('generation.image.input')}</summary>
+            <div class="mt-2">{@render sourceImageControls()}</div>
+          </details>
+          <details class="rounded-md border border-neutral-800 p-2">
+            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('generation.image.select_mask')}</summary>
+            <div class="mt-2">{@render maskInputControls()}</div>
+          </details>
+          <details class="rounded-md border border-neutral-800 p-2">
+            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('canvas.document_settings')}</summary>
+            <div class="mt-2 space-y-2">
+              {@render imageSettingsControls()}
+              {@render maskGrowthControls()}
+              {#if !generation.isNovelAi}<InpaintSettings settings={generation.inpaintSettings} onchange={(settings) => { generation.inpaintSettings = settings; generation.saveSettings(); }} />{/if}
             </div>
+          </details>
+
+          {:else if canvas.selectedWorkspaceSection === 'control'}
+            {#if !generation.isNovelAi}<ControlNetSettings />{/if}
+          {:else}
+          <div class="flex gap-1">
+            <label class="h-7 flex flex-1 cursor-pointer items-center justify-center rounded border border-neutral-700 px-2 text-center text-[10px] text-neutral-300 hover:border-indigo-500 focus-within:border-indigo-500">
+              {locale.t(rasterImportBusy ? 'generation.image.uploading' : 'canvas.import_raster')}
+              <input type="file" accept="image/*" disabled={rasterImportBusy} class="sr-only" onchange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void pasteRaster(file); event.currentTarget.value = ''; }} />
+            </label>
+            <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
+          </div>
+          <LayerPanel onAddRegions={() => (regionalPromptModalOpen = true)} />
           {/if}
         </div>
       {/if}
@@ -2260,14 +2296,14 @@
     <div class="flex flex-1 min-h-0">
     {#if mobileFriendly}
       <div class="fixed top-2 left-1/2 -translate-x-1/2 z-50 w-[min(96vw,34rem)] px-2">
-        <div class="w-full flex gap-1 bg-neutral-900 rounded-lg p-1 border border-neutral-700 shadow">
+        <div class="w-full flex gap-1 overflow-x-auto bg-neutral-900 rounded-lg p-1 border border-neutral-700 shadow [scrollbar-width:none]">
           {#each modes as mode}
             <button
               onclick={() => {
                 generation.mode = mode.id;
                 if (mode.id !== "inpainting") canvas.isCanvasMode = false;
               }}
-              class="min-w-0 flex-1 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
+              class="shrink-0 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
                 ? 'bg-neutral-700 text-white'
                 : 'text-neutral-400 hover:text-neutral-200'}"
             >
@@ -2315,14 +2351,14 @@
         {#if controlsSide === "left" && !mobileFriendly}
           <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-2 pt-2 pb-2">
             <div class="flex gap-1.5 items-center">
-              <div class="flex gap-1 bg-neutral-900 rounded-lg p-1 flex-1">
+              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
                 {#each modes as mode}
                   <button
                     onclick={() => {
                       generation.mode = mode.id;
                       if (mode.id !== "inpainting") canvas.isCanvasMode = false;
                     }}
-                    class="flex-1 text-xs py-1.5 rounded-md transition-colors {generation.mode === mode.id
+                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
                       ? 'bg-neutral-700 text-white'
                       : 'text-neutral-400 hover:text-neutral-200'}"
                   >
@@ -2339,27 +2375,6 @@
               </button>
             </div>
 
-            {#if generation.mode === "inpainting"}
-              <button
-                onclick={() => {
-                  canvas.isCanvasMode = !canvas.isCanvasMode;
-                  if (canvas.isCanvasMode && canvas.layers.length === 0) {
-                    canvas.initCanvas(generation.width, generation.height);
-                  }
-                }}
-                class="flex items-center justify-between w-full px-3 py-2 mt-2 rounded-lg text-xs transition-colors {canvas.isCanvasMode
-                  ? 'bg-indigo-600/20 border border-indigo-500/50 text-indigo-300'
-                  : 'bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600'}"
-              >
-                <span class="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
-                  {locale.t('generation.inpaint.canvas_editor')}
-                </span>
-                <span class="text-[10px] {canvas.isCanvasMode ? 'text-indigo-400' : 'text-neutral-500'}">
-                  {canvas.isCanvasMode ? locale.t('common.on') : locale.t('common.off')}
-                </span>
-              </button>
-            {/if}
           </div>
         {/if}
 
@@ -2402,7 +2417,7 @@
       </div>
     {/if}
 
-    {#if canvas.isCanvasMode}
+    {#if generation.mode === 'inpainting'}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
         <CanvasEditor bind:this={canvasEditorRef} />
       </div>
@@ -2494,14 +2509,14 @@
         {#if controlsSide === "right" && !mobileFriendly}
           <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-3 pt-3 pb-2">
             <div class="flex gap-1.5 items-center">
-              <div class="flex gap-1 bg-neutral-900 rounded-lg p-1 flex-1">
+              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
                 {#each modes as mode}
                   <button
                     onclick={() => {
                       generation.mode = mode.id;
                       if (mode.id !== "inpainting") canvas.isCanvasMode = false;
                     }}
-                    class="flex-1 text-xs py-1.5 rounded-md transition-colors {generation.mode === mode.id
+                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
                       ? 'bg-neutral-700 text-white'
                       : 'text-neutral-400 hover:text-neutral-200'}"
                   >
@@ -2518,27 +2533,6 @@
               </button>
             </div>
 
-            {#if generation.mode === "inpainting"}
-              <button
-                onclick={() => {
-                  canvas.isCanvasMode = !canvas.isCanvasMode;
-                  if (canvas.isCanvasMode && canvas.layers.length === 0) {
-                    canvas.initCanvas(generation.width, generation.height);
-                  }
-                }}
-                class="flex items-center justify-between w-full px-3 py-2 mt-2 rounded-lg text-xs transition-colors {canvas.isCanvasMode
-                  ? 'bg-indigo-600/20 border border-indigo-500/50 text-indigo-300'
-                  : 'bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600'}"
-              >
-                <span class="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
-                  {locale.t('generation.inpaint.canvas_editor')}
-                </span>
-                <span class="text-[10px] {canvas.isCanvasMode ? 'text-indigo-400' : 'text-neutral-500'}">
-                  {canvas.isCanvasMode ? locale.t('common.on') : locale.t('common.off')}
-                </span>
-              </button>
-            {/if}
           </div>
         {/if}
 
@@ -2560,7 +2554,7 @@
     </div>
 
     <!-- Bottom panel (LoRAs / Images / Prompts) — full width, below the side panels -->
-    {#if !mobileFriendly && !canvas.isCanvasMode}
+    {#if !mobileFriendly}
       <div class="relative shrink-0 flex items-center group">
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -2662,7 +2656,12 @@
   {/if}
 
   {#if regionalPromptModalOpen}
-    <RegionalPromptModal onclose={() => (regionalPromptModalOpen = false)} />
+    <RegionalPromptModal
+      initialRegions={generation.mode === 'inpainting' ? [] : generation.regionalPrompts}
+      referenceImage={generation.mode === 'inpainting' ? canvas.effectiveReferenceImage : null}
+      onSave={generation.mode === 'inpainting' ? (regions) => { for (const region of regions) canvas.addRegionLayer(region); } : undefined}
+      onclose={() => (regionalPromptModalOpen = false)}
+    />
   {/if}
 
   <!-- Staged by any drop or paste of a NovelAI image, wherever it landed. -->

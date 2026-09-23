@@ -21,6 +21,7 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
+  import { getRegionalChainRegions } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -46,6 +47,7 @@
   let submitRunToken = 0;
   let orderedRunToken = 0;
   let regionalChainToken = 0;
+  let cancellationEpoch = 0;
   const orderedWildcardRun = $derived(promptPresets.orderedWildcardRun);
   const orderedWildcardRunCount = $derived(compare.active && compare.cellCount > 1 ? 0 : (orderedWildcardRun?.count ?? 0));
   const pendingOrderedRunIds = $derived(orderedRunPromptIds.filter((id) => progress.pendingPrompts.some((prompt) => prompt.promptId === id)));
@@ -121,10 +123,10 @@
     if (orderedWildcardRunCount > 1) return true;
     const regionalPromptingSupported = generation.supportsRegionalPrompting;
     const useRegionalInpaintChain =
-      regionalPromptingSupported &&
-      generation.effectiveRegionalStrategy === "inpaint_chain";
+      (generation.mode === "inpainting" && !generation.isNovelAi && getRegionalChainRegions().length > 0) ||
+      (regionalPromptingSupported && generation.effectiveRegionalStrategy === "inpaint_chain");
     if (useRegionalInpaintChain) {
-      return generation.getValidRegionalSelectionsForInpaint().length > 0;
+      return getRegionalChainRegions().length > 0;
     }
     return false;
   }
@@ -142,6 +144,9 @@
   }
 
   async function handleGenerate() {
+    const initialCancellationEpoch = cancellationEpoch;
+    const initialMode = generation.mode;
+    const initialSourceVersion = canvas.inpaintSourceVersion;
     // Keyboard shortcuts reach this handler even when the button is disabled.
     if (generation.mode === "video" && !generation.canGenerate) return;
 
@@ -230,6 +235,9 @@
         return;
       }
 
+      if (generation.mode === "inpainting" && !generation.supportsRegionalInpaintChain && canvas.layers.some((layer) => layer.visible && layer.type === "region")) {
+        throw new Error(locale.t("canvas.regions_supported"));
+      }
       // If canvas mode is active, export canvas content before generating
       if (canvas.isCanvasMode) {
         if (!canvasEditorRef) {
@@ -286,7 +294,7 @@
       }
 
       // Anima models produce poor results below 1024 — clamp to 1024² area preserving aspect ratio
-      if (generation.isAnima && (generation.width < 1024 || generation.height < 1024)) {
+      if (generation.mode === "txt2img" && generation.isAnima && (generation.width < 1024 || generation.height < 1024)) {
         const ratio = generation.width / generation.height;
         const area = 1024 * 1024;
         generation.width = Math.round(Math.sqrt(area * ratio) / 8) * 8;
@@ -299,12 +307,14 @@
       }
 
       const regionalPromptingSupported = generation.supportsRegionalPrompting;
+      if (initialCancellationEpoch !== cancellationEpoch || generation.mode !== initialMode ||
+          (initialMode === 'inpainting' && canvas.inpaintSourceVersion !== initialSourceVersion)) return;
       const useRegionalInpaintChain =
-        regionalPromptingSupported &&
-        generation.effectiveRegionalStrategy === "inpaint_chain";
+        (generation.mode === "inpainting" && !generation.isNovelAi && getRegionalChainRegions().length > 0) ||
+        (regionalPromptingSupported && generation.effectiveRegionalStrategy === "inpaint_chain");
       const validRegions = useRegionalInpaintChain
-        ? generation.getValidRegionalSelectionsForInpaint()
-        : generation.regionalPrompts.filter(
+        ? getRegionalChainRegions()
+        : (generation.mode === "inpainting" ? [] : generation.regionalPrompts).filter(
             (r) => r.text.trim() && r.width > 0 && r.height > 0,
           );
       const configuredRegions = validRegions.length;
@@ -319,7 +329,7 @@
         );
       }
 
-      const skippedEmpty = generation.regionalPrompts.length - configuredRegions;
+      const skippedEmpty = generation.mode === "inpainting" ? 0 : generation.regionalPrompts.length - configuredRegions;
       if (skippedEmpty > 0 && configuredRegions > 0) {
         gallery.showToast(
           locale.t("generation.regional.empty_skipped_warning", { count: String(skippedEmpty) }),
@@ -338,6 +348,7 @@
       generation.saveCurrentPromptToHistory();
 
       if (useRegionalInpaintChain && configuredRegions > 0) {
+        const inpaintSnapshot = generation.mode === 'inpainting' ? canvas.captureInpaintSubmission() : null;
         const chainToken = ++regionalChainToken;
         regionalChainCancelRequested = false;
         gallery.showToast(locale.t("generation.regional.inpaint_chain_started"), "info");
@@ -346,8 +357,14 @@
           const chainResult = await runRegionalInpaintChain(validRegions, {
             submit: async (chainParams, ctx) => {
               const result = await requestGeneration(chainParams);
+              if (regionalChainCancelRequested || chainToken !== regionalChainToken || (inpaintSnapshot && !inpaintSnapshot.valid)) {
+                await interruptGeneration(result.prompt_id);
+                throw new Error("Regional inpaint chain cancelled");
+              }
               if (!ctx.isFinalOutput) {
                 suppressRegionalChainGallerySave(result.prompt_id);
+              } else if (inpaintSnapshot) {
+                canvas.registerInpaintPrompt(result.prompt_id, inpaintSnapshot);
               }
               trackGeneration(chainParams, result);
               return { promptId: result.prompt_id, seed: result.seed };
@@ -374,7 +391,8 @@
             },
             onWaitingForOutput: () => setRegionalChainStep("wait", 0, 0),
             shouldCancel: () =>
-              regionalChainCancelRequested || chainToken !== regionalChainToken,
+              regionalChainCancelRequested || chainToken !== regionalChainToken ||
+              (!!inpaintSnapshot && ((!inpaintSnapshot.valid && !inpaintSnapshot.accepted) || canvas.inpaintSourceVersion !== inpaintSnapshot.sourceVersion)),
           });
           console.log(
             "[regional] Inpaint chain finished:",
@@ -382,6 +400,7 @@
             "region(s)",
           );
         } catch (chainError) {
+          if (inpaintSnapshot) canvas.finishInpaintResult(inpaintSnapshot);
           if (regionalChainCancelRequested || chainToken !== regionalChainToken) {
             console.log("[regional] Inpaint chain cancelled");
           } else {
@@ -396,7 +415,14 @@
         if (sentRegions > 0) {
           console.log("[regional] Sending", sentRegions, "region(s) via conditioning");
         }
-        await submitGeneration(params);
+        const snapshot = params.mode === 'inpainting' ? canvas.captureInpaintSubmission() : null;
+        try {
+          const promptId = await submitGeneration(params);
+          if (snapshot) canvas.registerInpaintPrompt(promptId, snapshot);
+        } catch (error) {
+          if (snapshot) canvas.finishInpaintResult(snapshot);
+          throw error;
+        }
       }
       generation.saveSettings();
     } catch (e) {
@@ -471,8 +497,14 @@
       return;
     }
     const promptId = progress.activePromptId ?? progress.pendingPrompts[0]?.promptId;
+    cancellationEpoch++;
+    regionalChainCancelRequested = true;
+    regionalChainToken++;
+    if (promptId) canvas.invalidateInpaintPrompts([promptId]);
     await interruptGeneration(promptId ?? undefined);
-    if (promptId) progress.removePrompt(promptId);
+    if (promptId) {
+      progress.removePrompt(promptId);
+    }
   }
 
   async function handleSkipOrderedPrompt() {
@@ -485,6 +517,7 @@
 
   async function cancelPromptIds(idsToCancel: string[], interruptActive = false) {
     if (idsToCancel.length === 0) return;
+    canvas.invalidateInpaintPrompts(idsToCancel);
     const activePromptId = progress.activePromptId && idsToCancel.includes(progress.activePromptId)
       ? progress.activePromptId
       : null;
@@ -505,10 +538,14 @@
   /** Right-click: cancel current + clear the entire queue. */
   async function handleCancelAll(e: MouseEvent) {
     e.preventDefault();
+    cancellationEpoch++;
+    regionalChainCancelRequested = true;
+    regionalChainToken++;
     orderedRunCancelRequested = true;
     submitRunToken++;
     orderedRunToken++;
     progress.cancelAll();
+    canvas.invalidateInpaintPrompts();
     orderedRunPromptIds = [];
     compare.clearGridBatch();
     try {

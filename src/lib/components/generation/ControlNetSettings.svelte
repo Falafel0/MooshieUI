@@ -1,5 +1,6 @@
 <script lang="ts">
   import { generation } from "../../stores/generation.svelte.js";
+  import { canvas } from "../../stores/canvas.svelte.js";
   import { models } from "../../stores/models.svelte.js";
   import { connection } from "../../stores/connection.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -504,6 +505,15 @@
     ) {
       generation.controlnetPreprocessor = presetPreprocessor;
     }
+  });
+
+  $effect(() => {
+    canvas.controlContextPreviewUrl = generation.controlnetEnabled
+      ? (preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl)
+      : null;
+    return () => {
+      canvas.controlContextPreviewUrl = null;
+    };
   });
 
 </script>

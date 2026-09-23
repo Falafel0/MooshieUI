@@ -1,205 +1,70 @@
-import Konva from "konva";
+import type Konva from "konva";
 
-interface HistoryEntry {
-  layerId: string;
-  imageData: string; // base64 data URL from layer.toDataURL()
-}
-
+interface HistoryEntry { layerId: string; nodes: Konva.Node[]; }
 const MAX_HISTORY = 64;
 
 class CanvasHistoryStore {
-  undoStack = $state<HistoryEntry[][]>([]);
-  redoStack = $state<HistoryEntry[][]>([]);
+  undoStack = $state.raw<HistoryEntry[][]>([]);
+  redoStack = $state.raw<HistoryEntry[][]>([]);
+  private layers: Map<string, Konva.Layer> | null = null;
+  private onRestored: ((layerIds: string[]) => void) | null = null;
 
-  private _konvaLayers: Map<string, Konva.Layer> | null = null;
-  private _canvasWidth = 0;
-  private _canvasHeight = 0;
-  private _onRestored: ((layerIds: string[]) => void) | null = null;
+  setRefs(layers: Map<string, Konva.Layer>, _width: number, _height: number) { this.layers = layers; }
+  setOnRestored(callback: ((layerIds: string[]) => void) | null) { this.onRestored = callback; }
+  get canUndo() { return this.undoStack.length > 0; }
+  get canRedo() { return this.redoStack.length > 0; }
 
-  setRefs(konvaLayers: Map<string, Konva.Layer>, canvasWidth: number, canvasHeight: number) {
-    this._konvaLayers = konvaLayers;
-    this._canvasWidth = canvasWidth;
-    this._canvasHeight = canvasHeight;
-  }
-
-  // Called after undo/redo finishes restoring layers (async image load), so the
-  // consumer can regenerate anything derived from layer pixels (e.g. thumbnails).
-  setOnRestored(cb: ((layerIds: string[]) => void) | null) {
-    this._onRestored = cb;
-  }
-
-  get canUndo(): boolean {
-    return this.undoStack.length > 0;
-  }
-
-  get canRedo(): boolean {
-    return this.redoStack.length > 0;
-  }
-
-  // Snapshot specific layers before a destructive operation
-  snapshotLayers(layerIds: string[]) {
-    if (!this._konvaLayers) return;
-
-    const entries: HistoryEntry[] = [];
-    for (const id of layerIds) {
-      const kLayer = this._konvaLayers.get(id);
-      if (!kLayer) continue;
-
-      // Save current transform, reset for export
-      const origScale = kLayer.scaleX();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      // Restore transform
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
-      entries.push({ layerId: id, imageData: dataUrl });
-    }
-
-    if (entries.length > 0) {
-      this.undoStack = [...this.undoStack.slice(-(MAX_HISTORY - 1)), entries];
-      // Clear redo when a new action is taken
-      this.redoStack = [];
-    }
-  }
-
-  // Snapshot a single layer (convenience)
-  snapshot(layerId: string) {
-    this.snapshotLayers([layerId]);
-  }
-
-  async undo() {
-    if (!this.canUndo || !this._konvaLayers) return;
-
-    const entries = this.undoStack[this.undoStack.length - 1];
-
-    // Before restoring, snapshot current state for redo
-    const redoEntries: HistoryEntry[] = [];
-    for (const entry of entries) {
-      const kLayer = this._konvaLayers.get(entry.layerId);
-      if (!kLayer) continue;
-
-      const origScale = kLayer.scaleX();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
-      redoEntries.push({ layerId: entry.layerId, imageData: dataUrl });
-    }
-
-    this.redoStack = [...this.redoStack.slice(-(MAX_HISTORY - 1)), redoEntries];
-    this.undoStack = this.undoStack.slice(0, -1);
-
-    // Restore layers from snapshot
-    await this._restoreEntries(entries);
-  }
-
-  async redo() {
-    if (!this.canRedo || !this._konvaLayers) return;
-
-    const entries = this.redoStack[this.redoStack.length - 1];
-
-    // Before restoring, snapshot current state for undo
-    const undoEntries: HistoryEntry[] = [];
-    for (const entry of entries) {
-      const kLayer = this._konvaLayers.get(entry.layerId);
-      if (!kLayer) continue;
-
-      const origScale = kLayer.scaleX();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-
-      const dataUrl = kLayer.toDataURL({
-        pixelRatio: 1,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-      });
-
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
-      kLayer.x(origX);
-      kLayer.y(origY);
-
-      undoEntries.push({ layerId: entry.layerId, imageData: dataUrl });
-    }
-
-    this.undoStack = [...this.undoStack.slice(-(MAX_HISTORY - 1)), undoEntries];
-    this.redoStack = this.redoStack.slice(0, -1);
-
-    await this._restoreEntries(entries);
-  }
-
-  private async _restoreEntries(entries: HistoryEntry[]) {
-    if (!this._konvaLayers) return;
-
-    for (const entry of entries) {
-      const kLayer = this._konvaLayers.get(entry.layerId);
-      if (!kLayer) continue;
-
-      // Clear the layer
-      kLayer.destroyChildren();
-
-      // Load the snapshot image
-      const img = await this._loadImage(entry.imageData);
-      const kImage = new Konva.Image({
-        image: img,
-        x: 0,
-        y: 0,
-        width: this._canvasWidth,
-        height: this._canvasHeight,
-        listening: false,
-      });
-      kLayer.add(kImage);
-      kLayer.batchDraw();
-    }
-
-    this._onRestored?.(entries.map((e) => e.layerId));
-  }
-
-  private _loadImage(src: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = src;
+  private capture(ids: string[]): HistoryEntry[] {
+    return ids.flatMap((id) => {
+      const layer = this.layers?.get(id);
+      return layer ? [{ layerId: id, nodes: layer.getChildren().map((node) => node.clone()) }] : [];
     });
   }
-
-  clear() {
-    this.undoStack = [];
+  private dispose(entries: HistoryEntry[][]) {
+    for (const batch of entries) for (const entry of batch) for (const node of entry.nodes) node.destroy();
+  }
+  private append(stack: HistoryEntry[][], entries: HistoryEntry[]) {
+    if (stack.length >= MAX_HISTORY) this.dispose(stack.slice(0, 1));
+    return [...stack.slice(-(MAX_HISTORY - 1)), entries];
+  }
+  snapshotLayers(ids: string[]) {
+    const entries = this.capture(ids);
+    if (!entries.length) return;
+    this.undoStack = this.append(this.undoStack, entries);
+    this.dispose(this.redoStack);
     this.redoStack = [];
   }
+  snapshot(id: string) { this.snapshotLayers([id]); }
+  private restore(entries: HistoryEntry[]) {
+    const restored: string[] = [];
+    for (const entry of entries) {
+      const layer = this.layers?.get(entry.layerId);
+      if (!layer) continue;
+      layer.destroyChildren();
+      for (const node of entry.nodes) layer.add(node.clone());
+      layer.batchDraw();
+      restored.push(entry.layerId);
+    }
+    this.onRestored?.(restored);
+    this.dispose([entries]);
+  }
+  undo() {
+    if (!this.canUndo) return;
+    const entries = this.undoStack[this.undoStack.length - 1];
+    this.redoStack = this.append(this.redoStack, this.capture(entries.map((entry) => entry.layerId)));
+    this.undoStack = this.undoStack.slice(0, -1);
+    this.restore(entries);
+  }
+  redo() {
+    if (!this.canRedo) return;
+    const entries = this.redoStack[this.redoStack.length - 1];
+    this.undoStack = this.append(this.undoStack, this.capture(entries.map((entry) => entry.layerId)));
+    this.redoStack = this.redoStack.slice(0, -1);
+    this.restore(entries);
+  }
+  clear() {
+    this.dispose(this.undoStack); this.dispose(this.redoStack);
+    this.undoStack = []; this.redoStack = [];
+  }
 }
-
 export const canvasHistory = new CanvasHistoryStore();

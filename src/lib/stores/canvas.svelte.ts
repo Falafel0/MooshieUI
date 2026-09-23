@@ -1,17 +1,38 @@
+import Konva from "konva";
 import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
+import type { RegionalPromptSelection } from "../types/index.js";
+import { captureLayer, maskToGrayscale } from "../utils/canvasLayerExport.js";
+import type { InpaintSettings } from "../utils/inpaintSettings.js";
+import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
+import { processMaskCoverage } from "../utils/maskProcessing.js";
 
-export type ToolType = "brush" | "eraser" | "rectFill" | "lasso" | "eyedropper" | "move" | "view" | "transform";
+export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform";
+export type CanvasLayerType = "raster" | "mask" | "region";
+
+export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
+  return layer?.type === "mask" || layer?.type === "region";
+}
 
 export interface CanvasLayer {
   id: string;
   name: string;
-  type: "raster" | "mask";
+  type: CanvasLayerType;
   visible: boolean;
   opacity: number;
   locked: boolean;
   order: number;
+  regionalPrompt?: string;
+  regionalNegativePrompt?: string;
+  regionalStrength?: number;
+  positivePrompt?: string;
+  negativePrompt?: string;
+  denoise?: number;
+  maskGrow?: number;
+  initialRegion?: RegionalPromptSelection;
+  inpaintSettings?: InpaintSettings;
+  image?: { src: string; x: number; y: number; width: number; height: number; rotation: number; flipX: boolean; flipY: boolean };
 }
 
 export interface BrushSettings {
@@ -38,6 +59,7 @@ export interface InpaintBaseSnapshot {
   width: number;
   height: number;
   maskSnapshotUrl: string | null;
+  rasterVisibility?: Record<string, boolean>;
   owned: boolean;
 }
 
@@ -72,6 +94,26 @@ class CanvasStore {
   // Layers
   layers = $state<CanvasLayer[]>([]);
   activeLayerId = $state<string | null>(null);
+  baseColor = $state("#808080");
+  selectedWorkspaceSection = $state<"base" | "layers" | "control">("layers");
+  lastSubmittedMaskUrl: string | null = null;
+  lastSubmittedRasterLayerIds: string[] = [];
+  private detachedLayers = new Map<string, any>();
+
+  retainLayerNodes() {
+    for (const node of this.detachedLayers.values()) node.destroy();
+    this.detachedLayers.clear();
+    for (const node of this._stageRef?.getLayers() ?? []) {
+      if (this.layers.some((layer) => layer.id === node.id())) this.detachedLayers.set(node.id(), node.clone());
+    }
+    this._stageRef = null;
+  }
+
+  takeLayerNode(id: string): any {
+    const node = this.detachedLayers.get(id);
+    this.detachedLayers.delete(id);
+    return node;
+  }
 
   // Per-layer pixel thumbnails (data URLs), keyed by layer id
   layerThumbnails = $state<Record<string, string>>({});
@@ -82,6 +124,9 @@ class CanvasStore {
 
   // Viewport
   viewport = $state<CanvasViewport>({ zoom: 1, panX: 0, panY: 0 });
+  viewportInitialized = $state(false);
+  viewportWidth = $state(0);
+  viewportHeight = $state(0);
 
   // Bounding box (generation region)
   boundingBox = $state<BoundingBox>({ x: 0, y: 0, width: 1024, height: 1024, locked: false });
@@ -90,6 +135,8 @@ class CanvasStore {
   maskOverlayColor = $state("#ff3333");
   maskOverlayOpacity = $state(0.45);
   maskOverlayVisible = $state(true);
+  showLayerContext = $state(true);
+  controlContextPreviewUrl = $state<string | null>(null);
 
   // UI state
   isCanvasMode = $state(false);
@@ -122,6 +169,10 @@ class CanvasStore {
   pendingResultInputName = $state<string | null>(null);
   pendingResultWidth = $state<number | null>(null);
   pendingResultHeight = $state<number | null>(null);
+  pendingResultMaskUrl = $state<string | null>(null);
+  pendingResultRasterLayerIds: string[] = [];
+  insertingResult = $state(false);
+  private inpaintResults = new InpaintResultRegistry();
   // While a finished inpaint result is being previewed, the editable mask strokes
   // are hidden so the clean result is visible. This flips true once the user starts
   // painting more mask, bringing the mask back so they can see what they're editing.
@@ -163,7 +214,8 @@ class CanvasStore {
   }
 
   get sortedLayers(): CanvasLayer[] {
-    return [...this.layers].sort((a, b) => b.order - a.order);
+    const rank = (layer: CanvasLayer) => layer.type === 'raster' ? 0 : layer.type === 'region' ? 2 : 1;
+    return [...this.layers].sort((a, b) => rank(b) - rank(a) || b.order - a.order);
   }
 
   get zoomPercent(): number {
@@ -255,7 +307,13 @@ class CanvasStore {
     this.pendingResultInputName = null;
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
+    this.pendingResultMaskUrl = null;
+    this.pendingResultRasterLayerIds = [];
     this.maskEditedSinceResult = false;
+  }
+
+  dismissInpaintResult() {
+    this.clearPendingInpaintResult();
   }
 
   setInpaintOriginalSource(source: {
@@ -268,6 +326,7 @@ class CanvasStore {
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
     this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
 
     if (!source) {
       this.originalInpaintInputImageName = null;
@@ -284,8 +343,8 @@ class CanvasStore {
     generation.inputImage = source.uploadedInputName;
     generation.width = source.width;
     generation.height = source.height;
-    this.clearMask();
-    this.initCanvas(source.width, source.height);
+    if (this.layers.length === 0) this.initCanvas(source.width, source.height);
+    else this.resizeCanvas(source.width, source.height);
   }
 
   setPreparedInpaintOverride(source: {
@@ -323,12 +382,12 @@ class CanvasStore {
     generation.width = source.width;
     generation.height = source.height;
 
-    // Rebuild layers for the new base, then re-hydrate the mask onto the fresh
-    // mask layer. Clear the persisted (non-editable) overlay so the mask isn't
-    // drawn twice.
+    // Keep the document layer stack intact. A base swap is independent from
+    // masks, regions and raster layers, just like replacing a Photoshop base.
     this.persistedMaskPreviewUrl = null;
-    this.initCanvas(source.width, source.height);
-    this.pendingMaskRestoreUrl = outgoingMask;
+    this.resizeCanvas(source.width, source.height);
+    this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
   }
 
   // Called on inpaint completion. Holds the result for DISPLAY ONLY: it becomes
@@ -342,6 +401,8 @@ class CanvasStore {
     height: number;
     uploadedInputName: string | null;
     owned: boolean;
+    maskUrl?: string | null;
+    rasterLayerIds?: string[];
   }) {
     // A superseded re-roll: revoke the previous pending preview before replacing.
     this.clearPendingInpaintResult();
@@ -350,17 +411,21 @@ class CanvasStore {
     this.pendingResultInputName = source.uploadedInputName;
     this.pendingResultWidth = source.width;
     this.pendingResultHeight = source.height;
+    this.pendingResultMaskUrl = source.maskUrl ?? null;
+    this.pendingResultRasterLayerIds = source.rasterLayerIds ?? [];
   }
 
   // Promote the pending inpaint result to be the new base: checkpoint the current
-  // base + its mask for undo, adopt the result as the base, then start a fresh
-  // mask on top. Ownership of the pending preview URL transfers to the prepared
+  // base + its mask for undo, then adopt the result as the base. Editable masks
+  // and regions stay in the layer stack for another pass. Ownership of the pending preview URL transfers to the prepared
   // override (so it is NOT revoked here).
   applyInpaintResult() {
     if (!this.pendingResultPreviewUrl || this.pendingResultWidth == null || this.pendingResultHeight == null) {
       return;
     }
 
+    const bakedLayers = new Set(this.pendingResultRasterLayerIds);
+    const rasterVisibility = Object.fromEntries(this.layers.filter(layer => bakedLayers.has(layer.id)).map(layer => [layer.id, layer.visible]));
     const outgoingMask = this.snapshotInpaintMask();
     this.inpaintBaseHistory = [
       ...this.inpaintBaseHistory,
@@ -370,6 +435,7 @@ class CanvasStore {
         width: generation.width,
         height: generation.height,
         maskSnapshotUrl: outgoingMask,
+        rasterVisibility,
         // Only a prepared preview is an owned object URL; the session-original
         // referenceImageUrl is owned elsewhere and must not be revoked here.
         owned: this.preparedInpaintPreviewUrl ? this.preparedInpaintOwned : false,
@@ -391,11 +457,18 @@ class CanvasStore {
     this.pendingResultInputName = null;
     this.pendingResultWidth = null;
     this.pendingResultHeight = null;
+    this.pendingResultMaskUrl = null;
+    this.pendingResultRasterLayerIds = [];
+    // These pixels are already in the generated base. Keep the editable layers
+    // available, but hide them to avoid applying their opacity a second time.
+    this.layers = this.layers.map(layer => bakedLayers.has(layer.id) ? { ...layer, visible: false } : layer);
 
-    // Fresh mask on the new base.
+    // Applying a base never removes layer objects. The same mask/region can be
+    // refined or disabled explicitly after inspecting the result.
     this.persistedMaskPreviewUrl = null;
-    this.clearMask();
-    this.initCanvas(generation.width, generation.height);
+    this.resizeCanvas(generation.width, generation.height);
+    this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
   }
 
   get canApplyInpaintResult(): boolean {
@@ -433,8 +506,9 @@ class CanvasStore {
     generation.inputImage = this.originalInpaintInputImageName;
     generation.width = this.originalInpaintWidth;
     generation.height = this.originalInpaintHeight;
-    this.clearMask();
-    this.initCanvas(this.originalInpaintWidth, this.originalInpaintHeight);
+    this.resizeCanvas(this.originalInpaintWidth, this.originalInpaintHeight);
+    this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
   }
 
   clearInpaintSession() {
@@ -443,6 +517,7 @@ class CanvasStore {
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
     this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
     this.originalInpaintInputImageName = null;
     this.originalInpaintWidth = null;
     this.originalInpaintHeight = null;
@@ -456,8 +531,8 @@ class CanvasStore {
     this.inpaintBaseHistory = [];
   }
 
-  // Step the inpaint base back to the previous image, re-applying the mask that
-  // was on it. The current (discarded) prepared preview is revoked.
+  // Step the inpaint base back to the previous image while preserving the
+  // editable layer stack. The current prepared preview is revoked.
   undoInpaintBase() {
     if (!this.inpaintBaseHistory.length) return;
 
@@ -482,12 +557,17 @@ class CanvasStore {
     }
 
     generation.inputImage = entry.uploadedInputName;
+    if (entry.rasterVisibility) {
+      this.layers = this.layers.map(layer => layer.id in entry.rasterVisibility!
+        ? { ...layer, visible: entry.rasterVisibility![layer.id] } : layer);
+    }
     generation.width = entry.width;
     generation.height = entry.height;
 
     this.persistedMaskPreviewUrl = null;
-    this.initCanvas(entry.width, entry.height);
-    this.pendingMaskRestoreUrl = entry.maskSnapshotUrl;
+    this.resizeCanvas(entry.width, entry.height);
+    this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
   }
 
   get canUndoInpaintBase(): boolean {
@@ -601,17 +681,22 @@ class CanvasStore {
     this.referenceImageUrl = url;
   }
 
-  setPersistedMaskPreview(url: string | null) {
-    this.persistedMaskPreviewUrl = url;
+  async setPersistedMaskPreview(url: string | null) {
+    if (url && this.isCanvasMode) {
+      await this.addRasterImage(url, locale.t("canvas.layer.inpaint_mask"), "mask");
+      this.setTool("brush");
+      this.persistedMaskPreviewUrl = null;
+    } else this.persistedMaskPreviewUrl = url;
   }
 
   clearMask() {
     generation.maskImage = null;
     this.persistedMaskPreviewUrl = null;
+    this.layers = this.layers.map((layer) => layer.type === "mask" ? { ...layer, image: undefined, initialRegion: undefined } : layer);
 
     if (!this._stageRef) return;
     const stageLayers = this._stageRef.getLayers?.() ?? [];
-    for (const layerMeta of this.layers.filter((l) => l.type === "mask")) {
+    for (const layerMeta of this.layers.filter((layer) => layer.type === "mask")) {
       const layer = stageLayers.find((l: any) => l.id?.() === layerMeta.id);
       layer?.destroyChildren?.();
       layer?.batchDraw?.();
@@ -625,7 +710,7 @@ class CanvasStore {
     const stage = this._stageRef;
     if (!stage) return null;
 
-    const maskMetas = this.layers.filter((l) => l.type === "mask");
+    const maskMetas = this.layers.filter(isMaskLayer);
     if (!maskMetas.length) return null;
 
     const stageLayers = stage.getLayers?.() ?? [];
@@ -685,6 +770,12 @@ class CanvasStore {
 
   setInpaintDrawMode(mode: "mask" | "regular") {
     this.inpaintDrawMode = mode;
+    const type = mode === "mask" ? "mask" : "raster";
+    if (mode === "mask" ? !isMaskLayer(this.activeLayer) : this.activeLayer?.type !== type) {
+      const target = this.sortedLayers.find((layer) => mode === "mask" ? isMaskLayer(layer) : layer.type === type);
+      if (target) this.setActiveLayer(target.id);
+      else this.addLayer(type);
+    }
   }
 
   sendActiveLayerToMask(): boolean {
@@ -750,12 +841,14 @@ class CanvasStore {
   }
 
   // Layers
-  addLayer(type: "raster" | "mask" = "raster", name?: string): string {
+  addLayer(type: CanvasLayerType = "raster", name?: string): string {
     const id = genLayerId();
     const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
     const layerName = name ?? (type === "mask"
-      ? locale.t("canvas.layer.inpaint_mask")
-      : locale.t("canvas.layer.raster", { n: String(this.layers.filter((l) => l.type === "raster").length + 1) }));
+      ? locale.t("canvas.mask_name", { n: String(this.layers.filter((layer) => layer.type === "mask").length + 1) })
+      : type === "region"
+        ? locale.t("canvas.region_name", { n: String(this.layers.filter((layer) => layer.type === "region").length + 1) })
+        : locale.t("canvas.layer.raster", { n: String(this.layers.filter((l) => l.type === "raster").length + 1) }));
 
     this.layers = [
       ...this.layers,
@@ -769,11 +862,30 @@ class CanvasStore {
         order: maxOrder + 1,
       },
     ];
-    this.activeLayerId = id;
+    this.setActiveLayer(id);
     return id;
   }
 
+  addRegionLayer(region?: RegionalPromptSelection): string {
+    const id = this.addLayer("region");
+    this.layers = this.layers.map((layer) => layer.id === id ? {
+      ...layer,
+      regionalPrompt: region?.text ?? "",
+      regionalNegativePrompt: "",
+      regionalStrength: region?.strength ?? 1,
+      initialRegion: region ? { ...region, points: region.points?.map((point) => ({ ...point })) } : undefined,
+    } : layer);
+    this.setTool("rectFill");
+    return id;
+  }
+
+  updateLayerRegion(id: string, patch: { regionalPrompt?: string; regionalNegativePrompt?: string; regionalStrength?: number }) {
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "region" ? { ...layer, ...patch } : layer);
+  }
+
   removeLayer(id: string) {
+    this.detachedLayers.get(id)?.destroy();
+    this.detachedLayers.delete(id);
     const removed = this.layers.find((l) => l.id === id);
     this.layers = this.layers.filter((l) => l.id !== id);
     this.clearLayerThumbnail(id);
@@ -807,33 +919,41 @@ class CanvasStore {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return null;
     const newId = genLayerId();
-    const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
+    const source = this._stageRef?.getLayers().find((node: any) => node.id() === id);
+    // Clone actual canvas nodes, including eraser operations, before publishing metadata.
+    // The stage adopts this node on its next sync instead of creating an empty layer.
+    if (source) this._stageRef.add(source.clone({ id: newId }));
     this.layers = [
-      ...this.layers,
+      ...this.layers.map((l) => l.order > layer.order ? { ...l, order: l.order + 1 } : l),
       {
         ...layer,
         id: newId,
         name: `${layer.name} copy`,
-        order: maxOrder + 1,
+        order: layer.order + 1,
       },
     ];
-    this.activeLayerId = newId;
+    this.setActiveLayer(newId);
     return newId;
   }
 
+  getLayerMoveTarget(id: string, direction: "up" | "down"): CanvasLayer | null {
+    const layer = this.layers.find((l) => l.id === id);
+    if (!layer) return null;
+    // Match the panel's top-to-bottom order and its mask/raster groups.
+    const siblings = this.sortedLayers.filter((l) => l.type === layer.type);
+    const index = siblings.findIndex((l) => l.id === id);
+    return siblings[index + (direction === "up" ? -1 : 1)] ?? null;
+  }
+
   reorderLayer(id: string, direction: "up" | "down") {
-    const sorted = [...this.layers].sort((a, b) => a.order - b.order);
-    const idx = sorted.findIndex((l) => l.id === id);
-    if (idx < 0) return;
-
-    const swapIdx = direction === "up" ? idx + 1 : idx - 1;
-    if (swapIdx < 0 || swapIdx >= sorted.length) return;
-
-    const tmpOrder = sorted[idx].order;
-    sorted[idx].order = sorted[swapIdx].order;
-    sorted[swapIdx].order = tmpOrder;
-
-    this.layers = [...sorted];
+    const layer = this.layers.find((l) => l.id === id);
+    const target = this.getLayerMoveTarget(id, direction);
+    if (!layer || !target) return;
+    this.layers = this.layers.map((l) => {
+      if (l.id === id) return { ...l, order: target.order };
+      if (l.id === target.id) return { ...l, order: layer.order };
+      return l;
+    });
   }
 
   renameLayer(id: string, name: string) {
@@ -853,12 +973,30 @@ class CanvasStore {
   }
 
   setActiveLayer(id: string) {
+    const layer = this.layers.find((l) => l.id === id);
+    if (!layer) return;
     this.activeLayerId = id;
+    this.selectedWorkspaceSection = "layers";
+    this.inpaintDrawMode = isMaskLayer(layer) ? "mask" : "regular";
+  }
+
+  fillActiveLayer() {
+    const meta = this.activeLayer;
+    const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === meta?.id);
+    if (!meta || !node || meta.locked || !meta.visible || this.selectedWorkspaceSection !== 'layers') return;
+    node.add(new Konva.Rect({ x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight,
+      fill: isMaskLayer(meta) ? this.maskOverlayColor : this.foregroundColor,
+      opacity: this.brushSettings.opacity * (isMaskLayer(meta) ? 0.45 : 1), listening: false }));
+    node.batchDraw();
+    if (isMaskLayer(meta)) this.markMaskEdited();
   }
 
   // Clear all content from a layer (via Konva stage ref)
   clearLayer(id: string) {
     if (!this._stageRef) return;
+    const meta = this.layers.find((layer) => layer.id === id);
+    if (!meta || meta.locked) return;
+    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image: undefined, initialRegion: undefined } : layer);
     const layers = this._stageRef.getLayers();
     for (const kLayer of layers) {
       if (kLayer.id() === id) {
@@ -869,16 +1007,138 @@ class CanvasStore {
     }
   }
 
+  setLayerInpaintSettings(id: string, settings: InpaintSettings | undefined) {
+    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, inpaintSettings: settings } : layer);
+  }
+
+  setLayerGenerationOverride(id: string, enabled: boolean) {
+    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer) ? {
+      ...layer,
+      inpaintSettings: enabled ? { ...generation.inpaintSettings } : undefined,
+      maskGrow: enabled ? generation.growMaskBy : undefined,
+      denoise: enabled && layer.type === "mask" ? generation.denoise : undefined,
+      positivePrompt: enabled && layer.type === "mask" ? (layer.positivePrompt ?? "") : undefined,
+      negativePrompt: enabled && layer.type === "mask" ? (layer.negativePrompt ?? "") : undefined,
+    } : layer);
+  }
+
+  updateLayerGeneration(id: string, patch: { positivePrompt?: string; negativePrompt?: string; denoise?: number; maskGrow?: number }) {
+    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer) ? { ...layer, ...patch } : layer);
+  }
+
+  updateLayerImage(id: string, patch: Partial<NonNullable<CanvasLayer['image']>>) {
+    this.layers = this.layers.map((layer) => layer.id === id && layer.image && !layer.locked ? { ...layer, image: { ...layer.image, ...patch } } : layer);
+  }
+
+  restoreLayerImage(id: string, node: Konva.Image | undefined) {
+    const layer = this.layers.find((layer) => layer.id === id);
+    if (!layer) return;
+    let image: CanvasLayer['image'];
+    if (node?.image()) {
+      const source = node.image()!;
+      const pixels = document.createElement('canvas');
+      pixels.width = 'width' in source ? Number(source.width) : node.width();
+      pixels.height = 'height' in source ? Number(source.height) : node.height();
+      pixels.getContext('2d')!.drawImage(source, 0, 0);
+      const src = layer.image?.src ?? (isMaskLayer(layer) ? maskToGrayscale(pixels) ?? pixels : pixels).toDataURL('image/png');
+      image = { src, x: node.x() - (node.scaleX() < 0 ? node.width() : 0), y: node.y() - (node.scaleY() < 0 ? node.height() : 0), width: node.width(), height: node.height(), rotation: node.rotation(), flipX: node.scaleX() < 0, flipY: node.scaleY() < 0 };
+    }
+    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image } : layer);
+  }
+
+  async addRasterImage(src: string, name: string, type: "raster" | "mask" = "raster", isCurrent: () => boolean = () => true): Promise<string> {
+    const sourceVersion = this.inpaintSourceVersion;
+    const image = await this.loadImage(src);
+    if (!isCurrent() || sourceVersion !== this.inpaintSourceVersion) return "";
+    const pixels = document.createElement("canvas");
+    pixels.width = image.naturalWidth;
+    pixels.height = image.naturalHeight;
+    pixels.getContext("2d")!.drawImage(image, 0, 0);
+    const scale = Math.min(1, this.canvasWidth / pixels.width, this.canvasHeight / pixels.height);
+    const width = pixels.width * scale;
+    const height = pixels.height * scale;
+    const id = this.addLayer(type, name);
+    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image: {
+      src: pixels.toDataURL("image/png"), x: (this.canvasWidth-width)/2, y: (this.canvasHeight-height)/2,
+      width, height, rotation: 0, flipX: false, flipY: false,
+    } } : layer);
+    this.setTool("move");
+    return id;
+  }
+
+  private loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Failed to load canvas image"));
+      image.src = src;
+    });
+  }
+
+  async insertInpaintResult(masked: boolean) {
+    if (!this.pendingResultPreviewUrl || this.insertingResult) return;
+    this.insertingResult = true;
+    const resultUrl = this.pendingResultPreviewUrl;
+    const maskUrl = this.pendingResultMaskUrl;
+    const sourceVersion = this.inpaintSourceVersion;
+    const isCurrent = () => resultUrl === this.pendingResultPreviewUrl && sourceVersion === this.inpaintSourceVersion;
+    try {
+    const image = await this.loadImage(resultUrl);
+    if (!isCurrent()) return;
+    const pixels = document.createElement("canvas");
+    pixels.width = this.canvasWidth;
+    pixels.height = this.canvasHeight;
+    const ctx = pixels.getContext("2d")!;
+    ctx.drawImage(image, 0, 0, pixels.width, pixels.height);
+    if (masked && maskUrl) {
+      const mask = await this.loadImage(maskUrl);
+      if (!isCurrent()) return;
+      const alpha = document.createElement("canvas");
+      alpha.width = pixels.width; alpha.height = pixels.height;
+      const maskCtx = alpha.getContext("2d")!;
+      maskCtx.drawImage(mask, 0, 0, alpha.width, alpha.height);
+      const data = maskCtx.getImageData(0, 0, alpha.width, alpha.height);
+      for (let i = 0; i < data.data.length; i += 4) data.data[i+3] = data.data[i];
+      maskCtx.putImageData(data, 0, 0);
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.drawImage(alpha, 0, 0);
+    }
+    await this.addRasterImage(pixels.toDataURL("image/png"), locale.t('canvas.result_layer'), "raster", isCurrent);
+    if (isCurrent()) this.clearPendingInpaintResult();
+    } finally {
+      this.insertingResult = false;
+    }
+  }
+
+  exportMaskLayer(id: string): HTMLCanvasElement | null {
+    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && layer.opacity > 0);
+    const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === id);
+    if (!meta || !node) return null;
+    const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight);
+    const result = maskToGrayscale(pixels);
+    if (!result) return null;
+    // Apply layer opacity after normalizing the editor's translucent mask tint.
+    const ctx = result.getContext("2d")!;
+    ctx.globalCompositeOperation = "source-atop";
+    ctx.globalAlpha = 1 - meta.opacity;
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, result.width, result.height);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    return result;
+  }
+
   // Viewport
   zoomIn() {
-    this.setZoom(Math.min(20, this.viewport.zoom * 1.2));
+    this.setZoom(Math.min(20, this.viewport.zoom * 1.2), this.viewportWidth / 2, this.viewportHeight / 2);
   }
 
   zoomOut() {
-    this.setZoom(Math.max(0.05, this.viewport.zoom / 1.2));
+    this.setZoom(Math.max(0.05, this.viewport.zoom / 1.2), this.viewportWidth / 2, this.viewportHeight / 2);
   }
 
   setZoom(zoom: number, centerX?: number, centerY?: number) {
+    this.viewportInitialized = true;
     const oldZoom = this.viewport.zoom;
     const newZoom = Math.max(0.05, Math.min(20, zoom));
 
@@ -904,21 +1164,52 @@ class CanvasStore {
       panX: (containerWidth - this.canvasWidth * zoom) / 2,
       panY: (containerHeight - this.canvasHeight * zoom) / 2,
     };
+    this.viewportInitialized = true;
   }
 
   resetZoom() {
-    this.viewport = { zoom: 1, panX: 0, panY: 0 };
+    this.viewportInitialized = true;
+    this.viewport = {
+      zoom: 1,
+      panX: (this.viewportWidth - this.canvasWidth) / 2,
+      panY: (this.viewportHeight - this.canvasHeight) / 2,
+    };
+  }
+
+  setViewportSize(width: number, height: number) {
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+  }
+
+  resizeCanvas(width: number, height: number) {
+    if (width === this.canvasWidth && height === this.canvasHeight) return;
+    this.inpaintSourceVersion += 1;
+    this.invalidateInpaintPrompts();
+    const scaleX = this.canvasWidth > 0 ? width / this.canvasWidth : 1;
+    const scaleY = this.canvasHeight > 0 ? height / this.canvasHeight : 1;
+    this.canvasWidth = width;
+    this.canvasHeight = height;
+    this.boundingBox = {
+      ...this.boundingBox,
+      x: Math.round(this.boundingBox.x * scaleX),
+      y: Math.round(this.boundingBox.y * scaleY),
+      width: Math.round(this.boundingBox.width * scaleX),
+      height: Math.round(this.boundingBox.height * scaleY),
+    };
   }
 
   // Canvas init — creates default layers
   initCanvas(width: number, height: number) {
+    for (const node of this.detachedLayers.values()) node.destroy();
+    this.detachedLayers.clear();
     this.canvasWidth = width;
     this.canvasHeight = height;
     this.layers = [];
     this.activeLayerId = null;
     this.layerThumbnails = {};
+    this.viewportInitialized = false;
 
-    this.addLayer("raster", locale.t("canvas.layer.background"));
+    this.addLayer("raster");
     this.addLayer("mask", locale.t("canvas.layer.inpaint_mask"));
 
     // Set active to the raster layer
@@ -926,6 +1217,59 @@ class CanvasStore {
     if (rasterLayer) this.activeLayerId = rasterLayer.id;
 
     this.boundingBox = { x: 0, y: 0, width, height, locked: false };
+  }
+
+  captureInpaintSubmission() {
+    // The backend result already contains feathered compositing. Cut its full
+    // affected support, so inserting it does not feather twice or lose growth.
+    const width = this.canvasWidth, height = this.canvasHeight;
+    const support = new Uint8Array(width * height);
+    let hasMask = false;
+    for (const layer of this.layers.filter(isMaskLayer)) {
+      const source = this.exportMaskLayer(layer.id);
+      if (!source) continue;
+      hasMask = true;
+      const pixels = source.getContext("2d")!.getImageData(0, 0, width, height).data;
+      const settings = layer.inpaintSettings ?? generation.inpaintSettings;
+      const values = Float32Array.from({ length: width * height }, (_, i) => pixels[i * 4] / 255);
+      const grown = processMaskCoverage(values, width, height, layer.maskGrow ?? generation.growMaskBy, 0, settings.invert_mask);
+      const affected = processMaskCoverage(grown, width, height, Math.floor(3 * settings.mask_blur), 0, false);
+      for (let i = 0; i < support.length; i++) if (affected[i] > 0) support[i] = 255;
+    }
+    let maskUrl = this.lastSubmittedMaskUrl;
+    if (hasMask) {
+      const mask = document.createElement("canvas");
+      mask.width = width; mask.height = height;
+      const context = mask.getContext("2d")!;
+      const image = context.createImageData(width, height);
+      for (let i = 0; i < support.length; i++) {
+        image.data[i * 4] = image.data[i * 4 + 1] = image.data[i * 4 + 2] = support[i];
+        image.data[i * 4 + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+      maskUrl = mask.toDataURL("image/png");
+    }
+    return this.inpaintResults.capture(this.inpaintSourceVersion, maskUrl, this.lastSubmittedRasterLayerIds);
+  }
+
+  registerInpaintPrompt(promptId: string, snapshot = this.captureInpaintSubmission()) {
+    this.inpaintResults.register(promptId, snapshot);
+  }
+
+  claimInpaintPrompt(promptId: string) {
+    return this.inpaintResults.claim(promptId, this.inpaintSourceVersion);
+  }
+
+  acceptInpaintResult(snapshot: InpaintResultSnapshot) {
+    return this.inpaintResults.accept(snapshot, this.inpaintSourceVersion);
+  }
+
+  finishInpaintResult(snapshot: InpaintResultSnapshot) {
+    this.inpaintResults.finish(snapshot);
+  }
+
+  invalidateInpaintPrompts(promptIds?: string[]) {
+    this.inpaintResults.invalidate(promptIds);
   }
 
   // Export
@@ -938,7 +1282,7 @@ class CanvasStore {
     return uploadImageBytes(bytes, filename);
   }
 
-  async syncMaskToGeneration(maskCanvas: HTMLCanvasElement | null, uploadToComfy: boolean = true): Promise<boolean> {
+  async syncMaskToGeneration(maskCanvas: HTMLCanvasElement | null, uploadToComfy: boolean = true, ensureCurrentDocument: () => void = () => {}): Promise<boolean> {
     if (!maskCanvas) {
       generation.maskImage = null;
       this.persistedMaskPreviewUrl = null;
@@ -961,32 +1305,16 @@ class CanvasStore {
       return false;
     }
 
-    // Convert mask to white-on-black for ComfyUI.
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = maskCanvas.width;
-    exportCanvas.height = maskCanvas.height;
-    const exportCtx = exportCanvas.getContext("2d")!;
-    exportCtx.fillStyle = "black";
-    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-    exportCtx.drawImage(maskCanvas, 0, 0);
-
-    const imgData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
-    const pixels = imgData.data;
-    for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i + 3] > 0 && (pixels[i] > 64 || pixels[i + 1] > 64 || pixels[i + 2] > 64)) {
-        pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
-        pixels[i + 3] = 255;
-      } else {
-        pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
-        pixels[i + 3] = 255;
-      }
-    }
-    exportCtx.putImageData(imgData, 0, 0);
+    const exportCanvas = maskToGrayscale(maskCanvas);
+    if (!exportCanvas) return false;
 
     // Persist/update uploaded mask preview only when we actually sync to ComfyUI.
     if (uploadToComfy) {
-      this.persistedMaskPreviewUrl = exportCanvas.toDataURL("image/png");
-      const result = await this.exportLayerAsImage(exportCanvas, "canvas_mask.png");
+      this.lastSubmittedMaskUrl = exportCanvas.toDataURL("image/png");
+      // Editable mask layers are already visible; avoid a second stale overlay.
+      this.persistedMaskPreviewUrl = null;
+      const result = await this.exportLayerAsImage(exportCanvas, `canvas_mask_${Date.now()}.png`);
+      ensureCurrentDocument();
       generation.maskImage = result.name;
     }
 
@@ -998,30 +1326,47 @@ class CanvasStore {
     getRasterComposite: () => HTMLCanvasElement | null,
     getMaskCanvas: () => HTMLCanvasElement | null
   ) {
+    const sourceVersion = this.inpaintSourceVersion;
+    const documentWidth = this.canvasWidth;
+    const documentHeight = this.canvasHeight;
+    const sourceMode = generation.mode;
+    const ensureCurrentDocument = () => {
+      if (sourceVersion !== this.inpaintSourceVersion || sourceMode !== generation.mode ||
+          documentWidth !== this.canvasWidth || documentHeight !== this.canvasHeight) {
+        throw new Error("Canvas document changed while preparing generation. Please generate again.");
+      }
+    };
     const rasterCanvas = getRasterComposite();
-    const maskCanvas = getMaskCanvas();
+    this.lastSubmittedRasterLayerIds = this.layers.filter(layer => layer.type === 'raster' && layer.visible && layer.opacity > 0).map(layer => layer.id);
+    let maskCanvas = getMaskCanvas();
     const isInpainting = generation.mode === "inpainting";
 
     let hasRaster = false;
     let hasMask = false;
 
-    // In inpainting mode, keep the currently selected input image as the baseline.
-    // This makes denoise behave as expected: only the masked area is reworked.
+    // Composite a stable base and visible raster edits, never the pending preview.
+    const baseUrl = this.preparedInpaintPreviewUrl ?? this.referenceImageUrl;
+    const emptyBase = isInpainting && !baseUrl;
     if (isInpainting) {
-      if (generation.inputImage) {
-        hasRaster = true;
-      } else if (rasterCanvas) {
-        // Last resort only: if no source image exists, fall back to painted raster.
-        const ctx = rasterCanvas.getContext("2d")!;
-        const data = ctx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height).data;
-        for (let i = 3; i < data.length; i += 4) {
-          if (data[i] > 0) { hasRaster = true; break; }
-        }
-        if (hasRaster) {
-          const result = await this.exportLayerAsImage(rasterCanvas, "canvas_input.png");
-          generation.inputImage = result.name;
-        }
+      const composite = document.createElement("canvas");
+      composite.width = this.canvasWidth; composite.height = this.canvasHeight;
+      const ctx = composite.getContext("2d")!;
+      ctx.fillStyle = this.baseColor;
+      ctx.fillRect(0, 0, composite.width, composite.height);
+      if (baseUrl) {
+        const image = await this.loadImage(baseUrl);
+        ensureCurrentDocument();
+        const scale = Math.min(composite.width / image.naturalWidth, composite.height / image.naturalHeight);
+        const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+        ctx.drawImage(image, (composite.width-w)/2, (composite.height-h)/2, w, h);
       }
+      if (rasterCanvas) ctx.drawImage(rasterCanvas, 0, 0);
+      if (baseUrl || emptyBase) {
+        const result = await this.exportLayerAsImage(composite, `canvas_input_${Date.now()}.png`);
+        ensureCurrentDocument();
+        generation.inputImage = result.name;
+      }
+      hasRaster = true;
     } else {
       // Non-inpaint modes use raster if present, otherwise staged image fallback.
       if (rasterCanvas) {
@@ -1048,8 +1393,16 @@ class CanvasStore {
       }
     }
 
+    // A blank document can generate over its full base without importing a file.
+    if (isInpainting && !baseUrl && !maskCanvas?.getContext("2d")!.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data.some((value, index) => index % 4 === 3 && value > 0)) {
+      maskCanvas = document.createElement("canvas");
+      maskCanvas.width = this.canvasWidth; maskCanvas.height = this.canvasHeight;
+      const ctx = maskCanvas.getContext("2d")!;
+      ctx.fillStyle = "white"; ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    }
     // Export mask
-    hasMask = await this.syncMaskToGeneration(maskCanvas, true);
+    hasMask = await this.syncMaskToGeneration(maskCanvas, true, ensureCurrentDocument);
+    ensureCurrentDocument();
 
     // Keep the user-selected mode when using canvas flow for image editing modes.
     if (generation.mode === "inpainting") {

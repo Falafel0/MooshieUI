@@ -482,7 +482,7 @@
   }
 </script>
 
-<div class="relative w-full aspect-square bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 flex items-center justify-center overflow-hidden group">
+<div class="relative w-full aspect-square bg-neutral-950 rounded-xl border border-neutral-800 flex items-center justify-center overflow-hidden group">
   {#if progress.lastOutputVideo}
     <!-- A finished video wins over the last sampled still frame. No context
          menu: openPreviewContextMenu is image-scoped, and the player's own
@@ -608,19 +608,19 @@
     <!-- Tips Carousel -->
     <div class="flex flex-col items-center justify-center w-full h-full p-8 gap-6" onwheel={handleWheel}>
       <div class="flex flex-col items-center gap-3 max-w-md w-full">
-        <span class="text-xs font-semibold text-indigo-600 dark:text-indigo-500 uppercase tracking-wide">
+        <span class="text-xs font-semibold text-amber-400 uppercase tracking-wide">
           {locale.t(tips[currentTipIndex].category)}
         </span>
-        <p class="text-neutral-700 dark:text-neutral-300 text-sm text-center leading-relaxed">
+        <p class="text-neutral-300 text-sm text-center leading-relaxed">
           {locale.t(tips[currentTipIndex].text)}
         </p>
         
         <!-- Progress Bar -->
-        <div class="w-full h-0.5 bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden mt-2">
+        <div class="w-full h-0.5 bg-neutral-800 rounded-full overflow-hidden mt-2">
           <div 
-            class="h-full bg-indigo-600 dark:bg-indigo-500 transition-all ease-linear"
+            class="h-full bg-amber-400 transition-all ease-linear"
             style="width: {progressPercent}%"
-          />
+          ></div>
         </div>
       </div>
       
@@ -628,7 +628,7 @@
       <div class="flex items-center gap-3">
         <button
           onclick={prevTip}
-          class="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+          class="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-neutral-200 transition-colors"
           title={locale.t('preview.previous_tip')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -639,14 +639,14 @@
         <div class="flex gap-1.5">
           {#each tips as _, index}
             <div
-              class="w-1.5 h-1.5 rounded-full transition-colors {index === currentTipIndex ? 'bg-indigo-600 dark:bg-indigo-500' : 'bg-neutral-300 dark:bg-neutral-700'}"
-            />
+              class="w-1.5 h-1.5 rounded-full transition-colors {index === currentTipIndex ? 'bg-amber-400' : 'bg-neutral-700'}"
+            ></div>
           {/each}
         </div>
         
         <button
           onclick={nextTip}
-          class="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+          class="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-neutral-200 transition-colors"
           title={locale.t('preview.next_tip')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">

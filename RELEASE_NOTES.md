@@ -1,3 +1,19 @@
+## What's New in v2.3.6-fork.1
+
+### Inpainting workspace
+- **Photoshop-style layer workflow**: masks, regions and raster layers now have distinct groups, visibility, locking, ordering, duplication, deletion and compact per-layer properties.
+- **Regional inpainting**: regions are first-class layers with their own prompts, negative prompts, denoise and mask processing. Visible masks and regions run in a predictable bottom-to-top order.
+- **Live context overlays**: the canvas previews mask growth, blur, inversion, affected bounds and ControlNet timing without adding those guides to the exported image.
+- **Permanent canvas and compact controls**: inpainting always opens in the canvas workspace, with a smaller toolbar, useful status bar, clearer result actions and access to the existing prompt and image controls in the bottom drawer.
+
+### Generation reliability and interface polish
+- **Safe result handling**: completed results retain the mask snapshot and source version that created them. Canceled, stale or late jobs cannot replace a newer canvas state.
+- **Stable documents**: resizing, applying results, restoring a source and undoing a base change preserve layer identities, zoom and pan.
+- **Text-to-image and image-to-image cleanup**: mode navigation stays readable at narrow widths, image inputs appear where they are needed, and the empty preview follows the dark application theme.
+- **Fork-bound updates**: version checks, release notes, issue links and automatic updates point to Falafel0/MooshieUI and use the distinct `2.3.6-fork.1` release line.
+
+---
+
 ## What's New in v2.3.6
 
 ### Music references, styles and comparisons
