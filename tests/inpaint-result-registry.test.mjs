@@ -43,3 +43,12 @@ test('source changes and duplicate completion events are rejected', () => {
   registry.finish(snapshot);
   assert.equal(registry.accept(snapshot, 1), false);
 });
+
+test('successful finalization remains distinguishable from cancellation', () => {
+  const registry = new InpaintResultRegistry();
+  const snapshot = registry.capture(1, 'mask');
+  assert.equal(registry.accept(snapshot, 1), true);
+  registry.finish(snapshot);
+  assert.equal(snapshot.accepted, true);
+  assert.equal(snapshot.valid, false);
+});

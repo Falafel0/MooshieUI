@@ -392,7 +392,7 @@
             onWaitingForOutput: () => setRegionalChainStep("wait", 0, 0),
             shouldCancel: () =>
               regionalChainCancelRequested || chainToken !== regionalChainToken ||
-              (!!inpaintSnapshot && (!inpaintSnapshot.valid || canvas.inpaintSourceVersion !== inpaintSnapshot.sourceVersion)),
+              (!!inpaintSnapshot && ((!inpaintSnapshot.valid && !inpaintSnapshot.accepted) || canvas.inpaintSourceVersion !== inpaintSnapshot.sourceVersion)),
           });
           console.log(
             "[regional] Inpaint chain finished:",

@@ -4,6 +4,7 @@ export interface InpaintResultSnapshot {
   sequence: number;
   valid: boolean;
   claimed: boolean;
+  accepted: boolean;
 }
 
 /** Tracks both queued prompts and asynchronous result preparation. */
@@ -14,7 +15,7 @@ export class InpaintResultRegistry {
   private prompts = new Map<string, InpaintResultSnapshot>();
 
   capture(sourceVersion: number, maskUrl: string | null): InpaintResultSnapshot {
-    const snapshot = { sourceVersion, maskUrl, sequence: ++this.sequence, valid: true, claimed: false };
+    const snapshot = { sourceVersion, maskUrl, sequence: ++this.sequence, valid: true, claimed: false, accepted: false };
     this.pending.add(snapshot);
     return snapshot;
   }
@@ -33,6 +34,7 @@ export class InpaintResultRegistry {
   accept(snapshot: InpaintResultSnapshot, sourceVersion: number): boolean {
     if (!snapshot.valid || snapshot.sourceVersion !== sourceVersion || snapshot.sequence < this.acceptedSequence) return false;
     this.acceptedSequence = snapshot.sequence;
+    snapshot.accepted = true;
     return true;
   }
 
