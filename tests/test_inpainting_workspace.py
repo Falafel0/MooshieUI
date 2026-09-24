@@ -7,11 +7,12 @@ import torch
 
 source = Path(__file__).parents[1] / 'src-tauri/src/comfyui/mooshie_nodes.py'
 tree = ast.parse(source.read_text(encoding='utf-8-sig'))
-names = {'_inpaint_options', '_inpaint_resize', 'MooshieInpaintPrepare', 'MooshieInpaintEncode', 'MooshieInpaintComposite', 'MooshieInpaintControl'}
+names = {'_inpaint_options', '_inpaint_resize', 'MooshieInpaintPrepare', 'MooshieInpaintEncode', 'MooshieInpaintComposite', 'MooshieInpaintControl', 'MooshieInpaintConditionMask'}
 namespace = dict(torch=torch, json=json)
 exec(compile(ast.Module(body=[n for n in tree.body if getattr(n, 'name', '') in names], type_ignores=[]), str(source), 'exec'), namespace)
 Prepare, Encode, Composite = [namespace[name]() for name in ('MooshieInpaintPrepare','MooshieInpaintEncode','MooshieInpaintComposite')]
 Control = namespace['MooshieInpaintControl']()
+ConditionMask = namespace['MooshieInpaintConditionMask']()
 
 class InpaintingTests(unittest.TestCase):
     def setUp(self):
@@ -74,6 +75,18 @@ class InpaintingTests(unittest.TestCase):
         self.assertEqual(context['sample_size'], (1024, 1024))
         control, = Control.align(self.image, context)
         self.assertEqual(control.shape[1:3], pixels.shape[1:3])
+
+    def test_regional_conditioning_uses_the_sampler_crop(self):
+        pixels, _, context = self.prepare(area='masked', padding=0)
+        region = torch.zeros_like(self.mask)
+        region[:, 20:40, 30:40] = 1
+        aligned, = ConditionMask.align(context, 0, 0, 1, 1, region)
+        self.assertEqual(aligned.shape[-2:], pixels.shape[1:3])
+        self.assertGreater(float(aligned[:, :, :aligned.shape[-1] // 2].mean()), .9)
+        self.assertLess(float(aligned[:, :, aligned.shape[-1] // 2:].mean()), .1)
+
+        box, = ConditionMask.align(context, 30/96, 20/64, 10/96, 20/64)
+        self.assertTrue(torch.allclose(aligned, box))
 
         wide_mask = torch.zeros_like(self.mask)
         wide_mask[:, 4:16, 8:72] = 1

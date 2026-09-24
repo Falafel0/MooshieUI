@@ -240,7 +240,10 @@
         layer.type === "region" ||
         (layer.type === "mask" && (!!layer.positivePrompt?.trim() || !!layer.negativePrompt?.trim()))
       ));
-      if (generation.mode === "inpainting" && !generation.supportsRegionalConditioning && hasSpatialPromptLayers) {
+      if (generation.mode === "inpainting" &&
+          !generation.supportsRegionalConditioning &&
+          !generation.supportsRegionalInpaintChain &&
+          hasSpatialPromptLayers) {
         throw new Error(locale.t("canvas.regions_supported"));
       }
       // If canvas mode is active, export canvas content before generating

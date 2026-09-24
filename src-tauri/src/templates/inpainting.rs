@@ -37,99 +37,6 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     );
     next_id = nid;
 
-    // Prompt regions are conditioning masks, not extra inpaint operations.
-    // The document mask still decides which pixels may change; these nodes
-    // only change prompt influence where a region overlaps that document mask.
-    let regional_context = build_regional_context_prompt(params);
-    for region in &params.positive_regions {
-        let x = region.x.clamp(0.0, 1.0);
-        let y = region.y.clamp(0.0, 1.0);
-        let w = region.width.clamp(0.0, 1.0 - x);
-        let h = region.height.clamp(0.0, 1.0 - y);
-        if w <= 0.0 || h <= 0.0 {
-            continue;
-        }
-
-        let mask_source = region.mask_image.as_ref().map(|name| {
-            let id = next_id.to_string();
-            workflow.insert(
-                id.clone(),
-                json!({
-                    "class_type": "LoadImageMask",
-                    "inputs": { "image": name, "channel": "red" }
-                }),
-            );
-            next_id += 1;
-            (id, 0)
-        });
-
-        let positive_text = merge_regional_encode_text(&regional_context, &region.text);
-        if !positive_text.trim().is_empty() {
-            let encode_id = next_id.to_string();
-            workflow.insert(encode_id.clone(), json!({
-                "class_type": "CLIPTextEncode",
-                "inputs": { "text": positive_text, "clip": [clip_source.0.clone(), clip_source.1] }
-            }));
-            next_id += 1;
-            let spatial_id = next_id.to_string();
-            let spatial = if let Some((mask_id, slot)) = mask_source.as_ref() {
-                json!({ "class_type": "ConditioningSetMask", "inputs": {
-                    "conditioning": [encode_id, 0], "mask": [mask_id, slot],
-                    "strength": region.strength.clamp(0.0, 2.0), "set_cond_area": "default"
-                }})
-            } else {
-                json!({ "class_type": "ConditioningSetAreaPercentage", "inputs": {
-                    "conditioning": [encode_id, 0], "x": x, "y": y, "width": w, "height": h,
-                    "strength": region.strength.clamp(0.0, 2.0)
-                }})
-            };
-            workflow.insert(spatial_id.clone(), spatial);
-            next_id += 1;
-            let combine_id = next_id.to_string();
-            workflow.insert(combine_id.clone(), json!({
-                "class_type": "ConditioningCombine",
-                "inputs": { "conditioning_1": [pos_source.0.clone(), pos_source.1], "conditioning_2": [spatial_id, 0] }
-            }));
-            pos_source = (combine_id, 0);
-            next_id += 1;
-        }
-
-        if let Some(local_negative) = region
-            .negative_text
-            .as_deref()
-            .filter(|text| !text.trim().is_empty())
-        {
-            let negative_text = merge_regional_encode_text(&params.negative_prompt, local_negative);
-            let encode_id = next_id.to_string();
-            workflow.insert(encode_id.clone(), json!({
-                "class_type": "CLIPTextEncode",
-                "inputs": { "text": negative_text, "clip": [clip_source.0.clone(), clip_source.1] }
-            }));
-            next_id += 1;
-            let spatial_id = next_id.to_string();
-            let spatial = if let Some((mask_id, slot)) = mask_source.as_ref() {
-                json!({ "class_type": "ConditioningSetMask", "inputs": {
-                    "conditioning": [encode_id, 0], "mask": [mask_id, slot],
-                    "strength": region.strength.clamp(0.0, 2.0), "set_cond_area": "default"
-                }})
-            } else {
-                json!({ "class_type": "ConditioningSetAreaPercentage", "inputs": {
-                    "conditioning": [encode_id, 0], "x": x, "y": y, "width": w, "height": h,
-                    "strength": region.strength.clamp(0.0, 2.0)
-                }})
-            };
-            workflow.insert(spatial_id.clone(), spatial);
-            next_id += 1;
-            let combine_id = next_id.to_string();
-            workflow.insert(combine_id.clone(), json!({
-                "class_type": "ConditioningCombine",
-                "inputs": { "conditioning_1": [neg_source.0.clone(), neg_source.1], "conditioning_2": [spatial_id, 0] }
-            }));
-            neg_source = (combine_id, 0);
-            next_id += 1;
-        }
-    }
-
     // Load input image
     let load_img_id = next_id.to_string();
     workflow.insert(
@@ -190,6 +97,110 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         }),
     );
     next_id += 1;
+
+    // Prompt regions influence conditioning only where they overlap the edit
+    // mask. Both uploaded lasso masks and percentage boxes must be transformed
+    // through the same crop and sampling size as MooshieInpaintPrepare; passing
+    // document-space masks directly to ConditioningSetMask misaligns Only masked
+    // inpainting and can make the regional prompt appear to do nothing.
+    let regional_context = build_regional_context_prompt(params);
+    for region in &params.positive_regions {
+        let x = region.x.clamp(0.0, 1.0);
+        let y = region.y.clamp(0.0, 1.0);
+        let w = region.width.clamp(0.0, 1.0 - x);
+        let h = region.height.clamp(0.0, 1.0 - y);
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+
+        let loaded_mask = region.mask_image.as_ref().map(|name| {
+            let id = next_id.to_string();
+            workflow.insert(
+                id.clone(),
+                json!({
+                    "class_type": "LoadImageMask",
+                    "inputs": { "image": name, "channel": "red" }
+                }),
+            );
+            next_id += 1;
+            id
+        });
+        let aligned_mask_id = next_id.to_string();
+        let mut align_inputs = serde_json::Map::from_iter([
+            ("context".into(), json!([prepare_id.clone(), 2])),
+            ("x".into(), json!(x)),
+            ("y".into(), json!(y)),
+            ("width".into(), json!(w)),
+            ("height".into(), json!(h)),
+        ]);
+        if let Some(mask_id) = loaded_mask {
+            align_inputs.insert("mask".into(), json!([mask_id, 0]));
+        }
+        workflow.insert(
+            aligned_mask_id.clone(),
+            json!({
+                "class_type": "MooshieInpaintConditionMask",
+                "inputs": align_inputs
+            }),
+        );
+        next_id += 1;
+
+        let positive_text = merge_regional_encode_text(&regional_context, &region.text);
+        if !positive_text.trim().is_empty() {
+            let encode_id = next_id.to_string();
+            workflow.insert(encode_id.clone(), json!({
+                "class_type": "CLIPTextEncode",
+                "inputs": { "text": positive_text, "clip": [clip_source.0.clone(), clip_source.1] }
+            }));
+            next_id += 1;
+            let spatial_id = next_id.to_string();
+            workflow.insert(
+                spatial_id.clone(),
+                json!({ "class_type": "ConditioningSetMask", "inputs": {
+                    "conditioning": [encode_id, 0], "mask": [aligned_mask_id.clone(), 0],
+                    "strength": region.strength.clamp(0.0, 2.0), "set_cond_area": "default"
+                }}),
+            );
+            next_id += 1;
+            let combine_id = next_id.to_string();
+            workflow.insert(combine_id.clone(), json!({
+                "class_type": "ConditioningCombine",
+                "inputs": { "conditioning_1": [pos_source.0.clone(), pos_source.1], "conditioning_2": [spatial_id, 0] }
+            }));
+            pos_source = (combine_id, 0);
+            next_id += 1;
+        }
+
+        if let Some(local_negative) = region
+            .negative_text
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+        {
+            let negative_text = merge_regional_encode_text(&params.negative_prompt, local_negative);
+            let encode_id = next_id.to_string();
+            workflow.insert(encode_id.clone(), json!({
+                "class_type": "CLIPTextEncode",
+                "inputs": { "text": negative_text, "clip": [clip_source.0.clone(), clip_source.1] }
+            }));
+            next_id += 1;
+            let spatial_id = next_id.to_string();
+            workflow.insert(
+                spatial_id.clone(),
+                json!({ "class_type": "ConditioningSetMask", "inputs": {
+                    "conditioning": [encode_id, 0], "mask": [aligned_mask_id, 0],
+                    "strength": region.strength.clamp(0.0, 2.0), "set_cond_area": "default"
+                }}),
+            );
+            next_id += 1;
+            let combine_id = next_id.to_string();
+            workflow.insert(combine_id.clone(), json!({
+                "class_type": "ConditioningCombine",
+                "inputs": { "conditioning_1": [neg_source.0.clone(), neg_source.1], "conditioning_2": [spatial_id, 0] }
+            }));
+            neg_source = (combine_id, 0);
+            next_id += 1;
+        }
+    }
 
     let sampler_name_lc = params.sampler_name.to_lowercase();
     let is_cfgpp_sampler = sampler_name_lc.contains("cfg_pp");
@@ -336,6 +347,25 @@ mod workspace_tests {
                 .count(),
             2
         );
+        assert_eq!(
+            classes
+                .iter()
+                .filter(|class| **class == "MooshieInpaintConditionMask")
+                .count(),
+            1
+        );
+        let condition_mask = result
+            .workflow
+            .values()
+            .find(|node| node["class_type"] == "MooshieInpaintConditionMask")
+            .unwrap();
+        let prepare_id = result
+            .workflow
+            .iter()
+            .find(|(_, node)| node["class_type"] == "MooshieInpaintPrepare")
+            .map(|(id, _)| id)
+            .unwrap();
+        assert_eq!(condition_mask["inputs"]["context"], json!([prepare_id, 2]));
         assert_eq!(
             result.workflow[&result.image_output.0]["class_type"],
             "MooshieInpaintComposite"

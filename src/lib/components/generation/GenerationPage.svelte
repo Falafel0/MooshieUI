@@ -1674,7 +1674,7 @@
   {/snippet}
 
   {#snippet sourceImageControls()}
-          {#if canvas.currentPreparedInputImage}
+          {#if generation.mode !== 'inpainting' && canvas.currentStagingImage}
             <div class="rounded-md border border-amber-700/50 bg-amber-900/20 p-2 flex items-center justify-between gap-2">
               <span class="text-[11px] text-amber-300">{locale.t('generation.image.staged_active')}</span>
               <button
@@ -1687,7 +1687,7 @@
             </div>
           {/if}
 
-          <div class="{canvas.currentPreparedInputImage ? 'opacity-50 pointer-events-none' : ''}">
+          <div class="{generation.mode !== 'inpainting' && canvas.currentStagingImage ? 'opacity-50 pointer-events-none' : ''}">
             <p class="text-xs text-neutral-400 mb-1">{locale.t('generation.image.input')}</p>
             {#if imagePreviewUrl}
               <!-- svelte-ignore a11y_no_static_element_interactions -->

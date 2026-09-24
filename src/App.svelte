@@ -932,6 +932,66 @@
     photopeaOpen = true;
   }
 
+  async function importPhotopeaToCanvas(
+    bytes: number[],
+    target: "base" | "raster" | "mask" | "region",
+    suggestedName: string,
+  ) {
+    const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+    let previewUrl: string | null = URL.createObjectURL(blob);
+    try {
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => reject(new Error("Failed to decode Photopea export"));
+        image.src = previewUrl!;
+      });
+
+      generation.mode = "inpainting";
+      canvas.isCanvasMode = true;
+      canvas.selectedWorkspaceSection = "layers";
+      currentPage = "generate";
+
+      if (canvas.layers.length === 0) {
+        generation.width = dimensions.width;
+        generation.height = dimensions.height;
+        canvas.initCanvas(dimensions.width, dimensions.height);
+      }
+
+      if (target === "base") {
+        const uploaded = await uploadImageBytes(bytes, suggestedName);
+        canvas.setPreparedInpaintOverride({
+          previewUrl,
+          width: dimensions.width,
+          height: dimensions.height,
+          uploadedInputName: uploaded.name,
+          owned: true,
+        });
+        // Ownership transfers to the inpaint base/history lifecycle.
+        previewUrl = null;
+      } else {
+        const labelKey = target === "raster"
+          ? "photopea.layer_raster"
+          : target === "mask"
+            ? "photopea.layer_mask"
+            : "photopea.layer_region";
+        const id = await canvas.addRasterImage(previewUrl, locale.t(labelKey), target);
+        if (!id) throw new Error("Photopea import was superseded by a document change");
+        canvas.activeLayerId = id;
+        canvas.setTool("move");
+      }
+
+      gallery.closeLightbox();
+      gallery.showToast(locale.t(`photopea.imported_${target}`), "success");
+    } catch (error) {
+      console.error("Photopea: failed to import into canvas:", error);
+      gallery.showToast(locale.t("photopea.import_failed"), "error");
+      throw error;
+    } finally {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    }
+  }
+
   function showComfyStartupIssue(raw: unknown, fallbackMessage = "") {
     // Startup failed — release the lock so the error banner and settings are usable.
     startup.locked = false;
@@ -2147,6 +2207,7 @@
         uploadedInputName: response.name,
         owned: true,
         maskUrl: snapshot.maskUrl,
+        sourceKey: `${image.prompt_id}:${image.filename}`,
         rasterLayerIds: snapshot.rasterLayerIds,
       });
       unusedPreview = null;
@@ -4008,6 +4069,7 @@
         void gallery.addPersistedImage(filename);
         gallery.showToast(locale.t("photopea.saved"), "success");
       }}
+      onimport={importPhotopeaToCanvas}
     />
     {#if startupStatus && !connection.connected && !startup.locked}
       <div class="mb-1 flex shrink-0 items-center gap-2 rounded-[var(--app-panel-radius)] border border-amber-800/60 bg-amber-950/85 px-4 py-2.5 text-sm text-amber-100 shadow-lg shadow-black/20 backdrop-blur-sm">

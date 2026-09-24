@@ -63,9 +63,10 @@ export async function runRegionalInpaintChain(
   }).filter(({ region, pixels }) => !region.maskLayerId || pixels);
   if (!prepared.length) throw new Error(locale.t("generation.error_no_mask"));
 
+  const usesSpatialConditioning = fromInput && generation.supportsRegionalConditioning;
   const baseParams = generation.toParams({
-    includeConditioningRegions: fromInput,
-    regionalSelectionsOverride: fromInput ? callbacks.conditioningRegions : undefined,
+    includeConditioningRegions: usesSpatialConditioning,
+    regionalSelectionsOverride: usesSpatialConditioning ? callbacks.conditioningRegions : undefined,
   });
   const facefixOnFinal = baseParams.facefix_enabled;
   const upscaleOnFinal = baseParams.upscale_enabled;
@@ -117,11 +118,11 @@ export async function runRegionalInpaintChain(
       mode: "inpainting",
       input_image: inputName,
       mask_image: maskUpload.name,
-      positive_prompt: fromInput ? baseParams.positive_prompt : mergeRegionalPromptText(regionalContext, region.text),
-      negative_prompt: !fromInput && region.negativePrompt?.trim()
+      positive_prompt: usesSpatialConditioning ? baseParams.positive_prompt : mergeRegionalPromptText(regionalContext, region.text),
+      negative_prompt: !usesSpatialConditioning && region.negativePrompt?.trim()
         ? mergeRegionalPromptText(baseParams.negative_prompt, region.negativePrompt)
         : baseParams.negative_prompt,
-      positive_regions: fromInput ? baseParams.positive_regions : [],
+      positive_regions: usesSpatialConditioning ? baseParams.positive_regions : [],
       seed: fromInput && i === 0 ? resolvedBaseSeed : regionalChainStepSeed(resolvedBaseSeed, fromInput ? i - 1 : i),
       denoise: region.denoise ?? regionStrengthToDenoise(region.strength),
       inpaint_settings: region.inpaintSettings ?? baseParams.inpaint_settings,

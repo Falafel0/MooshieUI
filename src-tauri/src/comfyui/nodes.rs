@@ -229,6 +229,7 @@ const IPADAPTER_PLUS_PACKAGES: &[RequiredCustomNodePackage] = &[RequiredCustomNo
 const REQUIRED_MOOSHIE_NODE_CLASSES: &[&str] = &[
     "MooshieInpaintPrepare",
     "MooshieInpaintControl",
+    "MooshieInpaintConditionMask",
     "MooshieInpaintEncode",
     "MooshieInpaintComposite",
     "MooshieYuE2Plan",

@@ -4,17 +4,12 @@
   import { captureLayer } from "../../utils/canvasLayerExport.js";
   import { processMaskCoverage } from "../../utils/maskProcessing.js";
   import { generation } from "../../stores/generation.svelte.js";
-  import { canvas, isMaskLayer, type ToolType } from "../../stores/canvas.svelte.js";
+  import { canvas, isMaskLayer, type SpatialLayerSnapshot, type ToolType } from "../../stores/canvas.svelte.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
   import ColorTooltip from "../ui/ColorTooltip.svelte";
 
   let { showLivePreview = true }: { showLivePreview?: boolean } = $props();
-
-  // Hide the editable inpaint mask while a finished result is being previewed, so
-  // the clean output is visible. Keep it shown before any result, during a re-roll
-  // (progress.isGenerating), and once the user paints more mask (markMaskEdited).
-  const hideInpaintMask = $derived(canvas.shouldHideInpaintMask && !progress.isGenerating);
 
   let containerEl: HTMLDivElement | undefined = $state();
   let stage: Konva.Stage | null = null;
@@ -318,8 +313,6 @@
           width, height, rotation: node.rotation(), flipX, flipY,
         });
       }
-    } else if (isMaskLayer(layer)) {
-      canvas.markMaskEdited();
     }
     scheduleThumbRefresh(layer.id);
     selectionTransformer.forceUpdate();
@@ -441,7 +434,7 @@
     }
 
     const layer = canvas.activeLayer;
-    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !layer.visible || layer.showContext === false || hideInpaintMask) {
+    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !layer.visible || layer.showContext === false) {
       contextLayer.batchDraw(); return;
     }
     const source = canvas.exportMaskLayer(layer.id);
@@ -704,14 +697,12 @@
     const sorted = canvas.sortedLayers.toReversed();
 
     for (const layer of sorted) {
-      const effectiveVisible = layer.visible && !(
-        isMaskLayer(layer) && (hideInpaintMask || layer.id !== canvas.activeLayerId)
-      );
+      const effectiveVisible = layer.visible;
       if (!konvaLayers.has(layer.id)) {
         const existing = stage.getLayers().find((node) => node.id() === layer.id) ?? canvas.takeLayerNode(layer.id);
         const kLayer = existing ?? new Konva.Layer({
           id: layer.id,
-          opacity: layer.opacity,
+          opacity: isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity,
           visible: effectiveVisible,
         });
 
@@ -742,11 +733,11 @@
         konvaLayers.set(layer.id, kLayer);
       } else {
         const kLayer = konvaLayers.get(layer.id)!;
-        kLayer.opacity(layer.opacity);
+        kLayer.opacity(isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity);
         kLayer.visible(effectiveVisible);
       }
       konvaLayers.get(layer.id)!.clip({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight });
-      konvaLayers.get(layer.id)!.opacity(layer.opacity);
+      konvaLayers.get(layer.id)!.opacity(isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity);
       konvaLayers.get(layer.id)!.visible(effectiveVisible);
       if (layer.image) {
         const kLayer = konvaLayers.get(layer.id)!;
@@ -925,37 +916,44 @@
     });
   }
 
-  // Re-hydrate a preserved inpaint mask (tinted, transparent-bg data URL) onto
-  // the freshly-rebuilt mask layer after a base swap or an inpaint-base undo.
-  async function restoreMaskFromSnapshot(url: string) {
+  // Re-hydrate every preserved mask/region independently after a base undo.
+  // Empty snapshots intentionally clear just that layer; other layers survive.
+  async function restoreSpatialLayers(snapshots: SpatialLayerSnapshot[]) {
     if (!stage) return;
-    const maskMeta = canvas.layers.find((l) => l.type === "mask");
-    if (!maskMeta) return;
-    const kLayer = konvaLayers.get(maskMeta.id);
-    if (!kLayer) return;
+    await Promise.all(snapshots.map(async (snapshot) => {
+      const meta = canvas.layers.find((layer) => layer.id === snapshot.id && layer.type === snapshot.type);
+      const kLayer = meta ? konvaLayers.get(meta.id) : undefined;
+      if (!meta || !kLayer) return;
 
-    let img: HTMLImageElement;
-    try {
-      img = await loadImageEl(url);
-    } catch {
-      return;
-    }
+      if (!snapshot.contentUrl) {
+        kLayer.destroyChildren();
+        kLayer.batchDraw();
+        scheduleThumbRefresh(meta.id);
+        return;
+      }
 
-    // The layer may have been rebuilt again while the image loaded; bail if so.
-    if (!stage || konvaLayers.get(maskMeta.id) !== kLayer) return;
+      let img: HTMLImageElement;
+      try {
+        img = await loadImageEl(snapshot.contentUrl);
+      } catch {
+        return;
+      }
 
-    kLayer.destroyChildren();
-    const kImage = new Konva.Image({
-      image: img,
-      x: 0,
-      y: 0,
-      width: canvas.canvasWidth,
-      height: canvas.canvasHeight,
-      listening: false,
-    });
-    kLayer.add(kImage);
-    kLayer.batchDraw();
-    scheduleThumbRefresh(maskMeta.id);
+      // The document may have changed again while the image decoded.
+      if (!stage || konvaLayers.get(meta.id) !== kLayer) return;
+      kLayer.destroyChildren();
+      kLayer.add(new Konva.Image({
+        name: "raster-asset",
+        image: img,
+        x: 0,
+        y: 0,
+        width: canvas.canvasWidth,
+        height: canvas.canvasHeight,
+        listening: false,
+      }));
+      kLayer.batchDraw();
+      scheduleThumbRefresh(meta.id);
+    }));
   }
 
   // Drawing handlers
@@ -989,9 +987,6 @@
       const target = getDrawingTargetLayer();
       if (!target) return;
       const { layer, kLayer } = target;
-
-      // Painting more mask over a previewed result brings the mask back on screen.
-      if (isMaskLayer(layer)) canvas.markMaskEdited();
 
       // Snapshot for undo before drawing
       canvasHistory.snapshot(layer.id);
@@ -1032,8 +1027,6 @@
       if (!target) return;
       const { layer } = target;
 
-      if (isMaskLayer(layer)) canvas.markMaskEdited();
-
       // Snapshot for undo before rect fill
       canvasHistory.snapshot(layer.id);
 
@@ -1068,8 +1061,6 @@
       const target = getDrawingTargetLayer();
       if (!target) return;
       const { layer } = target;
-
-      if (isMaskLayer(layer)) canvas.markMaskEdited();
 
       // Snapshot for undo before committing the lasso fill.
       canvasHistory.snapshot(layer.id);
@@ -1514,12 +1505,11 @@
     drawCheckerboard();
     applyViewport();
 
-    // Re-hydrate a preserved inpaint mask onto the freshly-rebuilt mask layer
-    // (set by the store on a base swap or an inpaint-base undo).
-    const restoreUrl = canvas.pendingMaskRestoreUrl;
-    if (restoreUrl) {
-      canvas.pendingMaskRestoreUrl = null;
-      void restoreMaskFromSnapshot(restoreUrl);
+    // Re-hydrate preserved masks/regions after an inpaint-base undo.
+    const restoreLayers = canvas.pendingSpatialLayerRestore;
+    if (restoreLayers) {
+      canvas.pendingSpatialLayerRestore = null;
+      void restoreSpatialLayers(restoreLayers);
     }
 
     // Generate an initial thumbnail for any layer we haven't captured yet.
@@ -1588,23 +1578,6 @@
       baseColorNode.setAttrs({ fill: canvas.baseColor, width: canvas.canvasWidth, height: canvas.canvasHeight });
       refLayer?.batchDraw();
     }
-  });
-
-  $effect(() => {
-    // Toggle mask-layer visibility when the pending-result hide state changes.
-    // Only the Konva node's visibility is touched, never the layer model's
-    // `visible`, so the panel toggle and mask export (which reads the model) are
-    // unaffected.
-    const hide = hideInpaintMask;
-    void canvas.layers;
-    if (!stage) return;
-    for (const layer of canvas.layers) {
-      if (!isMaskLayer(layer)) continue;
-      const kLayer = konvaLayers.get(layer.id);
-      if (!kLayer) continue;
-      kLayer.visible(layer.visible && !hide && layer.id === canvas.activeLayerId);
-    }
-    stage.batchDraw();
   });
 
   $effect(() => {
@@ -1679,34 +1652,11 @@
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
 
-      const origScaleX = kLayer.scaleX();
-      const origScaleY = kLayer.scaleY();
-      const origX = kLayer.x();
-      const origY = kLayer.y();
-      // The mask node may be visually hidden while a result is previewed; Konva
-      // renders nothing for an invisible node, so force it visible for the capture
-      // and restore afterwards (no on-screen redraw happens in between).
-      const origVisible = kLayer.visible();
-      kLayer.scaleX(1);
-      kLayer.scaleY(1);
-      kLayer.x(0);
-      kLayer.y(0);
-      kLayer.visible(true);
-
-      const layerCanvas = kLayer.toCanvas({
-        pixelRatio: 1,
-        width: canvas.canvasWidth,
-        height: canvas.canvasHeight,
-      });
-
+      const layerCanvas = captureLayer(kLayer, canvas.canvasWidth, canvas.canvasHeight);
+      ctx.globalAlpha = layer.opacity;
       ctx.drawImage(layerCanvas, 0, 0);
-
-      kLayer.scaleX(origScaleX);
-      kLayer.scaleY(origScaleY);
-      kLayer.x(origX);
-      kLayer.y(origY);
-      kLayer.visible(origVisible);
     }
+    ctx.globalAlpha = 1;
 
     return offscreen;
   }

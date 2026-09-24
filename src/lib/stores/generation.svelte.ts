@@ -1803,17 +1803,22 @@ class GenerationStore {
     return this.isSdxlLike;
   }
 
-  /** Legacy sequential masked-region generation for text-to-image only. */
+  /** Sequential masked-region generation for txt2img and Anima inpainting. */
   get supportsRegionalInpaintChain(): boolean {
     if (this.isNovelAi) return false;
-    return this.mode === "txt2img" && (this.isAnima || this.isSdxlLike);
+    return (
+      (this.mode === "txt2img" && (this.isAnima || this.isSdxlLike)) ||
+      (this.mode === "inpainting" && this.isAnima)
+    );
   }
 
   get effectiveRegionalStrategy(): RegionalPromptStrategy {
     if (!this.supportsRegionalInpaintChain && !this.supportsRegionalConditioning) {
       return "conditioning";
     }
-    if (this.mode === "inpainting") return "conditioning";
+    if (this.mode === "inpainting") {
+      return this.supportsRegionalConditioning ? "conditioning" : "inpaint_chain";
+    }
     if (this.isAnima) return "inpaint_chain";
     if (this.supportsRegionalConditioning && this.regionalPromptStrategy === "conditioning") {
       return "conditioning";

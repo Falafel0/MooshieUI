@@ -1614,8 +1614,55 @@ class MooshieInpaintControl:
         return (_inpaint_resize(cropped,sample_width,sample_height).movedim(1,-1),)
 
 
+class MooshieInpaintConditionMask:
+    """Align a prompt-region mask to the exact crop and size sampled by inpainting."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "context": ("MOOSHIE_INPAINT_CONTEXT",),
+                "x": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "y": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "width": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
+                "height": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
+            },
+            "optional": {"mask": ("MASK",)},
+        }
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "align"
+    CATEGORY = "mooshie/inpainting"
+
+    def align(self, context, x, y, width, height, mask=None):
+        base = context["base"]
+        batch, document_height, document_width, _ = base.shape
+        if mask is None:
+            document_mask = torch.zeros(
+                (1, 1, document_height, document_width),
+                device=base.device,
+                dtype=base.dtype,
+            )
+            left = max(0, min(document_width, round(float(x) * document_width)))
+            top = max(0, min(document_height, round(float(y) * document_height)))
+            right = max(left, min(document_width, round((float(x) + float(width)) * document_width)))
+            bottom = max(top, min(document_height, round((float(y) + float(height)) * document_height)))
+            document_mask[:, :, top:bottom, left:right] = 1
+        else:
+            document_mask = mask.reshape(-1, 1, *mask.shape[-2:]).to(base.device, dtype=base.dtype)
+            document_mask = _inpaint_resize(document_mask, document_width, document_height)
+
+        if document_mask.shape[0] == 1 and batch > 1:
+            document_mask = document_mask.expand(batch, -1, -1, -1)
+        crop_x, crop_y, crop_width, crop_height = context["box"]
+        sample_width, sample_height = context.get("sample_size", (document_width, document_height))
+        cropped = document_mask[:, :, crop_y:crop_y+crop_height, crop_x:crop_x+crop_width]
+        return (_inpaint_resize(cropped, sample_width, sample_height).squeeze(1).clamp(0, 1),)
+
+
 NODE_CLASS_MAPPINGS = {
     "MooshieInpaintControl": MooshieInpaintControl,
+    "MooshieInpaintConditionMask": MooshieInpaintConditionMask,
     "MooshieInpaintPrepare": MooshieInpaintPrepare,
     "MooshieInpaintEncode": MooshieInpaintEncode,
     "MooshieInpaintComposite": MooshieInpaintComposite,
@@ -1640,6 +1687,7 @@ register_h3_draft_routes()
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MooshieInpaintControl": "Mooshie Inpaint Control",
+    "MooshieInpaintConditionMask": "Mooshie Inpaint Condition Mask",
     "MooshieInpaintPrepare": "Mooshie Inpaint Prepare",
     "MooshieInpaintEncode": "Mooshie Inpaint Encode",
     "MooshieInpaintComposite": "Mooshie Inpaint Composite",

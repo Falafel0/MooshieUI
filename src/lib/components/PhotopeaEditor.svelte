@@ -10,9 +10,14 @@
     image: OutputImage | null;
     onclose: () => void;
     onsaved?: (galleryFilename: string) => void;
+    onimport?: (
+      bytes: number[],
+      target: "base" | "raster" | "mask" | "region",
+      suggestedName: string,
+    ) => Promise<void> | void;
   }
 
-  let { open, image, onclose, onsaved }: Props = $props();
+  let { open, image, onclose, onsaved, onimport }: Props = $props();
 
   const PHOTOPEA_ORIGIN = "https://www.photopea.com";
 
@@ -33,6 +38,7 @@
   // image to finish opening; ready: user can edit and save.
   let phase = $state<"boot" | "opening" | "ready">("boot");
   let saving = $state(false);
+  let pendingAction = $state<"gallery" | "base" | "raster" | "mask" | "region" | null>(null);
   let error = $state("");
 
   async function sendImageToPhotopea() {
@@ -49,8 +55,9 @@
     }
   }
 
-  function requestSave() {
-    if (phase !== "ready" || saving) return;
+  function requestSave(target: "gallery" | "base" | "raster" | "mask" | "region" = "gallery") {
+    if (phase !== "ready" || saving || pendingAction) return;
+    pendingAction = target;
     iframeEl?.contentWindow?.postMessage('app.activeDocument.saveToOE("png");', PHOTOPEA_ORIGIN);
   }
 
@@ -60,12 +67,19 @@
     error = "";
     try {
       const bytes = Array.from(new Uint8Array(buffer));
+      const action = pendingAction ?? "gallery";
+      pendingAction = null;
+      const baseName = (image?.filename ?? "image.png").replace(/\.(jxl|webp|jpe?g)$/i, ".png");
+      if (action !== "gallery") {
+        if (!onimport) throw new Error("Photopea import handler is unavailable");
+        await onimport(bytes, action, `photopea_${baseName}`);
+        return;
+      }
       // Post-edit PNG bytes carry no metadata, so forward the source's.
       let metadata: Record<string, string> | undefined;
       if (image?.gallery_filename) {
         metadata = (await readImageMetadata(image.gallery_filename)) ?? undefined;
       }
-      const baseName = (image?.filename ?? "image.png").replace(/\.(jxl|webp|jpe?g)$/i, ".png");
       const saved = await saveToGalleryBytes(
         bytes,
         `edit_${baseName}`,
@@ -76,6 +90,7 @@
       );
       onsaved?.(saved);
     } catch (e) {
+      pendingAction = null;
       error = locale.t("photopea.save_failed");
       console.error("Photopea: failed to save edited image:", e);
     } finally {
@@ -90,6 +105,7 @@
     phase = "boot";
     error = "";
     saving = false;
+    pendingAction = null;
 
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== PHOTOPEA_ORIGIN) return;
@@ -121,19 +137,26 @@
     aria-modal="true"
     aria-label={locale.t("photopea.title")}
   >
-    <div class="flex items-center gap-3 pb-2 shrink-0">
+    <div class="flex flex-wrap items-center gap-2 pb-2 shrink-0">
       <h2 class="text-sm font-semibold text-neutral-100 shrink-0">
         {locale.t("photopea.title")}
       </h2>
       <p class="text-xs text-neutral-400 truncate min-w-0 flex-1">
         {locale.t("photopea.save_hint")}
       </p>
-      {#if saving}
+      {#if saving || pendingAction}
         <span class="text-xs text-indigo-300 shrink-0">{locale.t("common.saving")}</span>
       {:else if error}
         <span class="text-xs text-red-400 shrink-0">{error}</span>
       {/if}
-      <button type="button" disabled={phase !== 'ready' || saving} class="h-8 rounded-md border border-indigo-500 bg-indigo-600/25 px-3 text-xs font-medium text-indigo-100 hover:bg-indigo-600/40 disabled:opacity-40" onclick={requestSave}>{locale.t('photopea.save_gallery')}</button>
+      <button type="button" disabled={phase !== 'ready' || saving || !!pendingAction} class="h-8 rounded-md border border-indigo-500 bg-indigo-600/25 px-3 text-xs font-medium text-indigo-100 hover:bg-indigo-600/40 disabled:opacity-40" onclick={() => requestSave('gallery')}>{locale.t('photopea.save_gallery')}</button>
+      {#if onimport}
+        <span class="h-5 w-px bg-neutral-700"></span>
+        <button type="button" disabled={phase !== 'ready' || saving || !!pendingAction} class="h-8 rounded-md border border-emerald-700 bg-emerald-600/10 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-600/20 disabled:opacity-40" onclick={() => requestSave('base')}>{locale.t('photopea.import_base')}</button>
+        <button type="button" disabled={phase !== 'ready' || saving || !!pendingAction} class="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-indigo-500 hover:bg-neutral-800 disabled:opacity-40" onclick={() => requestSave('raster')}>{locale.t('photopea.import_raster')}</button>
+        <button type="button" disabled={phase !== 'ready' || saving || !!pendingAction} class="h-8 rounded-md border border-rose-800 px-3 text-xs text-rose-200 hover:bg-rose-900/30 disabled:opacity-40" onclick={() => requestSave('mask')}>{locale.t('photopea.import_mask')}</button>
+        <button type="button" disabled={phase !== 'ready' || saving || !!pendingAction} class="h-8 rounded-md border border-violet-800 px-3 text-xs text-violet-200 hover:bg-violet-900/30 disabled:opacity-40" onclick={() => requestSave('region')}>{locale.t('photopea.import_region')}</button>
+      {/if}
       <button type="button" disabled={phase === 'boot'} class="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40" onclick={sendImageToPhotopea}>{locale.t('photopea.reload_source')}</button>
       <button
         type="button"
