@@ -37,3 +37,18 @@ test('blank mask does not produce a generation mask', () => {
   }) };
   assert.equal(sandbox.exports.maskToGrayscale(source), null);
 });
+
+test('grayscale mask bounds follow the non-zero mask region', () => {
+  const width = 6, height = 5;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (const [x, y, value] of [[2, 1, 64], [4, 1, 255], [3, 3, 128]]) {
+    const offset = (y * width + x) * 4;
+    data[offset] = data[offset + 1] = data[offset + 2] = value;
+    data[offset + 3] = 255;
+  }
+  const mask = { width, height, getContext: () => ({ getImageData: () => ({ data }) }) };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.exports.grayscaleMaskBounds(mask))),
+    { x: 2, y: 1, width: 3, height: 3 },
+  );
+});
