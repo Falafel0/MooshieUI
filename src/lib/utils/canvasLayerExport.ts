@@ -30,6 +30,41 @@ export function maskToGrayscale(source: HTMLCanvasElement): HTMLCanvasElement | 
   return output;
 }
 
+export interface MaskPixelBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Return the tight non-zero bounds of an exported grayscale generation mask. */
+export function grayscaleMaskBounds(source: HTMLCanvasElement): MaskPixelBounds | null {
+  const width = source.width;
+  const height = source.height;
+  if (width <= 0 || height <= 0) return null;
+  const pixels = source.getContext("2d")!.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (pixels[(y * width + x) * 4] === 0) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0 || maxY < 0) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
 export async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<number[]> {
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Failed to encode mask PNG");

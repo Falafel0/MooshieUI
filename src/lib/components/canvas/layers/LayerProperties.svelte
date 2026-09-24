@@ -2,6 +2,7 @@
   import { canvas } from "../../../stores/canvas.svelte.js";
   import { generation } from "../../../stores/generation.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import { grayscaleMaskBounds } from "../../../utils/canvasLayerExport.js";
   import InpaintSettings from "../InpaintSettings.svelte";
 
   const layer = $derived(canvas.activeLayer);
@@ -9,7 +10,15 @@
   const aspectLocked = $derived(layer?.inpaintAspectLocked !== false);
 
   function setOwnSettings(enabled: boolean) {
-    if (layer) canvas.setLayerGenerationOverride(layer.id, enabled);
+    if (!layer) return;
+    const layerId = layer.id;
+    canvas.setLayerGenerationOverride(layerId, enabled);
+    if (!enabled) return;
+    const mask = canvas.exportMaskLayer(layerId);
+    const bounds = mask ? grayscaleMaskBounds(mask) : null;
+    if (!bounds) return;
+    const align = (value: number) => Math.max(64, Math.min(16384, Math.ceil(value / 8) * 8));
+    canvas.setLayerInpaintSize(layerId, align(bounds.width), align(bounds.height));
   }
 
   function setWidth(value: number) {
