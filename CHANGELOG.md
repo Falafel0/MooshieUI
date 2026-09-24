@@ -1,5 +1,12 @@
 # Changelog
 
+## What's New in v2.3.6-fork.3
+
+- Fixes automatic-update download URLs for the fork's spaced product name by normalizing release asset filenames before upload.
+- Adds a release regression test that requires updater URLs and GitHub asset names to match exactly.
+
+---
+
 ## What's New in v2.3.6-fork.2
 
 - Includes the layer workspace, per-layer masks and regions, context previews, result application and fork-only signed updates described below in v2.3.6-fork.1.
