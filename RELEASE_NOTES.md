@@ -1,3 +1,18 @@
+## What's New in v2.3.6-fork.2
+
+- Photoshop-style inpainting workspace with raster, mask and region layers, compact per-layer properties, context overlays and explicit result application.
+- Stable layer identities and viewport, source-bound result snapshots, cancellation-safe regional chains and final-only upscaling.
+- Correct mask-growth previews and masked insertion, with no double application of baked raster edits when replacing the base.
+- Clearer text-to-image and image-to-image controls, dark preview styling and contextual image inputs.
+- Separate fork installation, settings, signing key and update feed at Falafel0/MooshieUI; version checks correctly compare SemVer prereleases.
+- Final audit fix: canceling while submission is in flight now interrupts the eventual prompt ID and prevents a ghost queue entry.
+- Cross-tab isolation: Img2Img and Inpainting retain their own input, mask, dimensions, denoise and panel state; switching tabs or completing an inpaint in the background no longer clears or misroutes the document.
+- Frontend polish: reliable first canvas fit, preserved center on remount, responsive side panels, wrapped tool controls, a direct fit-to-view action and the correct fork version in development builds.
+
+The v2.3.6-fork.1 tag is retained as an unpublished build candidate. See docs/FORK_WORKSPACE.md for workflow details and validation scope.
+
+---
+
 ## What's New in v2.3.6-fork.1
 
 ### Inpainting workspace

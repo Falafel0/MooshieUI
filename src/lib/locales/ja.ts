@@ -2043,6 +2043,7 @@ const ja: Record<string, string> = {
   "canvas.brush_size": "サイズ",
   "canvas.opacity": "不透明度",
   "canvas.zoom_in": "拡大",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "縮小",
   "canvas.reset_zoom": "ズームをリセット",
   "canvas.inpaint_mask": "インペイントマスク",

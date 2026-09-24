@@ -1,5 +1,15 @@
 # Changelog
 
+## What's New in v2.3.6-fork.2
+
+- Includes the layer workspace, per-layer masks and regions, context previews, result application and fork-only signed updates described below in v2.3.6-fork.1.
+- Closes a submission race: canceling before the server returns a prompt ID now interrupts that late prompt and prevents a ghost queue entry. Result snapshots are registered before queue tracking.
+- Isolates Img2Img and Inpainting input, mask, dimensions, denoise and panel state. Background inpaint completion remains attached to the submitted canvas when another tab is visible.
+- Improves the first canvas fit, remount centering, narrow-window panels and toolbar wrapping, adds fit-to-view, and reports the fork build version consistently.
+- v2.3.6-fork.1 was a tagged build candidate; its installer build was stopped before publication when the final lifecycle audit found this race.
+
+---
+
 ## What's New in v2.3.6-fork.1
 
 ### Inpainting workspace

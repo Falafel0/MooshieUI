@@ -157,6 +157,9 @@
     lastAppliedKey = key;
     const { w, h } = suggestedAspect;
     untrack(() => {
+      // The suggestion is a one-shot import action; remounting this panel must
+      // not overwrite dimensions the user subsequently adjusted in this mode.
+      generation.setModeInput(generation.mode, { aspect: null });
       if (generation.resolutionLocked || generation.mode === "inpainting") return;
       const inferred = inferAspectFromDimensions(w, h);
       applyPreset(inferred.w, inferred.h);

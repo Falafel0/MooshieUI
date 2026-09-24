@@ -2018,6 +2018,7 @@ const zhTw: Record<string, string> = {
   "canvas.brush_size": "大小",
   "canvas.opacity": "不透明度",
   "canvas.zoom_in": "放大",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "縮小",
   "canvas.reset_zoom": "重置縮放",
   "canvas.inpaint_mask": "修復遮罩",

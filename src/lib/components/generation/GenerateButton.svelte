@@ -417,8 +417,10 @@
         }
         const snapshot = params.mode === 'inpainting' ? canvas.captureInpaintSubmission() : null;
         try {
-          const promptId = await submitGeneration(params);
-          if (snapshot) canvas.registerInpaintPrompt(promptId, snapshot);
+          await submitGeneration(params, {
+            isCancelled: () => initialCancellationEpoch !== cancellationEpoch || (!!snapshot && !snapshot.valid),
+            beforeTrack: promptId => { if (snapshot) canvas.registerInpaintPrompt(promptId, snapshot); },
+          });
         } catch (error) {
           if (snapshot) canvas.finishInpaintResult(snapshot);
           throw error;
@@ -426,6 +428,7 @@
       }
       generation.saveSettings();
     } catch (e) {
+      if (initialCancellationEpoch !== cancellationEpoch) return;
       if (runToken === submitRunToken) {
         console.error("Generation failed:", e);
         const message = e instanceof Error ? e.message : String(e);

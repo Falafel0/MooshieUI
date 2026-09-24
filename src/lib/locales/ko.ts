@@ -2018,6 +2018,7 @@ const ko: Record<string, string> = {
   "canvas.brush_size": "크기",
   "canvas.opacity": "불투명도",
   "canvas.zoom_in": "확대",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "축소",
   "canvas.reset_zoom": "줌 초기화",
   "canvas.inpaint_mask": "인페인트 마스크",

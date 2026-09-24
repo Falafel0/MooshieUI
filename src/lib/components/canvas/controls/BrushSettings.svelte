@@ -3,7 +3,7 @@
   import { locale } from "../../../stores/locale.svelte.js";
 </script>
 
-<div class="flex items-center gap-2">
+<div class="flex flex-wrap items-center gap-2">
   <label class="flex items-center gap-2 text-xs text-neutral-400">
     {locale.t('canvas.brush_size')}
     <input

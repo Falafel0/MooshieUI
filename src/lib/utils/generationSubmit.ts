@@ -1,4 +1,4 @@
-import { generate, novelaiGenerate, type GenerateResponse } from "./api.js";
+import { generate, novelaiGenerate, interruptGeneration, type GenerateResponse } from "./api.js";
 import { isNovelAiModel } from "./novelaiModels.js";
 import { progress } from "../stores/progress.svelte.js";
 import type { GenerationParams } from "../types/index.js";
@@ -33,6 +33,17 @@ export function trackGeneration(params: GenerationParams, result: GenerateRespon
   return result.prompt_id;
 }
 
-export async function submitGeneration(params: GenerationParams): Promise<string> {
-  return trackGeneration(params, await requestGeneration(params));
+export async function submitGeneration(params: GenerationParams, options?: {
+  isCancelled?: () => boolean;
+  beforeTrack?: (promptId: string) => void;
+}): Promise<string> {
+  const result = await requestGeneration(params);
+  if (options?.isCancelled?.()) {
+    // The cancellation request may have reached ComfyUI before this prompt was
+    // created. Cancel its actual ID as soon as the submission response arrives.
+    await interruptGeneration(result.prompt_id);
+    throw new Error("Generation cancelled");
+  }
+  options?.beforeTrack?.(result.prompt_id);
+  return trackGeneration(params, result);
 }

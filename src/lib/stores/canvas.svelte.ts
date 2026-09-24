@@ -690,7 +690,7 @@ class CanvasStore {
   }
 
   clearMask() {
-    generation.maskImage = null;
+    generation.setModeInput('inpainting', { mask: null });
     this.persistedMaskPreviewUrl = null;
     this.layers = this.layers.map((layer) => layer.type === "mask" ? { ...layer, image: undefined, initialRegion: undefined } : layer);
 

@@ -152,6 +152,11 @@
     const rect = containerEl.getBoundingClientRect();
     containerW = rect.width;
     containerH = rect.height;
+    if (canvas.viewportInitialized) {
+      canvas.viewport = { ...canvas.viewport,
+        panX: canvas.viewport.panX + (containerW - canvas.viewportWidth) / 2,
+        panY: canvas.viewport.panY + (containerH - canvas.viewportHeight) / 2 };
+    }
     canvas.setViewportSize(containerW, containerH);
 
     stage = new Konva.Stage({
