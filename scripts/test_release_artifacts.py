@@ -15,7 +15,7 @@ class ReleaseArtifactsTest(unittest.TestCase):
         self.source = Path(self.temp.name) / "source"
         self.source.mkdir()
         self.output = Path(self.temp.name) / "output"
-        for name in ("MooshieUI_2.3.1_amd64.AppImage", "MooshieUI_2.3.1_x64-setup.exe", "MooshieUI.app.tar.gz"):
+        for name in ("MooshieUI Fork_2.3.1_amd64.AppImage", "MooshieUI Fork_2.3.1_x64-setup.exe", "MooshieUI.app.tar.gz"):
             (self.source / name).write_bytes(b"signed archive content")
             (self.source / (name + ".sig")).write_text("signature")
         (self.source / "MooshieUI_2.3.1_aarch64.dmg").write_bytes(b"dmg")
@@ -35,6 +35,14 @@ class ReleaseArtifactsTest(unittest.TestCase):
         self.assertNotIn("darwin-aarch64", result["platforms"])
         self.assertFalse(list(self.output.glob("*.dmg")))
         self.assertFalse(list(self.output.glob("*.tar.gz")))
+
+    def test_updater_urls_match_github_normalized_asset_names(self):
+        result = self.collect(macos=False)
+        for platform in ("linux-x86_64", "windows-x86_64"):
+            url = result["platforms"][platform]["url"]
+            self.assertIn("MooshieUI.Fork_", url)
+            self.assertNotIn("MooshieUI%20Fork_", url)
+        self.assertTrue((self.output / "MooshieUI.Fork_2.3.1_x64-setup.exe").is_file())
 
     def test_missing_mac_signature_blocks_release(self):
         (self.source / "MooshieUI.app.tar.gz.sig").unlink()

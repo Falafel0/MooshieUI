@@ -9,6 +9,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 
 def collect(source: Path, output: Path, tag: str, repo: str, macos: bool = False):
@@ -24,7 +25,9 @@ def collect(source: Path, output: Path, tag: str, repo: str, macos: bool = False
     for file in source.rglob("*"):
         if not file.is_file() or not file.name.endswith(suffixes):
             continue
-        name = file.name
+        # GitHub normalizes spaces in uploaded release asset names to dots. Do
+        # that before upload so the filename, checksum and updater URL agree.
+        name = re.sub(r"\s+", ".", file.name)
         # Tauri's Mac updater archive omits architecture and version. Rename
         # the file, preserving the signed bytes and matching signature.
         if name.endswith((".app.tar.gz", ".app.tar.gz.sig")):
@@ -54,7 +57,7 @@ def collect(source: Path, output: Path, tag: str, repo: str, macos: bool = False
             raise ValueError(f"Empty signature for {bundle.name}")
         platforms[platform] = {
             "signature": signature,
-            "url": f"https://github.com/{repo}/releases/download/{tag}/{bundle.name}",
+            "url": f"https://github.com/{repo}/releases/download/{tag}/{quote(bundle.name)}",
         }
     manifest = {
         "version": version,
