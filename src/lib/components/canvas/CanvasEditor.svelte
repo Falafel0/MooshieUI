@@ -69,7 +69,7 @@
 <div class="flex flex-col h-full rounded-xl border border-neutral-800 overflow-hidden">
   <CanvasToolbar />
   <div class="flex-1 min-h-0 relative">
-    <CanvasStage bind:this={stageRef} showLivePreview={showInpaintPreviewOverlay} />
+    <CanvasStage bind:this={stageRef} showLivePreview={false} />
 
     {#if (canvas.selectedWorkspaceSection === 'layers' && activeContextLayer) || canvas.selectedWorkspaceSection === 'control'}
       <div class="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-md border border-neutral-700/70 bg-neutral-950/82 p-1 text-[10px] text-neutral-300 shadow-lg backdrop-blur-md">
@@ -102,11 +102,44 @@
     {/if}
 
     {#if showInpaintPreviewOverlay && generation.mode === "inpainting" && progress.isGenerating}
-      <div class="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-indigo-500/40 bg-neutral-950/82 px-2 py-1.5 text-[10px] shadow-lg backdrop-blur-md">
-        <span class="h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></span>
-        <span class="max-w-44 truncate text-neutral-200">{progress.phaseLabel || locale.t("progress.generating")}</span>
-        <span class="relative h-1.5 w-20 overflow-hidden rounded-full bg-neutral-700"><span class="absolute inset-y-0 left-0 rounded-full bg-indigo-400 transition-[width]" style={`width:${Math.max(2, progress.percentage)}%`}></span></span>
-        <span class="tabular-nums text-neutral-400">{progress.currentStep}/{progress.totalSteps || "?"}</span>
+      <div class="absolute inset-0 z-20 pointer-events-none">
+        <div class="absolute inset-0 bg-black/15"></div>
+
+        <div class="absolute right-4 top-4 w-full max-w-md rounded-xl border border-neutral-700/80 bg-neutral-950/88 shadow-2xl backdrop-blur-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-3">
+            <div class="text-sm font-medium text-neutral-100">{locale.t('canvas.inpainting_preview')}</div>
+            <div class="text-xs text-neutral-400 text-right">{progress.phaseLabel || locale.t("progress.generating")}</div>
+          </div>
+
+          <div class="p-3">
+            <div class="aspect-video rounded-lg border border-neutral-800 bg-neutral-900 flex items-center justify-center overflow-hidden">
+              {#if progress.displayImage}
+                <img
+                  src={progress.displayImage}
+                  alt={locale.t("canvas.inpaint_preview_alt")}
+                  class="w-full h-full object-contain"
+                />
+              {:else}
+                <div class="flex flex-col items-center gap-2 text-neutral-400">
+                  <div class="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span class="text-xs">{locale.t('canvas.waiting_preview')}</span>
+                </div>
+              {/if}
+            </div>
+
+            <div class="mt-3">
+              <div class="h-2 rounded-full bg-neutral-800 overflow-hidden">
+                <div
+                  class="h-full bg-indigo-500 transition-[width] duration-200"
+                  style="width: {Math.max(2, progress.percentage)}%"
+                ></div>
+              </div>
+              <div class="mt-1 text-[11px] text-neutral-500 text-right">
+                {progress.currentStep} / {progress.totalSteps || "?"} {locale.t("progress.steps_suffix")}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     {/if}
 
