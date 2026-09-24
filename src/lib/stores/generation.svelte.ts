@@ -3,8 +3,6 @@ import { ipcStore } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
 import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js";
 import {
-  buildRegionalContextPrompt,
-  mergeRegionalPromptText,
   parseRegionalPrompt,
   parseScheduledPrompt,
 } from "../utils/promptSchedule.js";
@@ -241,6 +239,8 @@ export interface GenerationToParamsOptions {
   fixedPresetChoices?: ReadonlyMap<string, string>;
   /** When false, positive_regions is omitted (regional inpaint chain). */
   includeConditioningRegions?: boolean;
+  /** Canvas region/mask layers prepared with uploaded spatial masks. */
+  regionalSelectionsOverride?: RegionalPromptSelection[];
   /**
    * Extra positive tags merged right after the Artist Styles slot. The Style
    * Creator passes a fragment for an unsaved artist combination here.
@@ -451,6 +451,7 @@ interface PromptBucket {
 }
 
 type PromptBuckets = Record<PromptBucketId, PromptBucket>;
+type ModeGeometry = { width: number; height: number; denoise: number; refineOnly: boolean };
 
 function newBoxId(): string {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -521,6 +522,24 @@ function normalizeModeToggles(value: unknown): ModeToggleStates {
   }
 
   return normalized;
+}
+
+function normalizeModeGeometry(value: unknown): Partial<Record<GenerationMode, ModeGeometry>> {
+  if (!value || typeof value !== "object") return {};
+  const result: Partial<Record<GenerationMode, ModeGeometry>> = {};
+  const raw = value as Record<string, Partial<ModeGeometry> | undefined>;
+  for (const mode of GENERATION_MODES) {
+    const item = raw[mode];
+    if (!item || typeof item !== "object") continue;
+    if (!Number.isFinite(item.width) || !Number.isFinite(item.height) || !Number.isFinite(item.denoise)) continue;
+    result[mode] = {
+      width: Math.max(64, Math.round(Number(item.width) / 8) * 8),
+      height: Math.max(64, Math.round(Number(item.height) / 8) * 8),
+      denoise: Math.max(0, Math.min(1, Number(item.denoise))),
+      refineOnly: !!item.refineOnly,
+    };
+  }
+  return result;
 }
 
 interface StylePreset {
@@ -753,7 +772,7 @@ class GenerationStore {
     input: string | null; mask: string | null; preview: string | null;
     aspect: { w: number; h: number } | null;
   }>>>({});
-  private modeGeometry: Partial<Record<GenerationMode, { width: number; height: number; denoise: number; refineOnly: boolean }>> = {};
+  private modeGeometry: Partial<Record<GenerationMode, ModeGeometry>> = {};
 
   get inputImage(): string | null { return this.modeInputs[this._mode]?.input ?? null; }
   set inputImage(input: string | null) { this.setModeInput(this._mode, { input }); }
@@ -1187,6 +1206,13 @@ class GenerationStore {
     return {
       ...this.promptBuckets,
       [promptBucketFor(this._mode)]: this.readPromptBucket(),
+    };
+  }
+
+  modeGeometryWithCurrent(): Partial<Record<GenerationMode, ModeGeometry>> {
+    return {
+      ...this.modeGeometry,
+      [this._mode]: { width: this.width, height: this.height, denoise: this.denoise, refineOnly: this.refineOnly },
     };
   }
 
@@ -1768,23 +1794,24 @@ class GenerationStore {
 
   /** SDXL-style area conditioning (ConditioningSetArea). */
   get supportsRegionalConditioning(): boolean {
-    if (this.mode !== "txt2img") return false;
+    if (this.mode !== "txt2img" && this.mode !== "inpainting") return false;
     // Both regional strategies are ComfyUI graph rewrites. NovelAI takes a
     // finished prompt over HTTP, so neither can apply there.
     if (this.isNovelAi) return false;
     return this.isSdxlLike;
   }
 
-  /** Sequential masked inpaint per region (works on Anima + optional SDXL). */
+  /** Legacy sequential masked-region generation for text-to-image only. */
   get supportsRegionalInpaintChain(): boolean {
     if (this.isNovelAi) return false;
-    return (this.mode === "txt2img" || this.mode === "inpainting") && (this.isAnima || this.isSdxlLike);
+    return this.mode === "txt2img" && (this.isAnima || this.isSdxlLike);
   }
 
   get effectiveRegionalStrategy(): RegionalPromptStrategy {
     if (!this.supportsRegionalInpaintChain && !this.supportsRegionalConditioning) {
       return "conditioning";
     }
+    if (this.mode === "inpainting") return "conditioning";
     if (this.isAnima) return "inpaint_chain";
     if (this.supportsRegionalConditioning && this.regionalPromptStrategy === "conditioning") {
       return "conditioning";
@@ -2673,6 +2700,7 @@ class GenerationStore {
         if (saved.batchSize) this.batchSize = saved.batchSize;
         if (saved.denoise !== undefined) this.denoise = saved.denoise;
         if (saved.inpaintSettings !== undefined) this.inpaintSettings = normalizeInpaintSettings(saved.inpaintSettings);
+        if (saved.modeGeometry) this.modeGeometry = normalizeModeGeometry(saved.modeGeometry);
         if (saved.differentialDiffusion !== undefined) this.differentialDiffusion = saved.differentialDiffusion;
         // The parked bucket. The active one is loaded from the flat fields below,
         // which also carries a pre-split store forward: its single prompt lands
@@ -2955,6 +2983,7 @@ class GenerationStore {
       await ipcStore.set(STORE_KEY, {
         mode: this.mode,
         modeToggles,
+        modeGeometry: this.modeGeometryWithCurrent(),
         promptBuckets: this.promptBucketsWithCurrent(),
         // The active bucket is also written flat, both for older builds reading
         // this store and as the load-time source for the live fields.
@@ -3668,7 +3697,7 @@ class GenerationStore {
       : { baseText: positivePrompt, regions: [] as Array<{ text: string; x: number; y: number; width: number; height: number }> };
     positivePrompt = parsedRegions.baseText;
     const guiRegions = regionalPromptingSupported
-      ? this.regionalPrompts
+      ? (options.regionalSelectionsOverride ?? this.regionalPrompts)
         .map((region) => {
           const x = Math.max(0, Math.min(1, region.x));
           const y = Math.max(0, Math.min(1, region.y));
@@ -3680,6 +3709,8 @@ class GenerationStore {
           if (!text || width <= 0 || height <= 0) return null;
           return {
             text,
+            negative_text: region.negativeText?.trim() || undefined,
+            mask_image: region.mask_image,
             x,
             y,
             width,
@@ -3704,18 +3735,6 @@ class GenerationStore {
       start: s.start,
       end: s.end,
     }));
-    const regionalContext = regionalPromptingSupported
-      ? buildRegionalContextPrompt(
-          translatedPositiveBase,
-          this.loras.filter((l) => l.enabled && l.name),
-        )
-      : "";
-
-    const mergeRegionText = (localText: string): string =>
-      regionalPromptingSupported
-        ? mergeRegionalPromptText(regionalContext, localText)
-        : localText;
-
     const includeConditioningRegions =
       regionalPromptingSupported &&
       (options.includeConditioningRegions ??
@@ -3723,7 +3742,7 @@ class GenerationStore {
 
     const builtRegions = includeConditioningRegions
       ? parsedRegions.regions.map((region) => ({
-          text: mergeRegionText(region.text),
+          text: translatePromptWeightSyntax(region.text),
           x: region.x,
           y: region.y,
           width: region.width,
@@ -3731,7 +3750,11 @@ class GenerationStore {
           strength: 1.0,
         })).concat(
           guiRegions.map((region) => ({
-            text: mergeRegionText(region.text),
+            text: translatePromptWeightSyntax(region.text),
+            negative_text: region.negative_text
+              ? translatePromptWeightSyntax(region.negative_text)
+              : undefined,
+            mask_image: region.mask_image,
             x: region.x,
             y: region.y,
             width: region.width,
@@ -3787,6 +3810,8 @@ class GenerationStore {
       mask_image: this.maskImage,
       grow_mask_by: this.growMaskBy,
       inpaint_settings: { ...this.inpaintSettings },
+      inpaint_target_width: null,
+      inpaint_target_height: null,
       upscale_enabled: this.upscaleEnabled,
       upscale_method: this.upscaleMethod,
       upscale_model: this.upscaleModel,

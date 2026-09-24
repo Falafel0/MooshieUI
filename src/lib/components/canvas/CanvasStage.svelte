@@ -9,6 +9,8 @@
   import { progress } from "../../stores/progress.svelte.js";
   import ColorTooltip from "../ui/ColorTooltip.svelte";
 
+  let { showLivePreview = true }: { showLivePreview?: boolean } = $props();
+
   // Hide the editable inpaint mask while a finished result is being previewed, so
   // the clean output is visible. Keep it shown before any result, during a re-roll
   // (progress.isGenerating), and once the user paints more mask (markMaskEdited).
@@ -43,6 +45,13 @@
   // changing editable layer pixels or exported masks.
   let contextLayer: Konva.Layer | null = null;
   let contextRevision = 0;
+  // Sampler preview rendered in document coordinates so it follows pan/zoom.
+  let livePreviewLayer: Konva.Layer | null = null;
+  let livePreviewNode: Konva.Image | null = null;
+  let lastLivePreviewSource: string | null = null;
+  let transformLayer: Konva.Layer | null = null;
+  let selectionTransformer: Konva.Transformer | null = null;
+  let canvasBoundsNode: Konva.Rect | null = null;
   // UI overlay layer (brush cursor, bounding box)
   let uiLayer: Konva.Layer | null = null;
 
@@ -190,6 +199,24 @@
     contextLayer = new Konva.Layer({ listening: false });
     stage.add(contextLayer);
 
+    livePreviewLayer = new Konva.Layer({ listening: false });
+    stage.add(livePreviewLayer);
+
+    transformLayer = new Konva.Layer();
+    stage.add(transformLayer);
+    canvasBoundsNode = new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, fill: 'rgba(0,0,0,0.001)', listening: false });
+    transformLayer.add(canvasBoundsNode);
+    selectionTransformer = new Konva.Transformer({
+      borderStroke: '#60a5fa', anchorFill: '#f8fafc', anchorStroke: '#2563eb',
+      anchorCornerRadius: 1, rotateAnchorOffset: 22, keepRatio: false, flipEnabled: false,
+      boundBoxFunc: (oldBox, newBox) => Math.abs(newBox.width) < 8 || Math.abs(newBox.height) < 8 ? oldBox : newBox,
+    });
+    selectionTransformer.on('transformstart', () => {
+      if (canvas.activeTool !== 'canvasResize' && canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId);
+    });
+    selectionTransformer.on('transformend', finishOnCanvasTransform);
+    transformLayer.add(selectionTransformer);
+
     // UI overlay layer
     uiLayer = new Konva.Layer({ listening: false });
     stage.add(uiLayer);
@@ -254,8 +281,114 @@
       if (kLayer) kLayer.moveToTop();
     }
 
+    livePreviewLayer?.moveToTop();
     contextLayer?.moveToTop();
+    transformLayer?.moveToTop();
     uiLayer?.moveToTop();
+  }
+
+  function finishOnCanvasTransform() {
+    if (!selectionTransformer) return;
+    if (canvas.activeTool === 'canvasResize' && canvasBoundsNode) {
+      // Generation backends work on 8-pixel latent units. Snap the visible
+      // document frame so Canvas size always matches the value that is sent.
+      const width = Math.max(64, Math.round(canvasBoundsNode.width() * canvasBoundsNode.scaleX() / 8) * 8);
+      const height = Math.max(64, Math.round(canvasBoundsNode.height() * canvasBoundsNode.scaleY() / 8) * 8);
+      canvasBoundsNode.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, width, height });
+      canvas.resizeCanvas(width, height);
+      refreshSelectionTransformer();
+      return;
+    }
+    const layer = canvas.activeLayer;
+    if (!layer) return;
+    const kLayer = konvaLayers.get(layer.id);
+    if (layer.type === 'raster' && layer.image && kLayer) {
+      const node = kLayer.findOne('.raster-asset') as Konva.Image | undefined;
+      if (node) {
+        const width = Math.max(1, Math.abs(node.width() * node.scaleX()));
+        const height = Math.max(1, Math.abs(node.height() * node.scaleY()));
+        const flipX = node.scaleX() < 0;
+        const flipY = node.scaleY() < 0;
+        node.width(width);
+        node.height(height);
+        node.scaleX(flipX ? -1 : 1);
+        node.scaleY(flipY ? -1 : 1);
+        canvas.updateLayerImage(layer.id, {
+          x: node.x() - (flipX ? width : 0), y: node.y() - (flipY ? height : 0),
+          width, height, rotation: node.rotation(), flipX, flipY,
+        });
+      }
+    } else if (isMaskLayer(layer)) {
+      canvas.markMaskEdited();
+    }
+    scheduleThumbRefresh(layer.id);
+    selectionTransformer.forceUpdate();
+  }
+
+  function refreshSelectionTransformer() {
+    if (!selectionTransformer || !transformLayer || !canvasBoundsNode) return;
+    const zoom = Math.max(.05, canvas.viewport.zoom);
+    selectionTransformer.setAttrs({ anchorSize: 9 / zoom, borderStrokeWidth: 1 / zoom, rotateAnchorOffset: 22 / zoom });
+    if (progress.isGenerating) {
+      selectionTransformer.nodes([]);
+      transformLayer.batchDraw();
+      return;
+    }
+    if (canvas.activeTool === 'canvasResize') {
+      canvasBoundsNode.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, width: canvas.canvasWidth, height: canvas.canvasHeight });
+      selectionTransformer.setAttrs({ rotateEnabled: false, keepRatio: false, enabledAnchors: ['middle-right', 'bottom-center', 'bottom-right'] });
+      selectionTransformer.nodes([canvasBoundsNode]);
+    } else if (canvas.activeTool === 'transform') {
+      const layer = canvas.activeLayer;
+      const kLayer = layer && layer.visible && !layer.locked ? konvaLayers.get(layer.id) : null;
+      const nodes = kLayer ? kLayer.getChildren().map((node) => node) : [];
+      selectionTransformer.setAttrs({
+        rotateEnabled: layer?.type === 'raster', keepRatio: false,
+        enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
+      });
+      selectionTransformer.nodes(nodes);
+    } else {
+      selectionTransformer.nodes([]);
+    }
+    transformLayer.batchDraw();
+  }
+
+  function updateLivePreview(url: string | null) {
+    if (!livePreviewLayer) return;
+    if (!url || !showLivePreview || generation.mode !== 'inpainting' || !progress.isGenerating) {
+      lastLivePreviewSource = null;
+      livePreviewNode?.destroy();
+      livePreviewNode = null;
+      livePreviewLayer.batchDraw();
+      return;
+    }
+    if (url === lastLivePreviewSource && livePreviewNode) {
+      // Reuse the decoded preview while keeping document-space geometry exact
+      // if the canvas changes size during a generation.
+      livePreviewNode.position({ x: 0, y: 0 });
+      livePreviewNode.size({ width: canvas.canvasWidth, height: canvas.canvasHeight });
+      livePreviewLayer.batchDraw();
+      return;
+    }
+    lastLivePreviewSource = url;
+    const image = new Image();
+    image.onload = () => {
+      if (!livePreviewLayer || lastLivePreviewSource !== url) return;
+      if (!livePreviewNode) {
+        livePreviewNode = new Konva.Image({ image, x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, listening: false });
+        livePreviewLayer.add(livePreviewNode);
+      } else {
+        livePreviewNode.setAttrs({ image, x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight });
+      }
+      reorderStageLayers();
+      livePreviewLayer.batchDraw();
+    };
+    image.onerror = () => {
+      // Keep the last valid frame visible and allow a transient blob/data URL
+      // failure to be retried if the producer publishes it again.
+      if (lastLivePreviewSource === url) lastLivePreviewSource = null;
+    };
+    image.src = url;
   }
 
   function buildProcessedMask(source: HTMLCanvasElement, grow: number, blur: number, invert: boolean, color: string) {
@@ -295,9 +428,9 @@
     if (!contextLayer) return;
     const revision = ++contextRevision;
     contextLayer.destroyChildren();
-    if (!canvas.showLayerContext) { contextLayer.batchDraw(); return; }
 
     if (canvas.selectedWorkspaceSection === 'control' && canvas.controlContextPreviewUrl) {
+      if (!canvas.showLayerContext) { contextLayer.batchDraw(); return; }
       try {
         const image = await loadImageEl(canvas.controlContextPreviewUrl);
         if (!contextLayer || revision !== contextRevision) return;
@@ -308,23 +441,32 @@
     }
 
     const layer = canvas.activeLayer;
-    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !layer.visible || hideInpaintMask) {
+    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !layer.visible || layer.showContext === false || hideInpaintMask) {
       contextLayer.batchDraw(); return;
     }
     const source = canvas.exportMaskLayer(layer.id);
     if (!source) { contextLayer.batchDraw(); return; }
     const settings = layer.inpaintSettings ?? generation.inpaintSettings;
-    const grow = layer.maskGrow ?? generation.growMaskBy;
+    const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
     const color = layer.type === 'region' ? '#a78bfa' : '#fb7185';
-    const { image, bounds } = buildProcessedMask(source, grow, settings.mask_blur, settings.invert_mask, color);
+    const { bounds } = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, color);
     if (!contextLayer || revision !== contextRevision) return;
-    contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: .32, listening: false }));
     if (bounds) {
       contextLayer.add(new Konva.Rect({ ...bounds, stroke: color, strokeWidth: 1.5 / canvas.viewport.zoom, dash: [7 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .95, listening: false }));
-      if (settings.area === 'masked') {
-        const p = settings.padding;
-        const x = Math.max(0, bounds.x - p), y = Math.max(0, bounds.y - p);
-        contextLayer.add(new Konva.Rect({ x, y, width: Math.min(canvas.canvasWidth - x, bounds.width + p * 2), height: Math.min(canvas.canvasHeight - y, bounds.height + p * 2), stroke: '#f8fafc', strokeWidth: 1 / canvas.viewport.zoom, dash: [3 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .65, listening: false }));
+      if (layer.type === 'mask' && settings.area === 'masked') {
+        const px = settings.context_padding_x ?? settings.padding;
+        const py = settings.context_padding_y ?? settings.padding;
+        const left = Math.max(0, bounds.x - px), top = Math.max(0, bounds.y - py);
+        const right = Math.min(canvas.canvasWidth, bounds.x + bounds.width + px);
+        const bottom = Math.min(canvas.canvasHeight, bounds.y + bounds.height + py);
+        let width = Math.max(right - left, settings.context_min_size ?? 0);
+        let height = Math.max(bottom - top, settings.context_min_size ?? 0);
+        if (settings.context_shape === 'square') width = height = Math.max(width, height);
+        width = Math.min(canvas.canvasWidth, width); height = Math.min(canvas.canvasHeight, height);
+        const cx = (left + right) / 2, cy = (top + bottom) / 2;
+        const x = Math.max(0, Math.min(canvas.canvasWidth - width, cx - width / 2));
+        const y = Math.max(0, Math.min(canvas.canvasHeight - height, cy - height / 2));
+        contextLayer.add(new Konva.Rect({ x, y, width, height, stroke: '#f8fafc', strokeWidth: 1 / canvas.viewport.zoom, dash: [3 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .72, listening: false }));
       }
     }
     reorderStageLayers(); contextLayer.batchDraw();
@@ -562,8 +704,9 @@
     const sorted = canvas.sortedLayers.toReversed();
 
     for (const layer of sorted) {
-      const effectiveVisible =
-        layer.visible && !(isMaskLayer(layer) && hideInpaintMask);
+      const effectiveVisible = layer.visible && !(
+        isMaskLayer(layer) && (hideInpaintMask || layer.id !== canvas.activeLayerId)
+      );
       if (!konvaLayers.has(layer.id)) {
         const existing = stage.getLayers().find((node) => node.id() === layer.id) ?? canvas.takeLayerNode(layer.id);
         const kLayer = existing ?? new Konva.Layer({
@@ -586,7 +729,7 @@
           const region = layer.initialRegion;
           const w = canvas.canvasWidth;
           const h = canvas.canvasHeight;
-          const attrs = { fill: canvas.maskOverlayColor, opacity: 0.45, listening: false };
+          const attrs = { fill: canvas.maskOverlayColor, opacity: 1, listening: false };
           if (region.shape === "circle") {
             kLayer.add(new Konva.Ellipse({ ...attrs, x: (region.x + region.width / 2) * w, y: (region.y + region.height / 2) * h, radiusX: region.width * w / 2, radiusY: region.height * h / 2 }));
           } else if (region.shape === "lasso" && region.points?.length) {
@@ -624,7 +767,7 @@
               const data = ctx.getImageData(0, 0, pixels.width, pixels.height);
               const color = parseHexColor(canvas.maskOverlayColor);
               for (let i = 0; i < data.data.length; i += 4) {
-                data.data[i + 3] = Math.round(data.data[i] * (data.data[i+3] / 255) * 0.45);
+                data.data[i + 3] = Math.round(data.data[i] * (data.data[i+3] / 255));
                 data.data[i] = color.r; data.data[i+1] = color.g; data.data[i+2] = color.b;
               }
               ctx.putImageData(data, 0, 0);
@@ -659,7 +802,7 @@
     }
 
     // Apply to all content layers (bg + reference + persisted mask + canvas layers), but NOT the UI layer.
-    const layers = [bgLayer, refLayer, persistedMaskLayer, ...konvaLayers.values(), contextLayer];
+    const layers = [bgLayer, refLayer, persistedMaskLayer, ...konvaLayers.values(), livePreviewLayer, contextLayer, transformLayer];
     for (const layer of layers) {
       if (!layer) continue;
       layer.scaleX(zoom);
@@ -667,6 +810,8 @@
       layer.x(panX);
       layer.y(panY);
     }
+
+    refreshSelectionTransformer();
 
     stage.batchDraw();
   }
@@ -729,7 +874,8 @@
 
     // The viewport is applied as a layer transform; reset it so the thumbnail
     // captures canvas-space pixels at a fixed scale, then restore it.
-    const origScale = kLayer.scaleX();
+    const origScaleX = kLayer.scaleX();
+    const origScaleY = kLayer.scaleY();
     const origX = kLayer.x();
     const origY = kLayer.y();
     kLayer.scaleX(1);
@@ -749,8 +895,8 @@
     } catch (error) {
       console.error("Failed to generate layer thumbnail:", error);
     } finally {
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
     }
@@ -863,11 +1009,7 @@
           ? canvas.maskOverlayColor
           : canvas.foregroundColor;
 
-      const drawOpacity = tool === "eraser"
-        ? 1
-        : inpaintMaskMode
-          ? canvas.brushSettings.opacity * 0.45
-          : canvas.brushSettings.opacity;
+      const drawOpacity = tool === "eraser" ? 1 : canvas.brushSettings.opacity;
 
       currentLine = new Konva.Line({
         stroke: color,
@@ -1131,13 +1273,11 @@
                 : canvas.foregroundColor;
             const rect = canvas.activeTool === "ellipseFill" ? new Konva.Ellipse({
               x: x+w/2, y: y+h/2, radiusX: w/2, radiusY: h/2, fill: color,
-              opacity: canvas.brushSettings.opacity * (isMaskLayer(layer) ? 0.45 : 1), listening: false,
+              opacity: canvas.brushSettings.opacity, listening: false,
             }) : new Konva.Rect({
               x, y, width: w, height: h,
               fill: color,
-              opacity: inpaintMaskMode
-                ? canvas.brushSettings.opacity * 0.45
-                : canvas.brushSettings.opacity,
+              opacity: canvas.brushSettings.opacity,
               listening: false,
             });
             kLayer.add(rect);
@@ -1172,9 +1312,7 @@
           points: [...lassoPoints],
           closed: true,
           fill: color,
-          opacity: inpaintMaskMode
-            ? canvas.brushSettings.opacity * 0.45
-            : canvas.brushSettings.opacity,
+          opacity: canvas.brushSettings.opacity,
           listening: false,
         });
         kLayer.add(shape);
@@ -1279,17 +1417,25 @@
   }
 
   function sampleColor(pos: { x: number; y: number }) {
-    if (!stage) return;
+    if (!stage || pos.x < 0 || pos.y < 0 || pos.x >= canvas.canvasWidth || pos.y >= canvas.canvasHeight) return;
 
-    // Composite all visible layers
-    const compositeCanvas = stage.toCanvas({
-      pixelRatio: 1,
-    });
-    const ctx = compositeCanvas.getContext("2d")!;
-    const { zoom, panX, panY } = canvas.viewport;
-    const screenX = pos.x * zoom + panX;
-    const screenY = pos.y * zoom + panY;
-    const pixel = ctx.getImageData(Math.round(screenX), Math.round(screenY), 1, 1).data;
+    // Sample document pixels only. Stage.toCanvas also contains checkerboard,
+    // context guides, sampler preview and transform handles, which must never
+    // influence the eyedropper.
+    const compositeCanvas = document.createElement('canvas');
+    compositeCanvas.width = canvas.canvasWidth;
+    compositeCanvas.height = canvas.canvasHeight;
+    const ctx = compositeCanvas.getContext('2d')!;
+    if (refLayer) ctx.drawImage(captureLayer(refLayer, canvas.canvasWidth, canvas.canvasHeight), 0, 0);
+    const sorted = [...canvas.layers].filter((layer) => layer.type === 'raster' && layer.visible).sort((a, b) => a.order - b.order);
+    for (const layer of sorted) {
+      const kLayer = konvaLayers.get(layer.id);
+      if (!kLayer) continue;
+      ctx.globalAlpha = layer.opacity;
+      ctx.drawImage(captureLayer(kLayer, canvas.canvasWidth, canvas.canvasHeight), 0, 0);
+    }
+    ctx.globalAlpha = 1;
+    const pixel = ctx.getImageData(Math.floor(pos.x), Math.floor(pos.y), 1, 1).data;
 
     if (pixel[3] > 0) {
       const hex = `#${pixel[0].toString(16).padStart(2, "0")}${pixel[1].toString(16).padStart(2, "0")}${pixel[2].toString(16).padStart(2, "0")}`;
@@ -1341,6 +1487,25 @@
 
   // Reactive effects
   $effect(() => {
+    void progress.previewImage;
+    void progress.isGenerating;
+    void generation.mode;
+    void canvas.canvasWidth;
+    void canvas.canvasHeight;
+    updateLivePreview(progress.previewImage);
+  });
+
+  $effect(() => {
+    void canvas.activeTool;
+    void canvas.activeLayerId;
+    void canvas.layers;
+    void canvas.canvasWidth;
+    void canvas.canvasHeight;
+    void progress.isGenerating;
+    refreshSelectionTransformer();
+  });
+
+  $effect(() => {
     // Re-sync Konva layers when canvas layers change
     void canvas.layers;
     void canvas.canvasWidth;
@@ -1359,7 +1524,7 @@
 
     // Generate an initial thumbnail for any layer we haven't captured yet.
     for (const layer of canvas.layers) {
-      if (!thumbInitialized.has(layer.id)) {
+      if (!thumbInitialized.has(layer.id) || !canvas.layerThumbnails[layer.id]) {
         thumbInitialized.add(layer.id);
         scheduleThumbRefresh(layer.id);
       }
@@ -1437,7 +1602,7 @@
       if (!isMaskLayer(layer)) continue;
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
-      kLayer.visible(layer.visible && !hide);
+      kLayer.visible(layer.visible && !hide && layer.id === canvas.activeLayerId);
     }
     stage.batchDraw();
   });
@@ -1500,7 +1665,9 @@
   export function getMaskCanvas(): HTMLCanvasElement | null {
     if (!stage) return null;
 
-    const maskLayers = canvas.layers.filter((l) => isMaskLayer(l) && l.visible);
+    // Region layers carry prompt influence only. They never grant permission
+    // to change pixels, so only true inpaint masks enter the exported union.
+    const maskLayers = canvas.layers.filter((l) => l.type === "mask" && l.visible);
     if (maskLayers.length === 0) return null;
 
     const offscreen = document.createElement("canvas");
@@ -1512,7 +1679,8 @@
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
 
-      const origScale = kLayer.scaleX();
+      const origScaleX = kLayer.scaleX();
+      const origScaleY = kLayer.scaleY();
       const origX = kLayer.x();
       const origY = kLayer.y();
       // The mask node may be visually hidden while a result is previewed; Konva
@@ -1533,8 +1701,8 @@
 
       ctx.drawImage(layerCanvas, 0, 0);
 
-      kLayer.scaleX(origScale);
-      kLayer.scaleY(origScale);
+      kLayer.scaleX(origScaleX);
+      kLayer.scaleY(origScaleY);
       kLayer.x(origX);
       kLayer.y(origY);
       kLayer.visible(origVisible);

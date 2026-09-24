@@ -84,6 +84,10 @@ pub struct DetailSegment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositiveRegion {
     pub text: String,
+    #[serde(default)]
+    pub negative_text: Option<String>,
+    #[serde(default)]
+    pub mask_image: Option<String>,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -159,6 +163,11 @@ pub struct GenerationParams {
     pub grow_mask_by: Option<u32>,
     #[serde(default)]
     pub inpaint_settings: Option<serde_json::Value>,
+    /// Optional per-mask sampling resolution. The composite remains width × height.
+    #[serde(default)]
+    pub inpaint_target_width: Option<u32>,
+    #[serde(default)]
+    pub inpaint_target_height: Option<u32>,
     pub upscale_enabled: bool,
     pub upscale_method: String,
     pub upscale_model: Option<String>,

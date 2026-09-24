@@ -6,7 +6,6 @@
   import { generation } from "../../../stores/generation.svelte.js";
   import { ArrowUp, ArrowDown, Copy, Trash2 } from "@lucide/svelte";
 
-  let { onAddRegions }: { onAddRegions?: () => void } = $props();
 
   type GroupKey = "mask" | "raster" | "region";
 
@@ -15,7 +14,7 @@
   const maskLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "mask"));
   const regionLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "region"));
   const rasterLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "raster"));
-  const processingOrder = $derived(canvas.sortedLayers.filter((l) => (l.type === 'mask' || l.type === 'region') && l.visible && l.opacity > 0).reverse());
+  const processingOrder = $derived(canvas.sortedLayers.filter((l) => l.type === 'mask' && l.visible && l.opacity > 0).reverse());
   const activeType = $derived(canvas.activeLayer?.type ?? null);
   const canMoveUp = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "up") !== null : false);
   const canMoveDown = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "down") !== null : false);
@@ -83,10 +82,10 @@
         <button
           type="button"
           aria-label={locale.t(group.addKey)}
-          disabled={group.key === 'region' && !generation.supportsRegionalInpaintChain}
-          onclick={() => group.key === 'region' && onAddRegions ? onAddRegions() : addToGroup(group.key)}
+          disabled={group.key === 'region' && !generation.supportsRegionalConditioning}
+          onclick={() => addToGroup(group.key)}
           class="h-7 w-7 flex items-center justify-center rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-indigo-400 disabled:opacity-30"
-          title={group.key === 'region' && !generation.supportsRegionalInpaintChain ? locale.t('canvas.regions_supported') : locale.t(group.addKey)}
+          title={group.key === 'region' && !generation.supportsRegionalConditioning ? locale.t('canvas.regions_supported') : locale.t(group.addKey)}
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>

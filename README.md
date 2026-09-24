@@ -1,6 +1,6 @@
 # MooshieUI
 
-> **Falafel0 fork — v2.3.6-fork.4.** This fork focuses on a layer-based inpainting workspace and generation-state reliability. Installers, release notes, signed updates and the `ghcr.io/falafel0/mooshieui-fork` container come only from this fork. The desktop app installs as **MooshieUI Fork**, with a separate application identifier and settings directory. Connect it to an existing ComfyUI server through Settings. See the [fork workspace guide](docs/FORK_WORKSPACE.md).
+> **Falafel0 fork — v2.3.6-fork.5.** This fork focuses on a layer-based inpainting workspace and generation-state reliability. Installers, release notes, signed updates and the `ghcr.io/falafel0/mooshieui-fork` container come only from this fork. The desktop app installs as **MooshieUI Fork**, with a separate application identifier and settings directory. Connect it to an existing ComfyUI server through Settings. See the [fork workspace guide](docs/FORK_WORKSPACE.md).
 
 MooshieUI is a beginner-friendly interface for image, video and music generation through [ComfyUI](https://github.com/comfyanonymous/ComfyUI), with optional image generation through the **NovelAI API** using your own key. It runs in two modes:
 

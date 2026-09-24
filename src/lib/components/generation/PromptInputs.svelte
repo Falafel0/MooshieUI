@@ -259,7 +259,7 @@
 
 </script>
 
-<div class="space-y-2">
+<div class="space-y-2" onfocusout={() => generation.saveSettings()}>
   {#if generation.stylePresetsEnabled}
     <div>
       <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.prompts.style_preset')}<InfoTip text={locale.t('generation.prompts.style_preset_tip')} /></label>

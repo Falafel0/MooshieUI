@@ -1397,7 +1397,12 @@ class MooshieMusicLoadAudio:
 # Inpainting workspace nodes. Kept self-contained for CPU regression tests.
 def _inpaint_options(settings):
     defaults = dict(resize_mode="resize", mask_blur=4, invert_mask=False,
-                    masked_content="original", area="whole", padding=32, soft=False,
+                    masked_content="original", area="whole", padding=32,
+                    context_padding_x=None, context_padding_y=None,
+                    context_shape="bounds", context_min_size=0,
+                    # Older saved workflows did not request aspect fitting.
+                    # The current UI sends this explicitly for each layer.
+                    preserve_context_aspect=False, soft=False,
                     schedule_bias=1, preservation=.5, transition_contrast=4,
                     mask_influence=0, difference_threshold=.5, difference_contrast=2)
     defaults.update(json.loads(settings or "{}"))
@@ -1416,12 +1421,16 @@ class MooshieInpaintPrepare:
                 "width": ("INT", {"default": 1024, "min": 64, "max": 16384}),
                 "height": ("INT", {"default": 1024, "min": 64, "max": 16384}),
                 "grow": ("INT", {"default": 0, "min": 0, "max": 256}),
-                "settings": ("STRING", {"default": "{}"})}}
+                "settings": ("STRING", {"default": "{}"})},
+                "optional": {
+                    "target_width": ("INT", {"default": 0, "min": 0, "max": 16384}),
+                    "target_height": ("INT", {"default": 0, "min": 0, "max": 16384}),
+                }}
     RETURN_TYPES = ("IMAGE", "MASK", "MOOSHIE_INPAINT_CONTEXT")
     FUNCTION = "prepare"
     CATEGORY = "mooshie/inpainting"
 
-    def prepare(self, image, mask, width, height, grow, settings):
+    def prepare(self, image, mask, width, height, grow, settings, target_width=0, target_height=0):
         opts = _inpaint_options(settings)
         image = image[..., :3]
         b, ih, iw, _ = image.shape
@@ -1465,18 +1474,45 @@ class MooshieInpaintPrepare:
         if opts["area"] == "masked":
             points = (mask.amax(dim=(0,1)) > .001).nonzero()
             if points.numel():
-                pad = max(0, min(256, int(opts["padding"])))
-                y, x = [max(0, int(v)-pad) for v in points.amin(dim=0)]
-                bottom, right = [int(v)+pad+1 for v in points.amax(dim=0)]
-                cw, ch = min(width, right)-x, min(height, bottom)-y
+                fallback = max(0, min(256, int(opts["padding"])))
+                pad_x = max(0, min(512, int(opts["context_padding_x"] if opts["context_padding_x"] is not None else fallback)))
+                pad_y = max(0, min(512, int(opts["context_padding_y"] if opts["context_padding_y"] is not None else fallback)))
+                minimum = max(0, min(4096, int(opts["context_min_size"])))
+                top, left = [int(v) for v in points.amin(dim=0)]
+                bottom, right = [int(v)+1 for v in points.amax(dim=0)]
+                left, top = max(0, left-pad_x), max(0, top-pad_y)
+                right, bottom = min(width, right+pad_x), min(height, bottom+pad_y)
+                target_w, target_h = max(right-left, minimum), max(bottom-top, minimum)
+                if opts["context_shape"] == "square":
+                    target_w = target_h = max(target_w, target_h)
+                target_w, target_h = min(width, target_w), min(height, target_h)
+                cx, cy = (left+right)/2, (top+bottom)/2
+                x = max(0, min(width-target_w, round(cx-target_w/2)))
+                y = max(0, min(height-target_h, round(cy-target_h/2)))
+                cw, ch = target_w, target_h
         context = {"base": base, "mask": mask.movedim(1,-1), "box": (x,y,cw,ch), "settings": opts}
         cropped_rgb = rgb[:, :, y:y+ch, x:x+cw]
         cropped_mask = mask[:, :, y:y+ch, x:x+cw]
-        sample_mask = _inpaint_resize(cropped_mask, width, height).squeeze(1)
+        sample_width = max(64, min(16384, int(target_width or width)))
+        sample_height = max(64, min(16384, int(target_height or height)))
+        if opts["area"] == "masked" and opts["preserve_context_aspect"] and cw > 0 and ch > 0:
+            crop_ratio, target_ratio = cw / ch, sample_width / sample_height
+            if crop_ratio > target_ratio:
+                sample_height = max(64, round(sample_width / crop_ratio))
+            else:
+                sample_width = max(64, round(sample_height * crop_ratio))
+            # VAE-friendly dimensions without changing the crop's aspect materially.
+            sample_width = max(64, round(sample_width / 8) * 8)
+            sample_height = max(64, round(sample_height / 8) * 8)
+        # ControlNet hints must use the exact sampler geometry. Passing a
+        # cropped hint through the full document size first adds a second
+        # interpolation and distorts non-square Only masked regions.
+        context["sample_size"] = (sample_width, sample_height)
+        sample_mask = _inpaint_resize(cropped_mask, sample_width, sample_height).squeeze(1)
         if opts["soft"]:
             sample_mask = sample_mask.pow(max(.01, min(8, float(opts["schedule_bias"]))))
         # Latent resize encodes native crop pixels, then resizes the latent in the encoder.
-        pixels = cropped_rgb if mode == "latent" else _inpaint_resize(cropped_rgb, width, height)
+        pixels = cropped_rgb if mode == "latent" else _inpaint_resize(cropped_rgb, sample_width, sample_height)
         if mode == "latent" and opts["area"] == "whole":
             pixels = image.movedim(-1,1)
         if opts["masked_content"] == "fill":
@@ -1517,7 +1553,11 @@ class MooshieInpaintEncode:
             generator = torch.Generator(device="cpu").manual_seed(seed)
             noise = torch.randn(samples.shape, generator=generator, dtype=samples.dtype).to(samples.device)
             samples = samples*(1-latent_mask) + noise*latent_mask
-        return ({"samples": samples, "noise_mask": mask},)
+        # KSampler consumes noise_mask alongside `samples`, so it must have
+        # the latent resolution. Returning the full-resolution brush mask here
+        # made inpainting fail or apply to the wrong area whenever the VAE
+        # downscaled the image, especially with latent resize.
+        return ({"samples": samples, "noise_mask": latent_mask.squeeze(1)},)
 
 
 class MooshieInpaintComposite:
@@ -1569,8 +1609,9 @@ class MooshieInpaintControl:
         mask = torch.ones(image.shape[:3], device=image.device)
         pixels, _, _ = MooshieInpaintPrepare().prepare(image, mask, width, height, 0, json.dumps(opts))
         x,y,w,h = context["box"]
+        sample_width, sample_height = context.get("sample_size", (width, height))
         cropped = pixels[:,y:y+h,x:x+w].movedim(-1,1)
-        return (_inpaint_resize(cropped,width,height).movedim(1,-1),)
+        return (_inpaint_resize(cropped,sample_width,sample_height).movedim(1,-1),)
 
 
 NODE_CLASS_MAPPINGS = {

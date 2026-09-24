@@ -1,6 +1,5 @@
 <script lang="ts">
   import { canvas, type ToolType } from "../../stores/canvas.svelte.js";
-  import { generation } from "../../stores/generation.svelte.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import BrushSettings from "./controls/BrushSettings.svelte";
@@ -48,6 +47,18 @@
       labelKey: "canvas.move",
       hotkey: "V",
       icon: `<polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>`,
+    },
+    {
+      id: "transform",
+      labelKey: "canvas.transform",
+      hotkey: "T",
+      icon: `<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>`,
+    },
+    {
+      id: "canvasResize",
+      labelKey: "canvas.resize_document_on_canvas",
+      hotkey: "C",
+      icon: `<path d="M4 4v13a3 3 0 0 0 3 3h13"/><path d="M9 4h11v11"/><path d="M16 12l4 3 3-4"/>`,
     },
     {
       id: "view",
@@ -101,6 +112,8 @@
       case "q": canvas.setTool("lasso"); break;
       case "i": canvas.setTool("eyedropper"); break;
       case "v": canvas.setTool("move"); break;
+      case "t": canvas.setTool("transform"); break;
+      case "c": canvas.setTool("canvasResize"); break;
       case "h": canvas.setTool("view"); break;
       case "x": canvas.swapColors(); break;
       case "d": canvas.resetColors(); break;
@@ -117,7 +130,7 @@
   <div class="flex shrink-0 items-center gap-0.5">
     {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.activeLayer?.type === 'raster') as tool}
       <button
-        disabled={!editable && tool.id !== "view"}
+        disabled={!editable && tool.id !== "view" && tool.id !== "canvasResize"}
         aria-label={locale.t(tool.labelKey)}
         onclick={() => handleToolClick(tool.id)}
         class="disabled:opacity-30 relative w-8 h-8 flex items-center justify-center rounded-md transition-colors {canvas.activeTool === tool.id
@@ -132,9 +145,10 @@
     {/each}
   </div>
 
-  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
-
-  {#if editable && ['brush','eraser','rectFill','ellipseFill','lasso'].includes(canvas.activeTool)}<BrushSettings />{/if}
+  {#if editable && ['brush','eraser','rectFill','ellipseFill','lasso'].includes(canvas.activeTool)}
+    <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
+    <BrushSettings />
+  {/if}
 
   <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
 

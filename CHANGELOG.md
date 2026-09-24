@@ -1,5 +1,20 @@
 # Changelog
 
+## What's New in v2.3.6-fork.5
+
+- Fixes the inpainting resize pipeline by passing the mask to the sampler at the same latent resolution as the generated image. This keeps painted regions aligned in every resize mode.
+- Adds independent sampling dimensions to each inpaint mask without changing the document dimensions.
+- Scales all layer content and keeps the viewport centered when the canvas dimensions change.
+- Adds horizontal/vertical context padding, square or mask-bound crops, minimum context size and proportional high-resolution masked passes, plus direct result export and Photopea actions.
+- Moves the inpainting live preview into the document canvas so intermediate frames follow the same zoom and pan as the layer stack.
+- Aligns ControlNet hints directly to each masked sampler crop, preserving region proportions and edge accuracy without an extra full-canvas interpolation.
+- Uses prompt regions strictly as spatial positive/negative conditioning. They influence overlapping inpaint masks but never become edit masks or sequential inpaint steps.
+- Adds on-canvas transform handles for raster, mask and prompt-region layers and a proportional document resize frame. Context guides stay outside image exports and eyedropper sampling.
+- Synchronizes document resizing with Canvas size and persists per-mode geometry and prompt edits on focus loss.
+- Removes duplicate controls and mask fills, isolates the selected mask/region preview and adds independent context-guide visibility per layer. Mask alpha now exports without the former fixed 45% normalization.
+
+---
+
 ## What's New in v2.3.6-fork.4
 
 - Moves Docker publication to the fork-owned `ghcr.io/falafel0/mooshieui-fork` package, separating its permissions, cache and release tags from the original project.

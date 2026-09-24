@@ -21,7 +21,7 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
-  import { getRegionalChainRegions } from "../../utils/inpaintingRegions.js";
+  import { getRegionalChainRegions, prepareInpaintConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -179,6 +179,7 @@
     }
 
     try {
+      let inpaintConditioningRegions: InpaintConditioningRegion[] = [];
       // Continuing a paused run: the remaining steps sample from the paused
       // latent with the current prompt, CFG, sampler and LoRAs. Grid, ordered
       // wildcard and regional chains all start fresh images, so they do not
@@ -235,7 +236,11 @@
         return;
       }
 
-      if (generation.mode === "inpainting" && !generation.supportsRegionalInpaintChain && canvas.layers.some((layer) => layer.visible && layer.type === "region")) {
+      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && (
+        layer.type === "region" ||
+        (layer.type === "mask" && (!!layer.positivePrompt?.trim() || !!layer.negativePrompt?.trim()))
+      ));
+      if (generation.mode === "inpainting" && !generation.supportsRegionalConditioning && hasSpatialPromptLayers) {
         throw new Error(locale.t("canvas.regions_supported"));
       }
       // If canvas mode is active, export canvas content before generating
@@ -247,6 +252,9 @@
           () => canvasEditorRef.getRasterComposite(),
           () => canvasEditorRef.getMaskCanvas()
         );
+        if (generation.mode === "inpainting" && generation.supportsRegionalConditioning) {
+          inpaintConditioningRegions = await prepareInpaintConditioningRegions();
+        }
       }
 
       if (generation.mode === "img2img" && !generation.inputImage) {
@@ -355,6 +363,7 @@
         clearAllRegionalChainGallerySuppress();
         try {
           const chainResult = await runRegionalInpaintChain(validRegions, {
+            conditioningRegions: inpaintConditioningRegions,
             submit: async (chainParams, ctx) => {
               const result = await requestGeneration(chainParams);
               if (regionalChainCancelRequested || chainToken !== regionalChainToken || (inpaintSnapshot && !inpaintSnapshot.valid)) {
@@ -410,7 +419,11 @@
           clearAllRegionalChainGallerySuppress();
         }
       } else {
-        const params = generation.toParams();
+        const params = generation.toParams({
+          regionalSelectionsOverride: generation.mode === "inpainting"
+            ? inpaintConditioningRegions
+            : undefined,
+        });
         const sentRegions = params.positive_regions?.length ?? 0;
         if (sentRegions > 0) {
           console.log("[regional] Sending", sentRegions, "region(s) via conditioning");

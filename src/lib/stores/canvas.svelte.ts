@@ -8,7 +8,7 @@ import type { InpaintSettings } from "../utils/inpaintSettings.js";
 import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 
-export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform";
+export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform" | "canvasResize";
 export type CanvasLayerType = "raster" | "mask" | "region";
 
 export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
@@ -22,6 +22,8 @@ export interface CanvasLayer {
   visible: boolean;
   opacity: number;
   locked: boolean;
+  /** Whether generation-context guides are shown when this layer is selected. */
+  showContext?: boolean;
   order: number;
   regionalPrompt?: string;
   regionalNegativePrompt?: string;
@@ -30,6 +32,9 @@ export interface CanvasLayer {
   negativePrompt?: string;
   denoise?: number;
   maskGrow?: number;
+  inpaintWidth?: number;
+  inpaintHeight?: number;
+  inpaintAspectLocked?: boolean;
   initialRegion?: RegionalPromptSelection;
   inpaintSettings?: InpaintSettings;
   image?: { src: string; x: number; y: number; width: number; height: number; rotation: number; flipX: boolean; flipY: boolean };
@@ -133,7 +138,7 @@ class CanvasStore {
 
   // Mask overlay
   maskOverlayColor = $state("#ff3333");
-  maskOverlayOpacity = $state(0.45);
+  maskOverlayOpacity = $state(1);
   maskOverlayVisible = $state(true);
   showLayerContext = $state(true);
   controlContextPreviewUrl = $state<string | null>(null);
@@ -727,7 +732,8 @@ class CanvasStore {
 
       // The viewport is applied as a layer transform; reset it so the snapshot
       // captures canvas-space pixels, then restore it.
-      const origScale = layer.scaleX();
+      const origScaleX = layer.scaleX();
+      const origScaleY = layer.scaleY();
       const origX = layer.x();
       const origY = layer.y();
       layer.scaleX(1);
@@ -745,8 +751,8 @@ class CanvasStore {
       } catch (error) {
         console.error("Failed to snapshot inpaint mask:", error);
       } finally {
-        layer.scaleX(origScale);
-        layer.scaleY(origScale);
+        layer.scaleX(origScaleX);
+        layer.scaleY(origScaleY);
         layer.x(origX);
         layer.y(origY);
       }
@@ -859,6 +865,7 @@ class CanvasStore {
         visible: true,
         opacity: 1,
         locked: false,
+        showContext: true,
         order: maxOrder + 1,
       },
     ];
@@ -972,6 +979,12 @@ class CanvasStore {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l));
   }
 
+  toggleLayerContext(id: string) {
+    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer)
+      ? { ...layer, showContext: layer.showContext === false }
+      : layer);
+  }
+
   setActiveLayer(id: string) {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return;
@@ -986,7 +999,7 @@ class CanvasStore {
     if (!meta || !node || meta.locked || !meta.visible || this.selectedWorkspaceSection !== 'layers') return;
     node.add(new Konva.Rect({ x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight,
       fill: isMaskLayer(meta) ? this.maskOverlayColor : this.foregroundColor,
-      opacity: this.brushSettings.opacity * (isMaskLayer(meta) ? 0.45 : 1), listening: false }));
+      opacity: this.brushSettings.opacity, listening: false }));
     node.batchDraw();
     if (isMaskLayer(meta)) this.markMaskEdited();
   }
@@ -1012,10 +1025,13 @@ class CanvasStore {
   }
 
   setLayerGenerationOverride(id: string, enabled: boolean) {
-    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer) ? {
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? {
       ...layer,
       inpaintSettings: enabled ? { ...generation.inpaintSettings } : undefined,
       maskGrow: enabled ? generation.growMaskBy : undefined,
+      inpaintWidth: enabled ? (layer.inpaintWidth ?? generation.width) : undefined,
+      inpaintHeight: enabled ? (layer.inpaintHeight ?? generation.height) : undefined,
+      inpaintAspectLocked: enabled ? (layer.inpaintAspectLocked ?? true) : undefined,
       denoise: enabled && layer.type === "mask" ? generation.denoise : undefined,
       positivePrompt: enabled && layer.type === "mask" ? (layer.positivePrompt ?? "") : undefined,
       negativePrompt: enabled && layer.type === "mask" ? (layer.negativePrompt ?? "") : undefined,
@@ -1023,7 +1039,20 @@ class CanvasStore {
   }
 
   updateLayerGeneration(id: string, patch: { positivePrompt?: string; negativePrompt?: string; denoise?: number; maskGrow?: number }) {
-    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer) ? { ...layer, ...patch } : layer);
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? { ...layer, ...patch } : layer);
+  }
+
+  setLayerInpaintSize(id: string, width: number, height: number) {
+    const clamp = (value: number) => Math.max(64, Math.min(16384, Math.round(value / 8) * 8));
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? {
+      ...layer,
+      inpaintWidth: clamp(width),
+      inpaintHeight: clamp(height),
+    } : layer);
+  }
+
+  setLayerInpaintAspectLocked(id: string, locked: boolean) {
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? { ...layer, inpaintAspectLocked: locked } : layer);
   }
 
   updateLayerImage(id: string, patch: Partial<NonNullable<CanvasLayer['image']>>) {
@@ -1117,7 +1146,7 @@ class CanvasStore {
     const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight);
     const result = maskToGrayscale(pixels);
     if (!result) return null;
-    // Apply layer opacity after normalizing the editor's translucent mask tint.
+    // Apply the layer's coverage once, independently of preview visibility.
     const ctx = result.getContext("2d")!;
     ctx.globalCompositeOperation = "source-atop";
     ctx.globalAlpha = 1 - meta.opacity;
@@ -1183,12 +1212,51 @@ class CanvasStore {
 
   resizeCanvas(width: number, height: number) {
     if (width === this.canvasWidth && height === this.canvasHeight) return;
+    // A completed preview belongs to the exact document geometry captured at
+    // submission time. Keeping it after a manual resize would let Apply restore
+    // stale dimensions and misalign the saved mask.
+    this.clearPendingInpaintResult();
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
     const scaleX = this.canvasWidth > 0 ? width / this.canvasWidth : 1;
     const scaleY = this.canvasHeight > 0 ? height / this.canvasHeight : 1;
+    const scaleLayerContents = (node: any) => {
+      for (const child of node?.getChildren?.() ?? []) {
+        // Raster assets are driven by their serializable layer metadata below.
+        if (child.name?.() === "raster-asset") continue;
+        child.x?.(child.x() * scaleX);
+        child.y?.(child.y() * scaleY);
+        child.scaleX?.(child.scaleX() * scaleX);
+        child.scaleY?.(child.scaleY() * scaleY);
+      }
+      node?.batchDraw?.();
+    };
+    for (const node of this._stageRef?.getLayers?.() ?? []) {
+      if (this.layers.some((layer) => layer.id === node.id?.())) scaleLayerContents(node);
+    }
+    for (const node of this.detachedLayers.values()) scaleLayerContents(node);
+    this.layers = this.layers.map((layer) => layer.image ? {
+      ...layer,
+      image: {
+        ...layer.image,
+        x: layer.image.x * scaleX,
+        y: layer.image.y * scaleY,
+        width: layer.image.width * scaleX,
+        height: layer.image.height * scaleY,
+      },
+    } : layer);
+    // Every thumbnail represents the old coordinate system; let the stage
+    // regenerate them after the scaled nodes have been drawn.
+    this.layerThumbnails = {};
+    const centerX = this.viewport.panX + this.canvasWidth * this.viewport.zoom / 2;
+    const centerY = this.viewport.panY + this.canvasHeight * this.viewport.zoom / 2;
     this.canvasWidth = width;
     this.canvasHeight = height;
+    this.viewport = {
+      ...this.viewport,
+      panX: centerX - width * this.viewport.zoom / 2,
+      panY: centerY - height * this.viewport.zoom / 2,
+    };
     this.boundingBox = {
       ...this.boundingBox,
       x: Math.round(this.boundingBox.x * scaleX),
@@ -1196,6 +1264,14 @@ class CanvasStore {
       width: Math.round(this.boundingBox.width * scaleX),
       height: Math.round(this.boundingBox.height * scaleY),
     };
+    // The document frame is the inpainting Canvas size. Keep the generation
+    // fields in lockstep so the dimensions panel, saved settings and backend
+    // request cannot retain the previous size after an on-canvas resize.
+    if (generation.mode === "inpainting") {
+      generation.width = width;
+      generation.height = height;
+      void generation.saveSettings();
+    }
   }
 
   // Canvas init — creates default layers
