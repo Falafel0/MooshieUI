@@ -1,6 +1,6 @@
 # Fork workspace
 
-The fork uses `Falafel0/MooshieUI` for signed desktop updates, server version checks, release notes and issue reports. Its desktop identifier is `com.falafel0.mooshieui`; upstream configuration and managed runtime paths are not automatically imported. Existing external ComfyUI servers can be connected in Settings.
+The fork uses `Falafel0/MooshieUI` for signed desktop updates, server version checks, release notes and issue reports. Its desktop identifier is `com.falafel0.mooshieui`, and server releases publish to the separate `ghcr.io/falafel0/mooshieui-fork` container package. Upstream configuration and managed runtime paths are not automatically imported. Existing external ComfyUI servers can be connected in Settings.
 
 ## Inpainting
 

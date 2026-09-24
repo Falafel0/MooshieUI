@@ -350,7 +350,10 @@ jobs:
           MAJOR_MINOR="$(echo "${VERSION}" | awk -F. '{print $1 "." $2}')"
           SHORT_SHA="${GITHUB_SHA::12}"
 
-          echo "image=ghcr.io/${OWNER}/mooshieui" >> "$GITHUB_OUTPUT"
+          # Keep the fork's container package separate from the original
+          # MooshieUI package. A fork-scoped GITHUB_TOKEN cannot publish to an
+          # existing package that is still linked to the original repository.
+          echo "image=ghcr.io/${OWNER}/mooshieui-fork" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "major_minor=${MAJOR_MINOR}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"

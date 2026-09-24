@@ -1,3 +1,10 @@
+## What's New in v2.3.6-fork.4
+
+- Publishes the server container as the fork-owned `ghcr.io/falafel0/mooshieui-fork` package so releases do not collide with the original project's package permissions or tags.
+- Includes the updater asset URL correction from v2.3.6-fork.3. The earlier tag remains an unpublished build candidate.
+
+---
+
 ## What's New in v2.3.6-fork.3
 
 - Fixes automatic-update download URLs for the fork's spaced product name by normalizing release asset filenames before upload.
