@@ -24,8 +24,8 @@
       if (!normalized) return;
 
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
-      generation.inputImage = response.name;
       generation.mode = "inpainting";
+      generation.inputImage = response.name;
       progress.setLastOutputForMode("inpainting", null);
       canvas.clearMask();
       canvas.clearStaging();

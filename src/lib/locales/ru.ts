@@ -2018,6 +2018,7 @@ const ru: Record<string, string> = {
   "canvas.brush_size": "Размер",
   "canvas.opacity": "Непрозрачность",
   "canvas.zoom_in": "Увеличить",
+  "canvas.fit_view": "Вписать холст в окно",
   "canvas.zoom_out": "Уменьшить",
   "canvas.reset_zoom": "Сбросить масштаб",
   "canvas.inpaint_mask": "Маска инпейнта",

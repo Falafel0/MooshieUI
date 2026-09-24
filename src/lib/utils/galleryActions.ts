@@ -184,6 +184,7 @@ export async function uploadOutputImageForGenerationInput(
 ): Promise<string> {
   const { bytes, filename } = await loadOutputImageForGenerationInput(image, fallbackFilename);
   const response = await uploadImageBytes(bytes, filename);
+  generation.setModeInput('img2img', { input: response.name, mask: null, preview: URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' })), aspect: null });
   return response.name;
 }
 

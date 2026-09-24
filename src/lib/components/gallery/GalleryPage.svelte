@@ -149,9 +149,11 @@
     try {
       const prepared = await prepareOutputImageForEditMode(image, mode);
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
-      generation.inputImage = response.name;
-      canvas.clearMask();
       generation.mode = mode;
+      generation.setModeInput(mode, mode === 'inpainting'
+        ? { input: response.name, mask: null }
+        : { input: response.name, mask: null, preview: URL.createObjectURL(new Blob([new Uint8Array(prepared.uploadBytes)], { type: 'image/png' })), aspect: null });
+      if (mode === 'inpainting') canvas.clearMask();
       generation.upscaleEnabled = false;
       if (mode === "inpainting" && prepared.normalized) {
         const normalized = prepared.normalized;
@@ -192,8 +194,9 @@
 
   async function upscaleImage(image: OutputImage) {
     try {
-      generation.inputImage = await uploadOutputImageForGenerationInput(image, "refine_input.png");
+      const inputName = await uploadOutputImageForGenerationInput(image, "refine_input.png");
       generation.mode = "img2img";
+      generation.inputImage = inputName;
       generation.upscaleEnabled = true;
       onSwitchToGenerate?.();
       gallery.showToast(locale.t("gallery.toast.loaded_upscale"), "success");

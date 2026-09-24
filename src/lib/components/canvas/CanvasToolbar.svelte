@@ -112,9 +112,9 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="flex flex-nowrap items-center gap-1 overflow-x-auto px-2 py-1 bg-neutral-900 border-b border-neutral-800 [scrollbar-width:thin]">
+<div class="flex shrink-0 flex-wrap items-center gap-1 max-h-28 overflow-auto px-2 py-1 bg-neutral-900 border-b border-neutral-800 [scrollbar-width:thin]">
   <!-- Tool buttons -->
-  <div class="flex items-center gap-0.5">
+  <div class="flex shrink-0 items-center gap-0.5">
     {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.activeLayer?.type === 'raster') as tool}
       <button
         disabled={!editable && tool.id !== "view"}

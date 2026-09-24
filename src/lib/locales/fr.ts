@@ -2043,6 +2043,7 @@ const fr: Record<string, string> = {
   "canvas.brush_size": "Taille",
   "canvas.opacity": "Opacité",
   "canvas.zoom_in": "Zoom avant",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Zoom arrière",
   "canvas.reset_zoom": "Réinitialiser le zoom",
   "canvas.inpaint_mask": "Masque d'inpainting",

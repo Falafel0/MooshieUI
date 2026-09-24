@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import { canvas, isMaskLayer } from "../../stores/canvas.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
@@ -21,8 +21,8 @@
   const activeContextSettings = $derived(activeContextLayer?.inpaintSettings ?? generation.inpaintSettings);
   const activeContextGrow = $derived(activeContextLayer?.maskGrow ?? generation.growMaskBy);
 
-  onMount(() => {
-    // Initialize canvas with generation dimensions if not already set
+  untrack(() => {
+    // Initialize before CanvasStage mounts and calculates its initial fit.
     if (canvas.layers.length === 0) {
       canvas.initCanvas(generation.width, generation.height);
     }

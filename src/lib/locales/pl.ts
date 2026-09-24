@@ -2403,6 +2403,7 @@ const pl: Record<string, string> = {
   "canvas.brush_size": "Rozmiar",
   "canvas.opacity": "Krycie",
   "canvas.zoom_in": "Powiększ",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Pomniejsz",
   "canvas.reset_zoom": "Resetuj zoom",
   "canvas.inpaint_mask": "Maska inpaintingu",

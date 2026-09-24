@@ -41,7 +41,7 @@
   import { directorTools, directorToolsAvailable } from "../../stores/directorTools.svelte.js";
   import { lazyThumbnail } from "../../utils/lazyThumbnail.js";
   import type { OutputImage, InterrogationResult } from "../../types/index.js";
-  import { onMount, onDestroy, tick } from "svelte";
+  import { onMount, onDestroy, tick, untrack } from "svelte";
   import BottomPanel from "./BottomPanel.svelte";
   import ContextMenu from "../ui/ContextMenu.svelte";
   import type { ContextMenuItem } from "../ui/ContextMenu.svelte";
@@ -106,11 +106,17 @@
   );
 
   let canvasEditorRef: CanvasEditor | undefined = $state();
-  let imagePreviewUrl = $state<string | null>(null);
+  const imagePreviewUrl = $derived(
+    generation.mode === 'inpainting' ? canvas.effectiveReferenceImage : generation.inputPreviewUrl,
+  );
   let maskPreviewUrl = $state<string | null>(null);
   let uploading = $state(false);
   let rasterImportBusy = $state(false);
-  let imageAspect = $state<{ w: number; h: number } | null>(null);
+  const imageAspect = $derived(
+    generation.mode === 'inpainting'
+      ? { w: canvas.canvasWidth, h: canvas.canvasHeight }
+      : generation.inputAspect,
+  );
   let dragOver = $state(false);
   let maskDragOver = $state(false);
   let imagePasteTarget = $state<"input" | "mask" | null>(null);
@@ -434,21 +440,21 @@
   // (ComfyUI through the ImageScale node, NovelAI in the client). Inpainting is
   // the one exception, because the mask canvas has to be the image's size.
   function applyImageGeometry(width: number, height: number) {
-    imageAspect = { w: width, h: height };
     if (generation.mode !== "inpainting") return;
     generation.width = width;
     generation.height = height;
 
     if (canvas.isCanvasMode && (canvas.canvasWidth !== width || canvas.canvasHeight !== height)) {
-      canvas.initCanvas(width, height);
+      canvas.resizeCanvas(width, height);
     }
   }
 
   function applyNormalizedImagePreview(normalized: NormalizedInputImage) {
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    imagePreviewUrl = normalized.previewUrl;
+    if (generation.mode !== 'inpainting') {
+      generation.setModeInput(generation.mode, { preview: normalized.previewUrl, aspect: { w: normalized.width, h: normalized.height } });
+    }
     applyImageGeometry(normalized.width, normalized.height);
-    canvas.setReferenceImage(imagePreviewUrl);
+    if (generation.mode === 'inpainting') canvas.setReferenceImage(normalized.previewUrl);
   }
 
   function syncInpaintBaseIfNeeded(normalized: NormalizedInputImage, uploadedInputName: string) {
@@ -462,8 +468,34 @@
   }
 
   function resetStagedInputForManualReplacement() {
+    if (generation.mode !== 'inpainting') return;
     canvas.clearStaging();
     canvas.clearInpaintSession();
+  }
+
+  let inputRequest = 0;
+  function beginInputRequest() {
+    return { id: ++inputRequest, mode: generation.mode, sourceVersion: canvas.inpaintSourceVersion };
+  }
+
+  async function installInput(
+    normalized: NormalizedInputImage,
+    request: ReturnType<typeof beginInputRequest>,
+    uploadNormalized: () => Promise<{ name: string }> = () => uploadImageBytes(normalized.bytes, normalized.filename),
+  ) {
+    let installed = false;
+    try {
+      const response = await uploadNormalized();
+      if (request.id !== inputRequest || request.mode !== generation.mode ||
+          (request.mode === 'inpainting' && request.sourceVersion !== canvas.inpaintSourceVersion)) return;
+      resetStagedInputForManualReplacement();
+      applyNormalizedImagePreview(normalized);
+      generation.inputImage = response.name;
+      syncInpaintBaseIfNeeded(normalized, response.name);
+      installed = true;
+    } finally {
+      if (!installed) URL.revokeObjectURL(normalized.previewUrl);
+    }
   }
 
   function getFilenameFromPath(path: string): string {
@@ -472,6 +504,7 @@
   }
 
   async function browseImage() {
+    const request = beginInputRequest();
     let selected: string | null = null;
     if (isTauri) {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -491,11 +524,7 @@
         const buf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buf));
         const normalized = await normalizeGenerationInputBytes(bytes, file.name);
-        resetStagedInputForManualReplacement();
-        applyNormalizedImagePreview(normalized);
-        const response = await uploadImageBytes(normalized.bytes, normalized.filename);
-        generation.inputImage = response.name;
-        syncInpaintBaseIfNeeded(normalized, response.name);
+        await installInput(normalized, request);
       } catch (e) { console.error("Failed to upload image:", e); } finally { uploading = false; }
       return;
     }
@@ -509,12 +538,7 @@
       const { readFile } = await import("@tauri-apps/plugin-fs");
       const bytes = Array.from(await readFile(selectedPath));
       const normalized = await normalizeGenerationInputBytes(bytes, getFilenameFromPath(selectedPath));
-      resetStagedInputForManualReplacement();
-      applyNormalizedImagePreview(normalized);
-
-      const response = await uploadImageBytes(normalized.bytes, normalized.filename);
-      generation.inputImage = response.name;
-      syncInpaintBaseIfNeeded(normalized, response.name);
+      await installInput(normalized, request);
     } catch (e) {
       console.error("Failed to upload image:", e);
     } finally {
@@ -570,6 +594,7 @@
   }
 
   async function handleImageDrop(e: DragEvent) {
+    const request = beginInputRequest();
     e.preventDefault();
     dragOver = false;
     const file = e.dataTransfer?.files?.[0];
@@ -580,12 +605,7 @@
       const buffer = await file.arrayBuffer();
       const bytes = Array.from(new Uint8Array(buffer));
       const normalized = await normalizeGenerationInputBytes(bytes, file.name || "dropped_image.png");
-      resetStagedInputForManualReplacement();
-      applyNormalizedImagePreview(normalized);
-
-      const response = await uploadImageBytes(normalized.bytes, normalized.filename);
-      generation.inputImage = response.name;
-      syncInpaintBaseIfNeeded(normalized, response.name);
+      await installInput(normalized, request);
     } catch (e) {
       console.error("Failed to handle dropped image:", e);
       gallery.showToast(locale.t('generation.toast.failed_drop'), "error");
@@ -634,18 +654,14 @@
   }
 
   async function handleImagePaste(file?: File | null) {
+    const request = beginInputRequest();
     try {
       uploading = true;
       const bytes = file
         ? Array.from(new Uint8Array(await file.arrayBuffer()))
         : await readClipboardImageSafe();
       const normalized = await normalizeGenerationInputBytes(bytes, file?.name || "pasted_image.png");
-      resetStagedInputForManualReplacement();
-      applyNormalizedImagePreview(normalized);
-
-      const response = await uploadImageBytes(normalized.bytes, normalized.filename);
-      generation.inputImage = response.name;
-      syncInpaintBaseIfNeeded(normalized, response.name);
+      await installInput(normalized, request);
     } catch (e) {
       console.error("Failed to paste image:", e);
     } finally {
@@ -672,15 +688,10 @@
   }
 
   function clearImage() {
-    generation.inputImage = null;
-    imageAspect = null;
-    canvas.clearStaging();
-    canvas.clearInpaintSession();
-    canvas.setReferenceImage(null);
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-      imagePreviewUrl = null;
-    }
+    inputRequest += 1;
+    resetStagedInputForManualReplacement();
+    if (generation.mode === 'inpainting') canvas.setReferenceImage(null);
+    generation.setModeInput(generation.mode, { input: null, preview: null, aspect: null });
   }
 
   function clearMask() {
@@ -703,8 +714,9 @@
 
   async function refineImage(image: OutputImage) {
     try {
-      generation.inputImage = await uploadOutputImageForGenerationInput(image, "img2img_input.png");
+      const inputName = await uploadOutputImageForGenerationInput(image, "img2img_input.png");
       generation.mode = "img2img";
+      generation.inputImage = inputName;
       generation.upscaleEnabled = false;
       gallery.showToast(locale.t('gallery.toast.loaded_img2img'), "success");
       await revealImageInputSection();
@@ -716,8 +728,9 @@
 
   async function upscaleImage(image: OutputImage) {
     try {
-      generation.inputImage = await uploadOutputImageForGenerationInput(image, "refine_input.png");
+      const inputName = await uploadOutputImageForGenerationInput(image, "refine_input.png");
       generation.mode = "img2img";
+      generation.inputImage = inputName;
       generation.upscaleEnabled = true;
       gallery.showToast(locale.t('generation.toast.loaded_upscale'), "success");
       await revealImageInputSection();
@@ -733,10 +746,10 @@
       const normalized = prepared.normalized;
       if (!normalized) throw new Error("Expected normalized inpaint source");
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
+      generation.mode = "inpainting";
       generation.inputImage = response.name;
       canvas.clearMask();
       canvas.clearStaging();
-      generation.mode = "inpainting";
       progress.setLastOutputForMode("inpainting", null);
       canvas.isCanvasMode = true;
       applyNormalizedImagePreview(normalized);
@@ -868,6 +881,7 @@
         const s = JSON.parse(raw) as {
           left?: number; right?: number; bottom?: number;
           leftCollapsed?: boolean; rightCollapsed?: boolean; bottomCollapsed?: boolean;
+          bottomByMode?: Record<string, boolean>;
         };
         return {
           left: typeof s.left === "number" ? Math.min(LEFT_MAX, Math.max(LEFT_MIN, s.left)) : LEFT_DEFAULT,
@@ -876,15 +890,17 @@
           leftCollapsed: s.leftCollapsed === true,
           rightCollapsed: s.rightCollapsed === true,
           bottomCollapsed: s.bottomCollapsed === true,
+          bottomByMode: s.bottomByMode ?? {},
         };
       }
     } catch {}
-    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false };
+    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomByMode: {} as Record<string, boolean> };
   }
 
   function savePanelLayout() {
     try {
-      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed }));
+      bottomByMode[layoutMode] = bottomCollapsed;
+      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed, bottomByMode }));
     } catch {}
   }
 
@@ -899,6 +915,8 @@
   const BOTTOM_MAX = 500;
 
   const _savedLayout = loadPanelLayout();
+  const bottomByMode = _savedLayout.bottomByMode;
+  let layoutMode = untrack(() => generation.mode);
   let leftWidth = $state(_savedLayout.left);
   let rightWidth = $state(_savedLayout.right);
   let bottomHeight = $state(_savedLayout.bottom);
@@ -906,7 +924,12 @@
   // Panel collapse state (restored from persisted layout)
   let leftCollapsed = $state(_savedLayout.leftCollapsed);
   let rightCollapsed = $state(_savedLayout.rightCollapsed);
-  let bottomCollapsed = $state(_savedLayout.bottomCollapsed);
+  let bottomCollapsed = $state(bottomByMode[layoutMode] ?? (layoutMode === 'inpainting' || _savedLayout.bottomCollapsed));
+  let workspaceWidth = $state(1500);
+  const panelScale = $derived(Math.min(1, Math.max(0, workspaceWidth - 360) /
+    Math.max(1, (leftCollapsed ? 0 : leftWidth) + (rightCollapsed ? 0 : rightWidth))));
+  const visibleLeftWidth = $derived(Math.max(LEFT_MIN, Math.round(leftWidth * panelScale)));
+  const visibleRightWidth = $derived(Math.max(RIGHT_MIN, Math.round(rightWidth * panelScale)));
 
   // Store pre-collapse widths/heights so we can restore them. Seed from the saved
   // sizes so expanding a panel that was restored as collapsed brings back its real size.
@@ -1239,15 +1262,21 @@
     bottomHeight = BOTTOM_DEFAULT;
   }
 
-  let wasInpaintingWorkspace = $state(false);
   $effect(() => {
-    const isInpainting = generation.mode === "inpainting";
+    const mode = generation.mode;
+    const isInpainting = mode === "inpainting";
     // Inpainting is one coherent workspace. Keeping the canvas mounted prevents
     // two divergent sets of masks, previews and result actions.
     canvas.isCanvasMode = isInpainting;
     if (isInpainting && canvas.layers.length === 0) canvas.initCanvas(generation.width, generation.height);
-    if (isInpainting && !wasInpaintingWorkspace) bottomCollapsed = true;
-    wasInpaintingWorkspace = isInpainting;
+    untrack(() => {
+      if (layoutMode !== mode) {
+        bottomByMode[layoutMode] = bottomCollapsed;
+        layoutMode = mode;
+        bottomCollapsed = bottomByMode[mode] ?? (isInpainting || mobileFriendly);
+        imagePasteTarget = null;
+      }
+    });
   });
 
   function hasFilePayload(dt: DataTransfer | null): boolean {
@@ -1415,26 +1444,22 @@
    *  byte array never crosses the IPC boundary, which could fail silently for
    *  large files and leave the preview set without an input image (#273). */
   async function handleImageDropPath(path: string, filename: string) {
+    const request = beginInputRequest();
     uploading = true;
     dragOver = false;
     try {
       const { readFile } = await import("@tauri-apps/plugin-fs");
       const bytes = Array.from(await readFile(path));
       const normalized = await normalizeGenerationInputBytes(bytes, filename);
-      resetStagedInputForManualReplacement();
-      applyNormalizedImagePreview(normalized);
-      const response = await uploadImage(path);
-      generation.inputImage = response.name;
-      syncInpaintBaseIfNeeded(normalized, response.name);
+      await installInput(
+        normalized,
+        request,
+        normalized.bytes === bytes
+          ? () => uploadImage(path)
+          : () => uploadImageBytes(normalized.bytes, normalized.filename),
+      );
     } catch (e) {
       console.error("Failed to handle dropped image:", e);
-      // Don't leave a preview visible when the upload never registered.
-      generation.inputImage = null;
-      if (imagePreviewUrl) {
-        URL.revokeObjectURL(imagePreviewUrl);
-        imagePreviewUrl = null;
-      }
-      canvas.setReferenceImage(null);
       gallery.showToast(locale.t('generation.toast.failed_drop'), "error");
     } finally {
       uploading = false;
@@ -2287,6 +2312,7 @@
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
+    bind:clientWidth={workspaceWidth}
     class="flex flex-col h-full select-none {draggingSection ? 'cursor-grabbing' : ''}"
     onmousemove={onPointerMove}
     onmouseup={onPointerUp}
@@ -2324,7 +2350,7 @@
             : 'overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] px-3 pt-2 flex flex-col gap-2 shrink-0 border-r'} {draggingSection && pendingDrop?.side === 'left' ? 'border-indigo-500/50' : 'border-transparent'} {compare.active ? 'compare-cell-glow' : ''}"
           style={mobileFriendly
             ? `bottom: calc(env(safe-area-inset-bottom) + 4rem); transform: ${mobilePanelTransform("left")}; transition: ${mobilePanelTransition("left")}; z-index: ${mobilePanelZIndex("left")};${compare.active ? ` --compare-color: ${compare.activeColor};` : ""}`
-            : `width: ${leftWidth}px${compare.active ? `; --compare-color: ${compare.activeColor}` : ""}`}
+            : `width: ${visibleLeftWidth}px${compare.active ? `; --compare-color: ${compare.activeColor}` : ""}`}
         >
         {#if mobileFriendly}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -2482,7 +2508,7 @@
           : 'overflow-y-auto [scrollbar-gutter:stable] p-3 flex flex-col gap-2 shrink-0 border-l'} {draggingSection && pendingDrop?.side === 'right' ? 'border-indigo-500/50' : 'border-transparent'} {compare.active ? 'compare-cell-glow' : ''}"
         style={mobileFriendly
           ? `bottom: calc(env(safe-area-inset-bottom) + 4rem); transform: ${mobilePanelTransform("right")}; transition: ${mobilePanelTransition("right")}; z-index: ${mobilePanelZIndex("right")};${compare.active ? ` --compare-color: ${compare.activeColor};` : ""}`
-          : `width: ${rightWidth}px${compare.active ? `; --compare-color: ${compare.activeColor}` : ""}`}
+          : `width: ${visibleRightWidth}px${compare.active ? `; --compare-color: ${compare.activeColor}` : ""}`}
       >
         {#if mobileFriendly}
           <!-- svelte-ignore a11y_no_static_element_interactions -->

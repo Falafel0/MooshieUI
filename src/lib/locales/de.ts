@@ -2039,6 +2039,7 @@ const de: Record<string, string> = {
   "canvas.brush_size": "Größe",
   "canvas.opacity": "Deckkraft",
   "canvas.zoom_in": "Vergrößern",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Verkleinern",
   "canvas.reset_zoom": "Zoom zurücksetzen",
   "canvas.inpaint_mask": "Inpaint-Maske",

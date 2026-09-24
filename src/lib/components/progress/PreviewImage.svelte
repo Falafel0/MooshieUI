@@ -8,7 +8,7 @@
   import { directorTools, directorToolsAvailable } from "../../stores/directorTools.svelte.js";
   import { naiImageEnhance, naiImageEnhanceAvailable } from "../../stores/naiImageEnhance.svelte.js";
   import { generate, uploadImageBytes, downloadModel, saveVideoToGalleryManual } from "../../utils/api.js";
-  import { loadOutputImageForGenerationInput, uploadImageUrlForGenerationInput, imageUrlToPngBytes } from "../../utils/galleryActions.js";
+  import { loadOutputImageForGenerationInput, imageUrlToPngBytes } from "../../utils/galleryActions.js";
   import { normalizeGenerationInputBytes, MAX_INPUT_PIXELS_INPAINT } from "../../utils/editImagePreparation.js";
   import { formatGenerationTime } from "../../utils/localeFormat.js";
   import {
@@ -188,6 +188,7 @@
     if (savedImage) {
       const source = await loadOutputImageForGenerationInput(savedImage, `${prefix}_${Date.now()}.png`);
       const upload = await uploadImageBytes(source.bytes, source.filename);
+      generation.setModeInput('img2img', { input: upload.name, mask: null, preview: URL.createObjectURL(new Blob([new Uint8Array(source.bytes)], { type: 'image/png' })), aspect: null });
       return upload.name;
     }
     const sourceUrl = previewSrc ?? progress.lastOutputImage;
@@ -195,7 +196,10 @@
       gallery.showToast(locale.t("preview.not_available"), "info");
       return null;
     }
-    return uploadImageUrlForGenerationInput(sourceUrl, `${prefix}_${Date.now()}.png`);
+    const bytes = await imageUrlToPngBytes(sourceUrl);
+    const upload = await uploadImageBytes(bytes, `${prefix}_${Date.now()}.png`);
+    generation.setModeInput('img2img', { input: upload.name, mask: null, preview: URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' })), aspect: null });
+    return upload.name;
   }
 
   /** Load the current preview into img2img mode without starting a generation (#391). */
@@ -203,8 +207,8 @@
     try {
       const uploadName = await resolvePreviewUploadName("img2img");
       if (!uploadName) return;
-      generation.inputImage = uploadName;
       generation.mode = "img2img";
+      generation.inputImage = uploadName;
       generation.refineOnly = false;
       generation.upscaleEnabled = false;
       gallery.showToast(locale.t("gallery.toast.loaded_img2img"), "success");
@@ -242,10 +246,10 @@
 
       // Upload normalised bytes and wire everything up.
       const upload = await uploadImageBytes(normalized.bytes, normalized.filename);
+      generation.mode = "inpainting";
       generation.inputImage = upload.name;
       generation.width = normalized.width;
       generation.height = normalized.height;
-      generation.mode = "inpainting";
       canvas.clearMask();
       canvas.isCanvasMode = true;
       canvas.clearStaging();

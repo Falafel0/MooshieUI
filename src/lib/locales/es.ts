@@ -2081,6 +2081,7 @@ const es: Record<string, string> = {
   "canvas.brush_size": "Tamaño",
   "canvas.opacity": "Opacidad",
   "canvas.zoom_in": "Acercar",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Alejar",
   "canvas.reset_zoom": "Restablecer zoom",
   "canvas.inpaint_mask": "Máscara de inpaint",

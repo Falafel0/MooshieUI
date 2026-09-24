@@ -20,7 +20,7 @@
   </div>
   <div class="flex shrink-0 items-center gap-0.5 border-l border-neutral-800 pl-1.5">
     <button type="button" onclick={() => canvas.zoomOut()} class="flex h-5 w-5 items-center justify-center rounded text-sm text-neutral-400 hover:bg-neutral-800 hover:text-white" title={locale.t('canvas.zoom_out')}>−</button>
-    <span class="w-10 text-center tabular-nums text-neutral-300">{canvas.zoomPercent}%</span>
+    <button type="button" onclick={() => canvas.zoomToFit(canvas.viewportWidth, canvas.viewportHeight)} class="h-5 w-10 rounded text-center tabular-nums text-neutral-300 hover:bg-neutral-800 hover:text-white" title={locale.t('canvas.fit_view')}>{canvas.zoomPercent}%</button>
     <button type="button" onclick={() => canvas.zoomIn()} class="flex h-5 w-5 items-center justify-center rounded text-sm text-neutral-400 hover:bg-neutral-800 hover:text-white" title={locale.t('canvas.zoom_in')}>+</button>
     <button type="button" onclick={() => canvas.resetZoom()} class="h-5 rounded px-1 text-[9px] text-neutral-500 hover:bg-neutral-800 hover:text-white" title={locale.t('canvas.reset_zoom')}>1:1</button>
   </div>

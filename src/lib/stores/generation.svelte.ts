@@ -747,8 +747,30 @@ class GenerationStore {
    */
   pausedEditArmed = $state(false);
   denoise = $state(0.7);
-  inputImage = $state<string | null>(null);
-  maskImage = $state<string | null>(null);
+  // Input files belong to their editing workspace, not whichever tab is visible
+  // when an asynchronous upload happens to finish. Kept in memory with previews.
+  modeInputs = $state<Partial<Record<GenerationMode, {
+    input: string | null; mask: string | null; preview: string | null;
+    aspect: { w: number; h: number } | null;
+  }>>>({});
+  private modeGeometry: Partial<Record<GenerationMode, { width: number; height: number; denoise: number; refineOnly: boolean }>> = {};
+
+  get inputImage(): string | null { return this.modeInputs[this._mode]?.input ?? null; }
+  set inputImage(input: string | null) { this.setModeInput(this._mode, { input }); }
+  get maskImage(): string | null { return this.modeInputs[this._mode]?.mask ?? null; }
+  set maskImage(mask: string | null) { this.setModeInput(this._mode, { mask }); }
+  get inputPreviewUrl(): string | null { return this.modeInputs[this._mode]?.preview ?? null; }
+  get inputAspect(): { w: number; h: number } | null { return this.modeInputs[this._mode]?.aspect ?? null; }
+
+  setModeInput(mode: GenerationMode, patch: Partial<NonNullable<typeof this.modeInputs[GenerationMode]>>) {
+    const previous = this.modeInputs[mode];
+    if ('preview' in patch && previous?.preview && previous.preview !== patch.preview) {
+      URL.revokeObjectURL(previous.preview);
+    }
+    this.modeInputs = { ...this.modeInputs, [mode]: {
+      input: null, mask: null, preview: null, aspect: null, ...previous, ...patch,
+    } };
+  }
   inpaintSettings = $state<InpaintSettings>({ ...DEFAULT_INPAINT_SETTINGS });
   growMaskBy = $state(6);
   differentialDiffusion = $state(false);
@@ -1114,6 +1136,9 @@ class GenerationStore {
   setMode(mode: GenerationMode): void {
     if (mode === this._mode) return;
 
+    this.modeGeometry[this._mode] = { width: this.width, height: this.height, denoise: this.denoise, refineOnly: this.refineOnly };
+    const geometry = this.modeGeometry[mode];
+
     this.modeToggles = {
       ...this.modeToggles,
       [this._mode]: this.readModeToggleState(),
@@ -1127,6 +1152,14 @@ class GenerationStore {
     }
 
     this._mode = mode;
+    if (geometry) {
+      this.width = geometry.width;
+      this.height = geometry.height;
+      this.denoise = geometry.denoise;
+      this.refineOnly = geometry.refineOnly;
+    } else {
+      this.refineOnly = false;
+    }
     this.applyModeToggleState(this.modeToggles[mode] ?? defaultModeToggleState());
     // Leaving the inpaint canvas abandons the painted edit; the paused run
     // itself stays until discarded.

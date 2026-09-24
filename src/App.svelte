@@ -478,8 +478,9 @@
 
   async function upscaleImage(image: OutputImage) {
     try {
-      generation.inputImage = await uploadOutputImageForGenerationInput(image, "refine_input.png");
+      const inputName = await uploadOutputImageForGenerationInput(image, "refine_input.png");
       generation.mode = "img2img";
+      generation.inputImage = inputName;
       generation.upscaleEnabled = true;
       // Skip the base img2img pass — the user wants to upscale this image
       // as-is, not regenerate it first.
@@ -534,9 +535,11 @@
     try {
       const prepared = await prepareOutputImageForEditMode(image, mode);
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
-      generation.inputImage = response.name;
-      canvas.clearMask();
       generation.mode = mode;
+      generation.setModeInput(mode, mode === 'inpainting'
+        ? { input: response.name, mask: null }
+        : { input: response.name, mask: null, preview: URL.createObjectURL(new Blob([new Uint8Array(prepared.uploadBytes)], { type: 'image/png' })), aspect: null });
+      if (mode === 'inpainting') canvas.clearMask();
       generation.upscaleEnabled = false;
       generation.refineOnly = false;
 
@@ -1358,10 +1361,8 @@
   async function img2imgFromPreviewUrl(url: string) {
     try {
       const name = await uploadModelPreviewImage(url, "model_preview.png");
-      generation.inputImage = name;
-      canvas.clearMask();
-      generation.maskImage = null;
       generation.mode = "img2img";
+      generation.setModeInput('img2img', { input: name, mask: null, preview: url, aspect: null });
       currentPage = "generate";
       gallery.showToast(locale.t("gallery.toast.loaded_img2img"), "success");
     } catch (e) {
@@ -2081,20 +2082,17 @@
    * MooshieSaveImage sends PNG bytes directly over WS — no disk round-trip.
    */
   async function prepareLatestInpaintResult(image: OutputImage, snapshot: NonNullable<ReturnType<typeof canvas.claimInpaintPrompt>>) {
+    let unusedPreview: string | null = null;
     try {
       const prepared = await prepareOutputImageForEditMode(image, "inpainting");
       const normalized = prepared.normalized;
       if (!normalized) return;
+      unusedPreview = normalized.previewUrl;
 
       const response = await uploadImageBytes(prepared.uploadBytes, prepared.uploadFilename);
-      if (
-        generation.mode !== "inpainting" ||
-        !canvas.isCanvasMode ||
-        !canvas.acceptInpaintResult(snapshot)
-      ) {
-        URL.revokeObjectURL(normalized.previewUrl);
-        return;
-      }
+      // Completion belongs to the submitted document even while another tab is
+      // visible. Source version/order/cancellation are checked by the registry.
+      if (!canvas.acceptInpaintResult(snapshot)) return;
       // Display-only: preview the result without advancing the base, so the next
       // "Generate" re-rolls the original base + mask. "Apply" promotes it later.
       canvas.setPendingInpaintResult({
@@ -2106,9 +2104,11 @@
         maskUrl: snapshot.maskUrl,
         rasterLayerIds: snapshot.rasterLayerIds,
       });
+      unusedPreview = null;
     } catch (e) {
       console.error("Failed to prepare latest inpaint result:", e);
     } finally {
+      if (unusedPreview) URL.revokeObjectURL(unusedPreview);
       canvas.finishInpaintResult(snapshot);
     }
   }
@@ -2152,7 +2152,7 @@
 
     gallery.addImages(newImages);
     progress.setLastOutputForMode(mode, newImages[0]?.url ?? null);
-    if (mode === "inpainting" && generation.mode === "inpainting" && canvas.isCanvasMode && newImages[0]) {
+    if (mode === "inpainting" && newImages[0]) {
       const snapshot = canvas.claimInpaintPrompt(promptId);
       if (snapshot) void prepareLatestInpaintResult(newImages[0], snapshot);
     }

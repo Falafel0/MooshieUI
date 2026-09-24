@@ -2018,6 +2018,7 @@ const pt: Record<string, string> = {
   "canvas.brush_size": "Tamanho",
   "canvas.opacity": "Opacidade",
   "canvas.zoom_in": "Aumentar zoom",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Diminuir zoom",
   "canvas.reset_zoom": "Redefinir zoom",
   "canvas.inpaint_mask": "Máscara de inpaint",

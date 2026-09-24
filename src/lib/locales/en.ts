@@ -2452,6 +2452,7 @@ const en: Record<string, string> = {
   "canvas.brush_size": "Size",
   "canvas.opacity": "Opacity",
   "canvas.zoom_in": "Zoom in",
+  "canvas.fit_view": "Fit canvas to view",
   "canvas.zoom_out": "Zoom out",
   "canvas.reset_zoom": "Reset zoom",
   "canvas.inpaint_mask": "Inpaint Mask",
