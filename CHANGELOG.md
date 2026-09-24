@@ -1,5 +1,12 @@
 # Changelog
 
+## What's New in v2.3.6-fork.4
+
+- Moves Docker publication to the fork-owned `ghcr.io/falafel0/mooshieui-fork` package, separating its permissions, cache and release tags from the original project.
+- Carries forward the exact updater asset-name and URL matching fix from v2.3.6-fork.3, which remains an unpublished build candidate.
+
+---
+
 ## What's New in v2.3.6-fork.3
 
 - Fixes automatic-update download URLs for the fork's spaced product name by normalizing release asset filenames before upload.
