@@ -44,6 +44,10 @@ export interface DetailSegment {
 
 export interface PositiveRegion {
   text: string;
+  /** Optional local negative prompt for the same spatial influence mask. */
+  negative_text?: string;
+  /** Uploaded grayscale mask used by inpainting; txt2img falls back to the box. */
+  mask_image?: string;
   x: number;
   y: number;
   width: number;
@@ -53,7 +57,7 @@ export interface PositiveRegion {
 
 export type RegionalPromptShape = "box" | "circle" | "lasso";
 
-/** How regional prompts are applied in txt2img. */
+/** How regional prompts are applied in txt2img. Inpainting always uses conditioning. */
 export type RegionalPromptStrategy = "conditioning" | "inpaint_chain";
 
 export interface RegionalPromptPoint {
@@ -65,6 +69,10 @@ export interface RegionalPromptSelection {
   id: string;
   shape: RegionalPromptShape;
   text: string;
+  /** Optional spatial negative prompt used by masked inpaint conditioning. */
+  negativeText?: string;
+  /** Uploaded grayscale influence mask used by masked inpaint conditioning. */
+  mask_image?: string;
   strength: number;
   x: number;
   y: number;
@@ -352,6 +360,9 @@ export interface GenerationParams {
   mask_image: string | null;
   grow_mask_by: number | null;
   inpaint_settings?: import("../utils/inpaintSettings.js").InpaintSettings;
+  /** Sampling resolution for this mask/region; compositing still returns width × height. */
+  inpaint_target_width?: number | null;
+  inpaint_target_height?: number | null;
   upscale_enabled: boolean;
   upscale_method: string;
   upscale_model: string | null;

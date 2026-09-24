@@ -36,16 +36,22 @@
   let error = $state("");
 
   async function sendImageToPhotopea() {
-    if (!image?.gallery_filename || !iframeEl?.contentWindow) return;
+    if (!image || !iframeEl?.contentWindow) return;
     try {
       // Always PNG bytes — the backend transcodes JXL sources on the way out.
-      const bytes = await loadGalleryImagePng(image.gallery_filename);
-      const buffer = new Uint8Array(bytes).buffer;
+      const buffer = image.sessionBlob
+        ? await image.sessionBlob.arrayBuffer()
+        : new Uint8Array(await loadGalleryImagePng(image.gallery_filename!)).buffer;
       iframeEl.contentWindow.postMessage(buffer, PHOTOPEA_ORIGIN);
     } catch (e) {
       error = locale.t("photopea.load_failed");
       console.error("Photopea: failed to load source image:", e);
     }
+  }
+
+  function requestSave() {
+    if (phase !== "ready" || saving) return;
+    iframeEl?.contentWindow?.postMessage('app.activeDocument.saveToOE("png");', PHOTOPEA_ORIGIN);
   }
 
   async function handleSavedBuffer(buffer: ArrayBuffer) {
@@ -127,6 +133,8 @@
       {:else if error}
         <span class="text-xs text-red-400 shrink-0">{error}</span>
       {/if}
+      <button type="button" disabled={phase !== 'ready' || saving} class="h-8 rounded-md border border-indigo-500 bg-indigo-600/25 px-3 text-xs font-medium text-indigo-100 hover:bg-indigo-600/40 disabled:opacity-40" onclick={requestSave}>{locale.t('photopea.save_gallery')}</button>
+      <button type="button" disabled={phase === 'boot'} class="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40" onclick={sendImageToPhotopea}>{locale.t('photopea.reload_source')}</button>
       <button
         type="button"
         class="text-neutral-400 hover:text-neutral-100 text-xl leading-none shrink-0"

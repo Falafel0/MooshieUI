@@ -11,7 +11,7 @@ export function captureLayer(layer: Konva.Layer, width: number, height: number):
   }
 }
 
-/** Mask paint uses a 45% alpha overlay; export coverage, independent of its tint. */
+/** Convert the mask layer's alpha coverage into a grayscale generation mask. */
 export function maskToGrayscale(source: HTMLCanvasElement): HTMLCanvasElement | null {
   const output = document.createElement("canvas");
   output.width = source.width;
@@ -20,7 +20,7 @@ export function maskToGrayscale(source: HTMLCanvasElement): HTMLCanvasElement | 
   const pixels = source.getContext("2d")!.getImageData(0, 0, source.width, source.height);
   let hasPixels = false;
   for (let i = 0; i < pixels.data.length; i += 4) {
-    const value = Math.min(255, Math.round(pixels.data[i + 3] / 0.45));
+    const value = pixels.data[i + 3];
     if (value > 0) hasPixels = true;
     pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = value;
     pixels.data[i + 3] = 255;

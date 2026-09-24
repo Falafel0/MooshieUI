@@ -62,8 +62,9 @@
 
   interface Props {
     mobileFriendly?: boolean;
+    oneditphotopea?: (image: OutputImage) => void;
   }
-  let { mobileFriendly = false }: Props = $props();
+  let { mobileFriendly = false, oneditphotopea }: Props = $props();
 
   const storageSuffix = mobileFriendly ? ".mobile" : ".desktop";
   const DIMENSIONS_LAYOUT_KEY = `mooshieui.generation.dimensions.layout.v1${storageSuffix}`;
@@ -1603,6 +1604,7 @@
   {/snippet}
 
   {#snippet dimensionsSection()}
+    {@const dimensionsTitle = generation.mode === 'inpainting' ? locale.t('canvas.document_size') : locale.t('generation.dimensions.title')}
     <div bind:this={sectionRefs['dimensions']} data-drop-section="dimensions" class="relative rounded-lg bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'dimensions' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'dimensions' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-neutral-800'} transition-colors"
       ondragenter={(e) => onMetadataDragEnter(e, "dimensions")}
       ondragover={(e) => onMetadataDragOver(e, "dimensions")}
@@ -1614,9 +1616,9 @@
         <button
           class="flex-1 flex items-center justify-between py-2 pr-3 text-xs text-neutral-300 hover:text-neutral-100 focus:outline-none"
           onclick={() => (dimensionsSectionOpen = !dimensionsSectionOpen)}
-          title={dimensionsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.dimensions.title') }) : locale.t('common.expand', { section: locale.t('generation.dimensions.title') })}
+          title={dimensionsSectionOpen ? locale.t('common.collapse', { section: dimensionsTitle }) : locale.t('common.expand', { section: dimensionsTitle })}
         >
-          <span class="font-medium">{locale.t('generation.dimensions.title')}</span>
+          <span class="font-medium">{dimensionsTitle}</span>
           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {dimensionsSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
       </div>
@@ -1628,7 +1630,7 @@
       {#if metadataDropTarget === "dimensions"}
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-lg bg-indigo-500/10 border-2 border-dashed border-indigo-400/60">
           <span class="text-xs font-medium text-indigo-300 bg-neutral-900/80 px-3 py-1.5 rounded-full">
-            {locale.t('common.drop_to_import', { section: locale.t('generation.dimensions.title') })}
+            {locale.t('common.drop_to_import', { section: dimensionsTitle })}
           </span>
         </div>
       {/if}
@@ -1960,7 +1962,7 @@
             </label>
             <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
           </div>
-          <LayerPanel onAddRegions={() => (regionalPromptModalOpen = true)} />
+          <LayerPanel />
           {/if}
         </div>
       {/if}
@@ -2445,7 +2447,7 @@
 
     {#if generation.mode === 'inpainting'}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <CanvasEditor bind:this={canvasEditorRef} />
+        <CanvasEditor bind:this={canvasEditorRef} {oneditphotopea} />
       </div>
     {:else}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -2681,11 +2683,9 @@
     />
   {/if}
 
-  {#if regionalPromptModalOpen}
+  {#if regionalPromptModalOpen && generation.mode !== 'inpainting'}
     <RegionalPromptModal
-      initialRegions={generation.mode === 'inpainting' ? [] : generation.regionalPrompts}
-      referenceImage={generation.mode === 'inpainting' ? canvas.effectiveReferenceImage : null}
-      onSave={generation.mode === 'inpainting' ? (regions) => { for (const region of regions) canvas.addRegionLayer(region); } : undefined}
+      initialRegions={generation.regionalPrompts}
       onclose={() => (regionalPromptModalOpen = false)}
     />
   {/if}

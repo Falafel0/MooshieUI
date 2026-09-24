@@ -912,6 +912,11 @@
   }
 
   async function editInPhotopea(image: OutputImage) {
+    if (image.sessionBlob) {
+      photopeaImage = image;
+      photopeaOpen = true;
+      return;
+    }
     const filename = await gallery.resolveGalleryFilename(image);
     if (!filename) {
       gallery.showToast(locale.t("gallery.persisted_only_thumb"), "warning");
@@ -3996,7 +4001,7 @@
     {/if}
     <div class="relative flex-1 overflow-hidden md:min-h-0 md:rounded-xl md:bg-neutral-950" inert={startup.locked}>
     {#if currentPage === "generate"}
-      <GenerationPage />
+      <GenerationPage oneditphotopea={editInPhotopea} />
     {:else if currentPage === "music"}
       <MusicPage {userRole} />
     {:else if currentPage === "gallery"}

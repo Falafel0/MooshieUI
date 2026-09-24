@@ -1,3 +1,18 @@
+## What's New in v2.3.6-fork.5
+
+- Fixes inpainting mask processing after image resizing: the sampler now receives the correctly scaled latent mask, so masked generation stays aligned for stretch, crop, fill and latent resize modes.
+- Adds independent generation resolution for every inpaint mask while keeping the final composite at the canvas size.
+- Keeps raster layers, masks, regions, the selection box and the viewport center aligned proportionally when the canvas is resized.
+- Adds per-layer context controls, a high-resolution masked workflow with proportional upscale/inpaint/downscale, live canvas context geometry, direct PNG saving and direct Photopea hand-off.
+- Renders live inpainting previews directly on the zoomable canvas and replaces the separate preview window with a compact progress indicator.
+- Keeps ControlNet hints at the same crop, aspect ratio and sampling resolution as each Only masked region, avoiding double resizing and shifted edges.
+- Treats prompt regions as spatial conditioning layers rather than edit masks; overlapping inpaint masks combine the global prompt, their local prompt and regional influence without adding regions to the inpaint sequence.
+- Adds direct transform handles for raster, mask and prompt-region layers plus an on-canvas document resize frame, while keeping guides out of exports and color sampling.
+- Synchronizes on-canvas document resizing with Canvas size and saves per-mode dimensions. Saves prompt edits when leaving their controls.
+- Shows only the selected mask or prompt region, preserves actual alpha coverage and remembers context-guide visibility per layer. Removes duplicate context controls, strength badges and the separate inpainting region editor.
+
+---
+
 ## What's New in v2.3.6-fork.4
 
 - Publishes the server container as the fork-owned `ghcr.io/falafel0/mooshieui-fork` package so releases do not collide with the original project's package permissions or tags.
