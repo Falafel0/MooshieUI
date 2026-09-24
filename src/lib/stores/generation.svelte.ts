@@ -653,6 +653,7 @@ export const DEFAULT_NANOSAUR_NEGATIVE_QUALITY = appendMissingNegativeTags(
 
 class GenerationStore {
   _mode = $state<GenerationMode>("txt2img");
+  lastImageMode = $state<Exclude<GenerationMode, "video">>("txt2img");
   modeToggles = $state<ModeToggleStates>(createDefaultModeToggles());
   positivePrompt = $state("");
   negativePrompt = $state("");
@@ -1153,6 +1154,7 @@ class GenerationStore {
   }
 
   setMode(mode: GenerationMode): void {
+    if (mode !== "video") this.lastImageMode = mode;
     if (mode === this._mode) return;
 
     this.modeGeometry[this._mode] = { width: this.width, height: this.height, denoise: this.denoise, refineOnly: this.refineOnly };
@@ -2904,6 +2906,7 @@ class GenerationStore {
           };
         }
         this._mode = savedMode;
+        if (savedMode !== "video") this.lastImageMode = savedMode;
         this.applyModeToggleState(this.modeToggles[savedMode] ?? defaultModeToggleState());
         if (saved.outputBitDepth) this.outputBitDepth = saved.outputBitDepth;
         if (saved.outputFormat === "png" || saved.outputFormat === "jxl" || saved.outputFormat === "webp") this.outputFormat = saved.outputFormat;
