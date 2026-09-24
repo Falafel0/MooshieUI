@@ -2,6 +2,7 @@
   import { canvas } from "../../../stores/canvas.svelte.js";
   import { generation } from "../../../stores/generation.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import { grayscaleMaskBounds } from "../../../utils/canvasLayerExport.js";
   import InpaintSettings from "../InpaintSettings.svelte";
 
   const layer = $derived(canvas.activeLayer);
@@ -9,7 +10,15 @@
   const aspectLocked = $derived(layer?.inpaintAspectLocked !== false);
 
   function setOwnSettings(enabled: boolean) {
-    if (layer) canvas.setLayerGenerationOverride(layer.id, enabled);
+    if (!layer) return;
+    const layerId = layer.id;
+    canvas.setLayerGenerationOverride(layerId, enabled);
+    if (!enabled) return;
+    const mask = canvas.exportMaskLayer(layerId);
+    const bounds = mask ? grayscaleMaskBounds(mask) : null;
+    if (!bounds) return;
+    const align = (value: number) => Math.max(64, Math.min(16384, Math.ceil(value / 8) * 8));
+    canvas.setLayerInpaintSize(layerId, align(bounds.width), align(bounds.height));
   }
 
   function setWidth(value: number) {
@@ -111,11 +120,11 @@
             {#if layer.type === 'mask'}
               <label class="block text-[10px] text-neutral-400">
                 {locale.t('canvas.layer_prompt')}
-                <textarea rows="2" value={layer.positivePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { positivePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500"></textarea>
+                <textarea rows="2" value={layer.positivePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { positivePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-violet-500"></textarea>
               </label>
               <label class="block text-[10px] text-neutral-400">
                 {locale.t('canvas.layer_negative_prompt')}
-                <textarea rows="1" value={layer.negativePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { negativePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500"></textarea>
+                <textarea rows="1" value={layer.negativePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { negativePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-violet-500"></textarea>
               </label>
               <label class="block text-[10px] text-neutral-400">
                 {locale.t('generation.image.denoise')} <span class="float-right tabular-nums text-neutral-300">{(layer.denoise ?? generation.denoise).toFixed(2)}</span>
