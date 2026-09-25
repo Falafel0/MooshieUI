@@ -1,5 +1,23 @@
 # Changelog
 
+## What's New in v2.3.7-fork.2
+
+### Inpainting layers, masks and regional prompting
+- Aligns inpaint regional-conditioning masks with the sampler crop and resolution, and enables Anima regional inpainting through ordered local passes.
+- Keeps masks and regions visible during result preview while separating display overlay opacity from exported mask coverage.
+- Retains the exact mask and baked-raster snapshot for every completed result selected from history, keeping Apply, insert, save and Photopea actions available.
+- Separates Base, pending Result and editable layers. Applying a result preserves layer objects; base undo restores each mask and region independently, including pixels, opacity and visibility.
+- Removes the incorrect Staged state from the inpainting base and stops it from disabling source-image controls.
+
+### Photopea round trip
+- Adds direct Photopea import actions for canvas base, raster layer, inpaint mask and regional-prompt mask while retaining Save to gallery.
+
+### Upstream and release reliability
+- Merges upstream v2.3.7 artist favourites, Video navigation and gallery LoRA restoration, plus fork fixes for mask-bound layer sizing and live previews.
+- Replaces the unpublished failed `v2.3.7-fork.1` build candidate with synchronized package, Cargo and Tauri version metadata.
+
+---
+
 ## What's New in v2.3.6-fork.5
 
 - Fixes the inpainting resize pipeline by passing the mask to the sampler at the same latent resolution as the generated image. This keeps painted regions aligned in every resize mode.

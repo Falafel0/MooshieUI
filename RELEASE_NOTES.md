@@ -1,3 +1,23 @@
+## What's New in v2.3.7-fork.2
+
+### Inpainting layers, masks and regional prompting
+- Regional prompts now work during inpainting. Uploaded region masks and box regions are aligned to the exact crop and sampling resolution used by each inpaint pass, including Anima's sequential regional workflow.
+- Visible masks and prompt regions remain visible while a generated result is previewed. Mask opacity is applied once for generation while the canvas keeps a separate configurable overlay opacity.
+- Selecting any completed result restores the mask and raster-layer snapshot captured for that result, so the result action menu remains available and masked insertion does not use the current, unrelated mask.
+- Base, candidate result and layer state are now separate. Applying a result never deletes mask or region layers, and undo restores every mask and prompt region independently with its own pixels, opacity and visibility.
+- The inpainting base no longer appears as a Staged input or disables the source controls. The bottom strip distinguishes the stable Base from the pending Result and exposes result history without silently changing the generation base.
+
+### Photopea round trip
+- Photopea can return the edited document directly as the canvas base, a raster layer, an inpaint mask or a regional-prompt mask. Imported layers remain editable in the inpainting layer stack.
+- Saving a normal gallery copy remains available alongside the new canvas import actions.
+
+### Upstream and reliability fixes
+- Includes upstream v2.3.7 artist favourites, Video navigation and gallery LoRA restoration.
+- Includes the fork fixes for mask-bound inpaint layer sizing and restored live-preview behavior.
+- `v2.3.7-fork.1` remains an unpublished failed build candidate; this release replaces it with synchronized package, Cargo and Tauri versions.
+
+---
+
 ## What's New in v2.3.6-fork.5
 
 - Fixes inpainting mask processing after image resizing: the sampler now receives the correctly scaled latent mask, so masked generation stays aligned for stretch, crop, fill and latent resize modes.
