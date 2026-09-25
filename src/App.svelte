@@ -61,7 +61,7 @@
   import VideoPlayer from "./lib/components/video/VideoPlayer.svelte";
   import InterrogateModal from "./lib/components/generation/InterrogateModal.svelte";
   import ExternalComfyModal from "./lib/components/ExternalComfyModal.svelte";
-  import PhotopeaEditor from "./lib/components/PhotopeaEditor.svelte";
+  import PatchyHandoff from "./lib/components/PatchyHandoff.svelte";
   import { opaqueMaskLuminanceToAlpha } from "./lib/utils/canvasLayerExport.js";
   import GlobalErrorModal from "./lib/components/errors/GlobalErrorModal.svelte";
   import NaiEnhanceModal from "./lib/components/generation/NaiEnhanceModal.svelte";
@@ -870,8 +870,8 @@
   let externalComfyPayload = $state<ComfyServerErrorPayload>({ error: "" });
   let comfyServerUrl = $state("http://127.0.0.1:18288");
 
-  let photopeaOpen = $state(false);
-  let photopeaImage = $state<OutputImage | null>(null);
+  let patchyOpen = $state(false);
+  let patchyImage = $state<OutputImage | null>(null);
 
   /** `slug::pN` -> object URL for a locally generated preview. */
   let artistPreviewSrcs = $state<Record<string, string>>({});
@@ -918,10 +918,10 @@
     return { state: "idle" };
   }
 
-  async function editInPhotopea(image: OutputImage) {
+  async function editInPatchy(image: OutputImage) {
     if (image.sessionBlob) {
-      photopeaImage = image;
-      photopeaOpen = true;
+      patchyImage = image;
+      patchyOpen = true;
       return;
     }
     const filename = await gallery.resolveGalleryFilename(image);
@@ -929,11 +929,11 @@
       gallery.showToast(locale.t("gallery.persisted_only_thumb"), "warning");
       return;
     }
-    photopeaImage = image.gallery_filename ? image : { ...image, gallery_filename: filename };
-    photopeaOpen = true;
+    patchyImage = image.gallery_filename ? image : { ...image, gallery_filename: filename };
+    patchyOpen = true;
   }
 
-  async function importPhotopeaToCanvas(
+  async function importPatchyToCanvas(
     bytes: number[],
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
@@ -945,7 +945,7 @@
       const source = await new Promise<HTMLImageElement>((resolve, reject) => {
         const image = new Image();
         image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("Failed to decode Photopea export"));
+        image.onerror = () => reject(new Error("Failed to decode the Patchy export"));
         image.src = previewUrl!;
       });
       const dimensions = { width: source.naturalWidth, height: source.naturalHeight };
@@ -960,7 +960,7 @@
         if (opaqueMaskLuminanceToAlpha(pixels.data)) {
           context.putImageData(pixels, 0, 0);
           const normalized = await new Promise<Blob>((resolve, reject) =>
-            mask.toBlob((result) => result ? resolve(result) : reject(new Error("Failed to encode Photopea mask")), "image/png"));
+            mask.toBlob((result) => result ? resolve(result) : reject(new Error("Failed to encode the Patchy mask")), "image/png"));
           URL.revokeObjectURL(previewUrl);
           previewUrl = URL.createObjectURL(normalized);
         }
@@ -995,21 +995,21 @@
         previewUrl = null;
       } else {
         const labelKey = target === "raster"
-          ? "photopea.layer_raster"
+          ? "patchy.layer_raster"
           : target === "mask"
-            ? "photopea.layer_mask"
-            : "photopea.layer_region";
+            ? "patchy.layer_mask"
+            : "patchy.layer_region";
         const id = await canvas.addRasterImage(previewUrl, locale.t(labelKey), target);
-        if (!id) throw new Error("Photopea import was superseded by a document change");
+        if (!id) throw new Error("Patchy import was superseded by a document change");
         canvas.activeLayerId = id;
         canvas.setTool("move");
       }
 
       gallery.closeLightbox();
-      gallery.showToast(locale.t(`photopea.imported_${target}`), "success");
+      gallery.showToast(locale.t(`patchy.imported_${target}`), "success");
     } catch (error) {
-      console.error("Photopea: failed to import into canvas:", error);
-      gallery.showToast(locale.t("photopea.import_failed"), "error");
+      console.error("Patchy: failed to import into canvas:", error);
+      gallery.showToast(locale.t("patchy.import_failed"), "error");
       throw error;
     } finally {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -4107,18 +4107,18 @@
         startupStatusKind = "starting";
       }}
     />
-    <PhotopeaEditor
-      open={photopeaOpen}
-      image={photopeaImage}
+    <PatchyHandoff
+      open={patchyOpen}
+      image={patchyImage}
       onclose={() => {
-        photopeaOpen = false;
-        photopeaImage = null;
+        patchyOpen = false;
+        patchyImage = null;
       }}
       onsaved={(filename) => {
         void gallery.addPersistedImage(filename);
-        gallery.showToast(locale.t("photopea.saved"), "success");
+        gallery.showToast(locale.t("patchy.saved"), "success");
       }}
-      onimport={importPhotopeaToCanvas}
+      onimport={importPatchyToCanvas}
     />
     {#if startupStatus && !connection.connected && !startup.locked}
       <div class="mb-1 flex shrink-0 items-center gap-2 rounded-[var(--app-panel-radius)] border border-amber-800/60 bg-amber-950/85 px-4 py-2.5 text-sm text-amber-100 shadow-lg shadow-black/20 backdrop-blur-sm">
@@ -4172,7 +4172,7 @@
     {/if}
     <div class="relative flex-1 overflow-hidden md:min-h-0 md:rounded-xl md:bg-neutral-950" inert={startup.locked}>
     {#if currentPage === "generate"}
-      <GenerationPage oneditphotopea={editInPhotopea} />
+      <GenerationPage oneditpatchy={editInPatchy} />
     {:else if currentPage === "music"}
       <MusicPage {userRole} />
     {:else if currentPage === "gallery"}
@@ -4445,9 +4445,9 @@
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.37 4.36A9 9 0 0020.49 15"/></svg>
         </button>
         <button
-          title={locale.t("gallery.edit_photopea")}
+          title={locale.t("gallery.edit_patchy")}
           class="flex items-center justify-center w-8 h-8 rounded-lg bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 hover:text-neutral-100 transition-colors"
-          onclick={() => gallery.selectedImage && editInPhotopea(gallery.selectedImage)}
+          onclick={() => gallery.selectedImage && editInPatchy(gallery.selectedImage)}
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
         </button>

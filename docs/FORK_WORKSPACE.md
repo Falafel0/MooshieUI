@@ -10,7 +10,7 @@ Inpainting always opens the canvas. The right workspace groups Base, Layers and 
 - **Raster:** paint or insert images, then move, resize, rotate or flip them. Visibility and opacity affect the generation input.
 - **Mask:** paint the area to change. Local prompts, denoise, growth and mask processing can override document settings.
 - **Region:** a special mask layer with its own regional prompt. Visible masks and regions run from bottom to top; the layer list shows their step numbers. Hidden or empty ordinary masks are skipped. Regions require a prompt and painted area.
-- **Photopea:** open the current base, selected raster/mask/region layer, or a generated result. Import the edited PNG as a new base or layer. Transparent masks use alpha coverage; fully opaque mask and region imports use brightness (black = no coverage, white = full coverage).
+- **Patchy:** open the current base, selected raster/mask/region layer, or a generated result in the local Patchy editor. Save there, then import the result back as a new base or layer. Transparent masks use alpha coverage; fully opaque mask and region imports use brightness (black = no coverage, white = full coverage).
 - **ControlNet:** configure its source, strength and start/end range in the dedicated tab. The canvas overlay helps align the control source.
 
 The context eye toggles the selected mask's affected bounds and padding guides. Guides use a reduced-resolution preview for responsiveness and are excluded from exported pixels. Precise output still depends on the model and ComfyUI processing.

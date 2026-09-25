@@ -446,6 +446,40 @@ export async function openDirectory(path: string): Promise<void> {
   return ipcInvoke("open_directory", { path });
 }
 
+// ---------------------------------------------------------------------------
+// Patchy hand-off (desktop only)
+//
+// The editor is a local native application rather than an embedded website, so
+// the document travels through the filesystem: MooshieUI writes it, launches
+// Patchy on it, and reads it back once the user has saved.
+// ---------------------------------------------------------------------------
+
+/** Absolute path to the Patchy executable, or null when it cannot be found. */
+export async function resolvePatchyPath(explicit?: string | null): Promise<string | null> {
+  const resolved = await ipcInvoke<string | null>("resolve_patchy_path", {
+    explicit: explicit ?? null,
+  });
+  return resolved ?? null;
+}
+
+/** Write the document handed to Patchy and return its absolute path. */
+export async function writePatchyDocument(bytes: number[], fileName: string): Promise<string> {
+  return ipcInvoke<string>("write_patchy_document", { bytes, fileName });
+}
+
+/** Read the edited document back. Throws when the file is not there yet. */
+export async function readPatchyDocument(path: string): Promise<number[]> {
+  return ipcInvoke<number[]>("read_patchy_document", { path });
+}
+
+/** Launch Patchy on a document and return the executable path used. */
+export async function launchPatchy(documentPath: string, explicit?: string | null): Promise<string> {
+  return ipcInvoke<string>("launch_patchy", {
+    documentPath,
+    explicit: explicit ?? null,
+  });
+}
+
 export async function findModelByHash(
   category: string,
   hash: string

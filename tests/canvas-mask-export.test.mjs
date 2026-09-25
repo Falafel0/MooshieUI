@@ -38,7 +38,7 @@ test('blank mask does not produce a generation mask', () => {
   assert.equal(sandbox.exports.maskToGrayscale(source), null);
 });
 
-test('opaque Photopea masks use brightness as coverage, while transparent masks retain alpha', () => {
+test('opaque external-editor masks use brightness as coverage, while transparent masks retain alpha', () => {
   const opaque = new Uint8ClampedArray([0,0,0,255, 128,128,128,255, 255,255,255,255]);
   assert.equal(sandbox.exports.opaqueMaskLuminanceToAlpha(opaque), true);
   assert.deepEqual([opaque[3], opaque[7], opaque[11]], [0,128,255]);

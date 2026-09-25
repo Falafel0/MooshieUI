@@ -663,7 +663,7 @@ class GalleryStore {
   }
 
   /**
-   * Insert an already-persisted gallery file (e.g. one saved from the Photopea
+   * Insert an already-persisted gallery file (e.g. one saved from the Patchy
    * editor) at the top of the gallery. The backend's "image_saved" broadcast is
    * not consumed by the frontend, so newly written files must be surfaced here.
    */

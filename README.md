@@ -256,7 +256,7 @@ Auto-installed into ComfyUI alongside MooshieUI's own nodes:
 - **[Danbooru](https://danbooru.donmai.us/)** and **[Gelbooru](https://gelbooru.com/)** - the tag taxonomies behind autocomplete (~140k tags; Gelbooru-derived Anima list curated by [BetaDoggo](https://huggingface.co/BetaDoggo)).
 - **[Animadex](https://animadex.net/)** - the character and LoRA database integration.
 - **[NovelAI](https://novelai.net/)** - the optional hosted image-generation backend, enhancement passes and Director Tools.
-- **[Photopea](https://www.photopea.com/)** - the embedded full image editor.
+- **[Patchy](https://github.com/SethRobinson/Patchy)** - the local image editor used for external edits.
 - **GitHub** and **Cloudflare** - code hosting, CI/CD, releases, and the CDN behind the artist gallery.
 
 ### Libraries

@@ -12,6 +12,8 @@ pub mod music_review;
 #[cfg(feature = "desktop")]
 pub mod novelai;
 #[cfg(feature = "desktop")]
+pub mod patchy;
+#[cfg(feature = "desktop")]
 pub mod prompt_assistant;
 #[cfg(feature = "desktop")]
 pub mod server;

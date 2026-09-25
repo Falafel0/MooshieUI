@@ -512,7 +512,7 @@ class CanvasStore {
 
   restoreOriginalInpaintSource() {
     if (!this.originalInpaintInputImageName || this.originalInpaintWidth == null || this.originalInpaintHeight == null) {
-      // A Photopea/base import may start from an empty document. In that case
+      // A Patchy/base import may start from an empty document. In that case
       // "restore original" means returning to the blank base, not doing nothing.
       this.clearPreparedInpaintOverride();
       this.clearPendingInpaintResult();
