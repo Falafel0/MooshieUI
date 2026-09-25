@@ -21,7 +21,7 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
-  import { getRegionalChainRegions, prepareInpaintConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
+  import { getRegionalChainRegions, hasSequentialInpaintRegionMask, prepareInpaintConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -270,7 +270,9 @@
           errorMsg = locale.t('generation.error_no_image');
           return;
         }
-        if (!generation.maskImage) {
+        // Anima's prompt regions are sequential edit masks. They are uploaded
+        // by the chain, not by the document's ordinary mask export.
+        if (!generation.maskImage && !hasSequentialInpaintRegionMask()) {
           errorMsg = locale.t('generation.error_no_mask');
           return;
         }

@@ -91,3 +91,10 @@ export function getRegionalChainRegions(): RegionalChainRegion[] {
     inpaintHeight: layer.inpaintHeight,
   }));
 }
+
+/** Anima uses a painted prompt region as the mask for its own sequential pass. */
+export function hasSequentialInpaintRegionMask(): boolean {
+  return generation.mode === "inpainting" && generation.isAnima &&
+    getRegionalChainRegions().some((region) =>
+      canvas.layers.some((layer) => layer.id === region.maskLayerId && layer.type === "region"));
+}
