@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AppConfig, InterrogatorModelStatus, LlmProviderState, QueueInfo } from "../../types/index.js";
-  import { getConfig, updateConfig, stopComfyui, startComfyui, fetchReleaseNotes, importImageDirectory, exportLogs, exportLogsContent, getGalleryPath, setGalleryPath, setStorageLimit, installAttentionBackend, checkAttentionBackend, clearAllQueues, getQueue, getGpuStats, updateComfyui, listInterrogatorModels, deleteInterrogatorModel, addCustomInterrogatorModel, removeCustomInterrogatorModel } from "../../utils/api.js";
-  import type { ReleaseNote, ImportResult, AttentionBackendStatus, BackendSupport, ComfyUiVersionInfo } from "../../utils/api.js";
+  import { getConfig, updateConfig, stopComfyui, startComfyui, fetchReleaseNotes, importImageDirectory, exportLogs, exportLogsContent, getGalleryPath, setGalleryPath, setStorageLimit, installAttentionBackend, checkAttentionBackend, clearAllQueues, getQueue, getGpuStats, updateComfyui, listInterrogatorModels, deleteInterrogatorModel, addCustomInterrogatorModel, removeCustomInterrogatorModel, getPatchyStatus, installPatchy } from "../../utils/api.js";
+  import type { ReleaseNote, ImportResult, AttentionBackendStatus, BackendSupport, ComfyUiVersionInfo, PatchyStatus } from "../../utils/api.js";
   import { connection } from "../../stores/connection.svelte.js";
   import { autocomplete } from "../../stores/autocomplete.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
@@ -97,6 +97,11 @@
 
   let config = $state<AppConfig | null>(null);
   let showPromptAssistantSetup = $state(false);
+  // Patchy install state, mirroring how ComfyUI is provisioned and managed.
+  let patchyStatus = $state<PatchyStatus | null>(null);
+  let patchyInstalling = $state(false);
+  let patchyInstallPercent = $state(0);
+  let patchyInstallError = $state("");
   let loading = $state(true);
   let saving = $state(false);
   let saved = $state(false);
@@ -1183,8 +1188,50 @@
   let originalExtraArgs = "";
   let originalModelPaths = "";
 
+  /** Read the Patchy installation state for the section below. */
+  async function loadPatchyStatus() {
+    if (!isTauri) return;
+    try {
+      patchyStatus = await getPatchyStatus();
+    } catch (e) {
+      console.error("Settings: failed to read the Patchy status:", e);
+    }
+  }
+
+  /** Install Patchy on request, showing download progress. */
+  async function handlePatchyInstall() {
+    patchyInstalling = true;
+    patchyInstallPercent = 0;
+    patchyInstallError = "";
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await ipcListen("patchy:install_progress", (event) => {
+        const payload = event.payload as {
+          phase?: string;
+          downloaded?: number;
+          total?: number;
+        };
+        if (payload?.phase === "downloading" && payload.total) {
+          patchyInstallPercent = Math.min(
+            100,
+            Math.round(((payload.downloaded ?? 0) / payload.total) * 100),
+          );
+        }
+      });
+      await installPatchy();
+      await loadPatchyStatus();
+    } catch (e) {
+      patchyInstallError = e instanceof Error ? e.message : String(e);
+      console.error("Settings: Patchy installation failed:", e);
+    } finally {
+      unlisten?.();
+      patchyInstalling = false;
+    }
+  }
+
   async function loadConfig() {
     config = await getConfig();
+    void loadPatchyStatus();
     if (!Array.isArray(config.theme_profiles)) config.theme_profiles = [];
     config.theme_profile_id ??= null;
     if (
@@ -2887,6 +2934,85 @@
             <div>
               <label for="keep-alive" class="text-sm text-neutral-200">{locale.t('settings.performance.keep_alive')}</label>
               <p class="text-[10px] text-amber-400/80 mt-0.5">{locale.t('settings.performance.keep_alive_warning')}</p>
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-neutral-800 space-y-3">
+            <div>
+              <p class="text-sm text-neutral-200">{locale.t('patchy.install_title')}</p>
+              {#if patchyStatus?.installed}
+                <p class="text-[10px] text-neutral-500 mt-0.5">
+                  {patchyStatus.version
+                    ? locale.t('patchy.installed_version', { version: patchyStatus.version })
+                    : patchyStatus.executable}
+                </p>
+              {:else}
+                <p class="text-[10px] text-neutral-500 mt-0.5">{locale.t('patchy.install_desc')}</p>
+              {/if}
+            </div>
+
+            {#if patchyInstalling}
+              <div>
+                <p class="text-[10px] text-neutral-300">{locale.t('patchy.install_downloading', { percent: patchyInstallPercent })}</p>
+                <div class="mt-1 h-1.5 w-full overflow-hidden rounded bg-neutral-800">
+                  <div class="h-full bg-indigo-500 transition-all duration-200" style={`width:${patchyInstallPercent}%`}></div>
+                </div>
+              </div>
+            {:else if patchyStatus?.can_install !== false}
+              <button
+                onclick={handlePatchyInstall}
+                class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm transition-colors cursor-pointer"
+              >
+                {patchyStatus?.installed ? locale.t('patchy.reinstall_button') : locale.t('patchy.install_button')}
+              </button>
+            {:else}
+              <p class="text-[10px] text-neutral-500">{locale.t('patchy.install_unsupported')}</p>
+            {/if}
+
+            {#if patchyInstallError}
+              <p class="text-[10px] text-red-400">{locale.t('patchy.install_failed', { error: patchyInstallError })}</p>
+            {/if}
+
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="patchy-auto-install"
+                bind:checked={config.patchy_auto_install}
+                onchange={() => { autoSave(); }}
+                class="w-4 h-4 mt-0.5 accent-indigo-500 rounded"
+              />
+              <div>
+                <label for="patchy-auto-install" class="text-sm text-neutral-200">{locale.t('patchy.auto_install')}</label>
+                <p class="text-[10px] text-neutral-500 mt-0.5">{locale.t('patchy.auto_install_desc')}</p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="patchy-auto-start"
+                bind:checked={config.patchy_auto_start}
+                onchange={() => { autoSave(); }}
+                class="w-4 h-4 mt-0.5 accent-indigo-500 rounded"
+              />
+              <div>
+                <label for="patchy-auto-start" class="text-sm text-neutral-200">{locale.t('patchy.auto_start')}</label>
+                <p class="text-[10px] text-neutral-500 mt-0.5">{locale.t('patchy.auto_start_desc')}</p>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="patchy-keep-alive"
+                bind:checked={config.patchy_keep_alive}
+                onchange={() => { autoSave(); }}
+                class="w-4 h-4 mt-0.5 accent-indigo-500 rounded"
+              />
+              <div>
+                <label for="patchy-keep-alive" class="text-sm text-neutral-200">{locale.t('patchy.keep_alive')}</label>
+                <p class="text-[10px] text-amber-400/80 mt-0.5">{locale.t('patchy.keep_alive_warning')}</p>
+              </div>
             </div>
           </div>
 

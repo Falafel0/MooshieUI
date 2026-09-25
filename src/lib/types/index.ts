@@ -629,6 +629,14 @@ export interface AppConfig {
   vram_mode: string;
   keep_alive: boolean;
   auto_start: boolean;
+  /** Download and install Patchy automatically when an edit needs it. */
+  patchy_auto_install: boolean;
+  /** Launch Patchy together with the app. */
+  patchy_auto_start: boolean;
+  /** Keep Patchy running after the app closes. */
+  patchy_keep_alive: boolean;
+  /** Explicit Patchy executable chosen by the user. */
+  patchy_executable_path: string | null;
   theme: string;
   theme_palette: string;
   font_scale: number;

@@ -15,6 +15,8 @@
 //! threads.
 
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 use crate::error::AppError;
 
@@ -39,6 +41,12 @@ pub fn resolve_patchy_executable(explicit: Option<&str>) -> Option<PathBuf> {
         if let Some(path) = usable_path(Some(Path::new(&env))) {
             return Some(path);
         }
+    }
+    // The copy MooshieUI installed itself. Explicit settings and PATCHY_PATH
+    // still win; a half-removed managed install falls through to the system
+    // locations below rather than failing the launch.
+    if let Some(path) = managed_executable() {
+        return Some(path);
     }
     for candidate in candidate_install_paths() {
         if candidate.exists() {
@@ -137,6 +145,30 @@ fn find_on_path() -> Option<PathBuf> {
         .find(|candidate| candidate.exists())
 }
 
+// --- managed install ------------------------------------------------------
+
+/// Root of the copy MooshieUI installs for the user.
+fn managed_install_root() -> Option<PathBuf> {
+    Some(crate::patchy_install::managed_root(
+        &crate::config::app_data_dir()?,
+    ))
+}
+
+/// Executable of the managed install, when one is present and complete.
+fn managed_executable() -> Option<PathBuf> {
+    crate::patchy_install::installed_executable(&managed_install_root()?)
+}
+
+/// Version directory name of a managed install (`v0.99`), for display.
+fn managed_version(executable: &Path) -> Option<String> {
+    let root = managed_install_root()?;
+    executable
+        .ancestors()
+        .find(|ancestor| ancestor.parent() == Some(root.as_path()))
+        .and_then(|dir| dir.file_name())
+        .map(|name| name.to_string_lossy().to_string())
+}
+
 // --- document storage -----------------------------------------------------
 
 /// Directory holding Patchy hand-off documents, creating it if needed.
@@ -209,20 +241,150 @@ pub async fn read_patchy_document(path: String) -> Result<Vec<u8>, AppError> {
 /// Launch Patchy detached with the document path as its single argument, and
 /// return the executable that was used. The child is not waited on and its
 /// stdio goes to the OS null device so the app never blocks on it.
+///
+/// The handle is kept so [`stop_launched_patchy`] can close the editor again
+/// when MooshieUI exits. Patchy forwards a second launch to an instance that is
+/// already running, in which case our child exits immediately and nothing is
+/// recorded as running: an editor the user opened themselves is never closed by
+/// this app.
 #[tauri::command]
 pub async fn launch_patchy(
-    document_path: String,
+    document_path: Option<String>,
     explicit: Option<String>,
 ) -> Result<String, AppError> {
     let executable = resolve_patchy_executable(explicit.as_deref())
         .ok_or_else(|| AppError::Other("Patchy executable not found".to_string()))?;
-    std::process::Command::new(&executable)
-        .arg(&document_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+    let mut command = Command::new(&executable);
+    // No document means "just open the editor", which is what auto-start does.
+    if let Some(path) = document_path.as_deref() {
+        command.arg(path);
+    }
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| AppError::ProcessSpawnFailed(format!("Failed to launch Patchy: {}", e)))?;
+    if let Ok(mut guard) = LAUNCHED_PATCHY.lock() {
+        *guard = Some(child);
+    }
+    Ok(executable.to_string_lossy().to_string())
+}
+
+/// The Patchy process MooshieUI started, if it is still running.
+static LAUNCHED_PATCHY: Mutex<Option<Child>> = Mutex::new(None);
+
+/// Close the Patchy instance MooshieUI started. Returns false when there was
+/// none, or when it had already exited on its own.
+pub fn stop_launched_patchy() -> bool {
+    let mut guard = match LAUNCHED_PATCHY.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let Some(mut child) = guard.take() else {
+        return false;
+    };
+    // Already gone (a forwarded launch, or the user closed the editor).
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `kill` reaches the direct child only; taskkill also takes its tree so
+        // no helper process is orphaned.
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    true
+}
+
+/// True while the editor MooshieUI started is still running.
+fn launched_patchy_running() -> bool {
+    let mut guard = match LAUNCHED_PATCHY.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    match guard.as_mut() {
+        Some(child) => match child.try_wait() {
+            Ok(Some(_)) => {
+                *guard = None;
+                false
+            }
+            Ok(None) => true,
+            Err(_) => false,
+        },
+        None => false,
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct PatchyStatus {
+    /// A usable executable exists (managed install, user setting or system).
+    pub installed: bool,
+    pub executable: Option<String>,
+    /// Version of the managed install, when the executable comes from it.
+    pub version: Option<String>,
+    /// MooshieUI started this editor and it is still open.
+    pub running: bool,
+    /// False on platforms where MooshieUI cannot install Patchy itself.
+    pub can_install: bool,
+}
+
+/// What the settings panel needs to render the Patchy section.
+#[tauri::command]
+pub async fn patchy_status() -> Result<PatchyStatus, AppError> {
+    let executable = resolve_patchy_executable(None);
+    Ok(PatchyStatus {
+        installed: executable.is_some(),
+        version: executable.as_deref().and_then(managed_version),
+        executable: executable.map(|path| path.to_string_lossy().to_string()),
+        running: launched_patchy_running(),
+        can_install: crate::patchy_install::is_supported(),
+    })
+}
+
+/// Close the editor MooshieUI started, without touching anything else.
+#[tauri::command]
+pub async fn stop_patchy() -> Result<bool, AppError> {
+    Ok(stop_launched_patchy())
+}
+
+/// Download and install Patchy into the app's managed directory. Progress is
+/// reported as `patchy:install_progress` events so the settings panel can show
+/// a determinate bar.
+#[tauri::command]
+pub async fn install_patchy(app: tauri::AppHandle) -> Result<String, AppError> {
+    use tauri::Emitter;
+
+    if !crate::patchy_install::is_supported() {
+        return Err(AppError::Other(
+            "Automatic installation is not available on this platform".to_string(),
+        ));
+    }
+    let root = managed_install_root()
+        .ok_or_else(|| AppError::Other("Failed to determine app data directory".to_string()))?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("MooshieUI")
+        .build()
+        .map_err(|e| AppError::Other(format!("Failed to create HTTP client: {}", e)))?;
+    let release = crate::patchy_install::fetch_latest_release(&client)
+        .await
+        .map_err(AppError::Other)?;
+
+    let emitter = app.clone();
+    let progress = move |step: crate::patchy_install::InstallProgress| {
+        let _ = emitter.emit("patchy:install_progress", step);
+    };
+    let executable = crate::patchy_install::install_release(&client, &release, &root, &progress)
+        .await
+        .map_err(AppError::Other)?;
     Ok(executable.to_string_lossy().to_string())
 }
 
