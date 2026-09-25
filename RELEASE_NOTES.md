@@ -1,3 +1,15 @@
+## What's New in v2.3.7-fork.6
+
+### Patchy replaces Photopea
+- The embedded Photopea frame is gone. Editing now hands the image to a locally installed Patchy: MooshieUI writes the document, opens the editor on it, and reads the result back into the gallery, a layer, a mask or a prompt region.
+- MooshieUI installs Patchy itself on Windows and macOS. It downloads the latest release, verifies the download against the release checksums, and unpacks it into the app data directory, reporting progress in the hand-off dialog and in Settings.
+- Settings gains a Patchy section with an install or reinstall button and three switches: install automatically, start the editor with the app, and keep it running after MooshieUI closes. By default Patchy is installed on first use and closed together with the app.
+- The editor opens as soon as the document is ready, so opening it is no longer a separate step.
+- Automatic installation is not available on Linux, where the release ships a Flatpak bundle; the UI points at the release page instead.
+- Editing entry points are hidden in browser mode, since Patchy is a local application. Browser mode loses the in-app editor it had with Photopea.
+
+---
+
 ## What's New in v2.3.7-fork.5
 
 ### Regional conditioning and live results
