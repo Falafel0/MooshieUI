@@ -62,6 +62,7 @@
   import InterrogateModal from "./lib/components/generation/InterrogateModal.svelte";
   import ExternalComfyModal from "./lib/components/ExternalComfyModal.svelte";
   import PhotopeaEditor from "./lib/components/PhotopeaEditor.svelte";
+  import { opaqueMaskLuminanceToAlpha } from "./lib/utils/canvasLayerExport.js";
   import GlobalErrorModal from "./lib/components/errors/GlobalErrorModal.svelte";
   import NaiEnhanceModal from "./lib/components/generation/NaiEnhanceModal.svelte";
   import DirectorToolsModal from "./lib/components/generation/DirectorToolsModal.svelte";
@@ -937,15 +938,39 @@
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
   ) {
+    const sourceVersion = canvas.inpaintSourceVersion;
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
     let previewUrl: string | null = URL.createObjectURL(blob);
     try {
-      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const source = await new Promise<HTMLImageElement>((resolve, reject) => {
         const image = new Image();
-        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onload = () => resolve(image);
         image.onerror = () => reject(new Error("Failed to decode Photopea export"));
         image.src = previewUrl!;
       });
+      const dimensions = { width: source.naturalWidth, height: source.naturalHeight };
+
+      if (target === "mask" || target === "region") {
+        const mask = document.createElement("canvas");
+        mask.width = dimensions.width;
+        mask.height = dimensions.height;
+        const context = mask.getContext("2d")!;
+        context.drawImage(source, 0, 0);
+        const pixels = context.getImageData(0, 0, mask.width, mask.height);
+        if (opaqueMaskLuminanceToAlpha(pixels.data)) {
+          context.putImageData(pixels, 0, 0);
+          const normalized = await new Promise<Blob>((resolve, reject) =>
+            mask.toBlob((result) => result ? resolve(result) : reject(new Error("Failed to encode Photopea mask")), "image/png"));
+          URL.revokeObjectURL(previewUrl);
+          previewUrl = URL.createObjectURL(normalized);
+        }
+      }
+
+      // Decoding, mask conversion and uploading can outlive the document that
+      // started the import. Never apply those bytes to a newer source.
+      if (sourceVersion !== canvas.inpaintSourceVersion) return;
+      const uploaded = target === "base" ? await uploadImageBytes(bytes, suggestedName) : null;
+      if (sourceVersion !== canvas.inpaintSourceVersion) return;
 
       generation.mode = "inpainting";
       canvas.isCanvasMode = true;
@@ -959,12 +984,11 @@
       }
 
       if (target === "base") {
-        const uploaded = await uploadImageBytes(bytes, suggestedName);
         canvas.setPreparedInpaintOverride({
           previewUrl,
           width: dimensions.width,
           height: dimensions.height,
-          uploadedInputName: uploaded.name,
+          uploadedInputName: uploaded!.name,
           owned: true,
         });
         // Ownership transfers to the inpaint base/history lifecycle.

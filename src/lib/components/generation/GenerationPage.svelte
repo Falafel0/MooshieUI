@@ -30,6 +30,7 @@
   import InpaintSettings from "../canvas/InpaintSettings.svelte";
   import LayerPanel from "../canvas/layers/LayerPanel.svelte";
   import { canvas } from "../../stores/canvas.svelte.js";
+  import { captureLayer } from "../../utils/canvasLayerExport.js";
   import { uploadImage, uploadImageBytes, getOutputImage, readClipboardImageSafe } from "../../utils/api.js";
   import { uploadOutputImageForGenerationInput } from "../../utils/galleryActions.js";
   import {
@@ -65,6 +66,46 @@
     oneditphotopea?: (image: OutputImage) => void;
   }
   let { mobileFriendly = false, oneditphotopea }: Props = $props();
+
+  async function editCanvasSourceInPhotopea(target: "base" | "layer") {
+    if (!oneditphotopea) return;
+    const sourceVersion = canvas.inpaintSourceVersion;
+    try {
+      const pixels = document.createElement("canvas");
+      pixels.width = canvas.canvasWidth;
+      pixels.height = canvas.canvasHeight;
+      if (target === "layer") {
+        const id = canvas.activeLayerId;
+        const node = canvas.getStageRef()?.getLayers?.().find((layer: { id: () => string }) => layer.id() === id);
+        if (!node) return;
+        pixels.getContext("2d")!.drawImage(captureLayer(node, pixels.width, pixels.height), 0, 0);
+      } else {
+        const context = pixels.getContext("2d")!;
+        context.fillStyle = canvas.baseColor;
+        context.fillRect(0, 0, pixels.width, pixels.height);
+        const url = canvas.preparedInpaintPreviewUrl ?? canvas.referenceImageUrl;
+        if (url) {
+          const source = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error("Failed to load canvas base"));
+            image.src = url;
+          });
+          const scale = Math.min(pixels.width / source.naturalWidth, pixels.height / source.naturalHeight);
+          const width = source.naturalWidth * scale;
+          const height = source.naturalHeight * scale;
+          context.drawImage(source, (pixels.width - width) / 2, (pixels.height - height) / 2, width, height);
+        }
+      }
+      const sessionBlob = await new Promise<Blob>((resolve, reject) =>
+        pixels.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Failed to encode canvas image")), "image/png"));
+      if (sourceVersion !== canvas.inpaintSourceVersion) return;
+      oneditphotopea({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-photopea", generation_mode: "inpainting", sessionBlob });
+    } catch (error) {
+      console.error("Failed to open canvas source in Photopea:", error);
+      gallery.showToast(locale.t("photopea.load_failed"), "error");
+    }
+  }
 
   const storageSuffix = mobileFriendly ? ".mobile" : ".desktop";
   const DIMENSIONS_LAYOUT_KEY = `mooshieui.generation.dimensions.layout.v1${storageSuffix}`;
@@ -1931,6 +1972,7 @@
             {/each}
           </div>
           {#if canvas.selectedWorkspaceSection === 'base'}
+          {#if oneditphotopea}<button type="button" onclick={() => editCanvasSourceInPhotopea('base')} class="h-7 w-full rounded border border-violet-700 px-2 text-[10px] text-violet-200 hover:bg-violet-900/30">{locale.t('canvas.open_photopea')}</button>{/if}
           <div class="flex h-8 items-center justify-between rounded-md border border-neutral-800 px-2">
             <span class="text-[11px] text-neutral-300">{locale.t('canvas.base_color')}</span>
             <input type="color" bind:value={canvas.baseColor} class="h-6 w-9 cursor-pointer rounded border-0 bg-transparent p-0" />
@@ -1962,7 +2004,7 @@
             </label>
             <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
           </div>
-          <LayerPanel />
+          <LayerPanel oneditphotopea={oneditphotopea ? () => editCanvasSourceInPhotopea('layer') : undefined} />
           {/if}
         </div>
       {/if}
