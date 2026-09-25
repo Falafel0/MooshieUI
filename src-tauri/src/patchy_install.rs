@@ -828,4 +828,19 @@ notahashline
         assert_eq!(installed_executable(&root), Some(installed));
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// The glue the resolver relies on: an app data directory holding a managed
+    /// install must resolve to the executable inside it.
+    #[test]
+    fn a_managed_install_resolves_from_the_app_data_directory() {
+        let app_data = std::env::temp_dir().join(format!("patchy-data-{}", uuid::Uuid::new_v4()));
+        let root = managed_root(&app_data);
+        let version_dir = root.join("v0.99");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        let exe = version_dir.join(executable_relative(current_platform()));
+        std::fs::write(&exe, b"stub").unwrap();
+
+        assert_eq!(installed_executable(&root), Some(exe));
+        let _ = std::fs::remove_dir_all(&app_data);
+    }
 }
