@@ -63,12 +63,12 @@
 
   interface Props {
     mobileFriendly?: boolean;
-    oneditphotopea?: (image: OutputImage) => void;
+    oneditpatchy?: (image: OutputImage) => void;
   }
-  let { mobileFriendly = false, oneditphotopea }: Props = $props();
+  let { mobileFriendly = false, oneditpatchy }: Props = $props();
 
-  async function editCanvasSourceInPhotopea(target: "base" | "layer") {
-    if (!oneditphotopea) return;
+  async function editCanvasSourceInPatchy(target: "base" | "layer") {
+    if (!oneditpatchy) return;
     const sourceVersion = canvas.inpaintSourceVersion;
     try {
       const pixels = document.createElement("canvas");
@@ -100,10 +100,10 @@
       const sessionBlob = await new Promise<Blob>((resolve, reject) =>
         pixels.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Failed to encode canvas image")), "image/png"));
       if (sourceVersion !== canvas.inpaintSourceVersion) return;
-      oneditphotopea({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-photopea", generation_mode: "inpainting", sessionBlob });
+      oneditpatchy({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-patchy", generation_mode: "inpainting", sessionBlob });
     } catch (error) {
-      console.error("Failed to open canvas source in Photopea:", error);
-      gallery.showToast(locale.t("photopea.load_failed"), "error");
+      console.error("Failed to open canvas source in Patchy:", error);
+      gallery.showToast(locale.t("patchy.load_failed"), "error");
     }
   }
 
@@ -1972,7 +1972,7 @@
             {/each}
           </div>
           {#if canvas.selectedWorkspaceSection === 'base'}
-          {#if oneditphotopea}<button type="button" onclick={() => editCanvasSourceInPhotopea('base')} class="h-7 w-full rounded border border-violet-700 px-2 text-[10px] text-violet-200 hover:bg-violet-900/30">{locale.t('canvas.open_photopea')}</button>{/if}
+          {#if oneditpatchy}<button type="button" onclick={() => editCanvasSourceInPatchy('base')} class="h-7 w-full rounded border border-violet-700 px-2 text-[10px] text-violet-200 hover:bg-violet-900/30">{locale.t('canvas.open_patchy')}</button>{/if}
           <div class="flex h-8 items-center justify-between rounded-md border border-neutral-800 px-2">
             <span class="text-[11px] text-neutral-300">{locale.t('canvas.base_color')}</span>
             <input type="color" bind:value={canvas.baseColor} class="h-6 w-9 cursor-pointer rounded border-0 bg-transparent p-0" />
@@ -2004,7 +2004,7 @@
             </label>
             <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
           </div>
-          <LayerPanel oneditphotopea={oneditphotopea ? () => editCanvasSourceInPhotopea('layer') : undefined} />
+          <LayerPanel oneditpatchy={oneditpatchy ? () => editCanvasSourceInPatchy('layer') : undefined} />
           {/if}
         </div>
       {/if}
@@ -2495,7 +2495,7 @@
 
     {#if generation.mode === 'inpainting'}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <CanvasEditor bind:this={canvasEditorRef} {oneditphotopea} />
+        <CanvasEditor bind:this={canvasEditorRef} {oneditpatchy} />
       </div>
     {:else}
       <div class="flex-1 min-w-0 flex flex-col overflow-hidden">

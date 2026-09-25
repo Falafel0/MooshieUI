@@ -30,8 +30,9 @@ export function maskToGrayscale(source: HTMLCanvasElement): HTMLCanvasElement | 
   return output;
 }
 
-/** Photopea can export a black-on-white mask without transparency. Convert its
- * luminance to coverage; transparent exports already encode coverage in alpha. */
+/** An external editor can export a black-on-white mask without transparency.
+ * Convert its luminance to coverage; transparent exports already encode
+ * coverage in alpha. */
 export function opaqueMaskLuminanceToAlpha(pixels: Uint8ClampedArray): boolean {
   for (let i = 3; i < pixels.length; i += 4) {
     if (pixels[i] !== 255) return false;

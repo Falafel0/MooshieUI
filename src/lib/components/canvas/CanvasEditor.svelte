@@ -14,10 +14,10 @@
 
   interface Props {
     showInpaintPreviewOverlay?: boolean;
-    oneditphotopea?: (image: OutputImage) => void;
+    oneditpatchy?: (image: OutputImage) => void;
   }
 
-  let { showInpaintPreviewOverlay = true, oneditphotopea }: Props = $props();
+  let { showInpaintPreviewOverlay = true, oneditpatchy }: Props = $props();
 
   let stageRef: CanvasStage | undefined = $state();
   const activeContextLayer = $derived(isMaskLayer(canvas.activeLayer) ? canvas.activeLayer : null);
@@ -57,12 +57,12 @@
     return stageRef?.getMaskCanvas() ?? null;
   }
 
-  async function editPendingInPhotopea() {
+  async function editPendingInPatchy() {
     const url = canvas.pendingResultPreviewUrl;
-    if (!url || !oneditphotopea) return;
+    if (!url || !oneditpatchy) return;
     const response = await fetch(url);
     const sessionBlob = await response.blob();
-    oneditphotopea({ filename: `inpaint_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "inpaint-result", generation_mode: "inpainting", url, sessionBlob });
+    oneditpatchy({ filename: `inpaint_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "inpaint-result", generation_mode: "inpainting", url, sessionBlob });
   }
 </script>
 
@@ -158,7 +158,7 @@
           <button type="button" onclick={() => canvas.insertInpaintResult(true)} class="h-7 rounded-md border border-neutral-600 px-2.5 text-xs text-neutral-200 hover:border-neutral-400">{locale.t('canvas.result_masked')}</button>
           <span class="mx-0.5 h-5 w-px bg-neutral-700"></span>
           <button type="button" disabled={gallery.saving} onclick={() => canvas.pendingResultPreviewUrl && gallery.saveBlobAs(canvas.pendingResultPreviewUrl, `inpaint_${Date.now()}.png`)} class="h-7 rounded-md border border-sky-600/70 bg-sky-500/10 px-2.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 disabled:opacity-50">{locale.t('canvas.save_result')}</button>
-          {#if oneditphotopea}<button type="button" onclick={editPendingInPhotopea} class="h-7 rounded-md border border-violet-600/70 bg-violet-500/10 px-2.5 text-xs font-medium text-violet-200 hover:bg-violet-500/20">{locale.t('canvas.open_photopea')}</button>{/if}
+          {#if oneditpatchy}<button type="button" onclick={editPendingInPatchy} class="h-7 rounded-md border border-violet-600/70 bg-violet-500/10 px-2.5 text-xs font-medium text-violet-200 hover:bg-violet-500/20">{locale.t('canvas.open_patchy')}</button>{/if}
           <button type="button" onclick={() => canvas.dismissInpaintResult()} class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200" title={locale.t('canvas.dismiss')}><X size={14} /></button>
         </div>
       </div>

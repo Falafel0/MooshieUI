@@ -6,7 +6,7 @@
   import { generation } from "../../../stores/generation.svelte.js";
   import { ArrowUp, ArrowDown, Copy, Trash2 } from "@lucide/svelte";
 
-  let { oneditphotopea }: { oneditphotopea?: () => void } = $props();
+  let { oneditpatchy }: { oneditpatchy?: () => void } = $props();
 
 
   type GroupKey = "mask" | "raster" | "region";
@@ -106,7 +106,7 @@
     </div>
   {/each}
   <div class="flex h-7 items-center justify-end gap-0.5 border-t border-neutral-800 pt-1">
-    {#if oneditphotopea}<button type="button" class="mr-auto h-6 rounded px-2 text-[10px] text-violet-200 hover:bg-violet-900/30 disabled:opacity-30" disabled={!canvas.activeLayerId} onclick={oneditphotopea}>{locale.t('canvas.open_photopea')}</button>{/if}
+    {#if oneditpatchy}<button type="button" class="mr-auto h-6 rounded px-2 text-[10px] text-violet-200 hover:bg-violet-900/30 disabled:opacity-30" disabled={!canvas.activeLayerId} onclick={oneditpatchy}>{locale.t('canvas.open_patchy')}</button>{/if}
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveUp || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'up')} aria-label={locale.t('canvas.move_up_title')} title={locale.t('canvas.move_up_title')}><ArrowUp size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveDown || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'down')} aria-label={locale.t('canvas.move_down_title')} title={locale.t('canvas.move_down_title')}><ArrowDown size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.duplicateLayer(canvas.activeLayerId)} aria-label={locale.t('canvas.duplicate')} title={locale.t('canvas.duplicate')}><Copy size={14} class="mx-auto" /></button>
