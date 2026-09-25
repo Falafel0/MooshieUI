@@ -472,12 +472,38 @@ export async function readPatchyDocument(path: string): Promise<number[]> {
   return ipcInvoke<number[]>("read_patchy_document", { path });
 }
 
-/** Launch Patchy on a document and return the executable path used. */
-export async function launchPatchy(documentPath: string, explicit?: string | null): Promise<string> {
+/** Launch Patchy on a document (null opens the editor empty) and return the executable path used. */
+export async function launchPatchy(documentPath: string | null, explicit?: string | null): Promise<string> {
   return ipcInvoke<string>("launch_patchy", {
     documentPath,
     explicit: explicit ?? null,
   });
+}
+
+export interface PatchyStatus {
+  installed: boolean;
+  executable: string | null;
+  /** Version of the copy MooshieUI installed, when it is the one in use. */
+  version: string | null;
+  /** MooshieUI started this editor and it is still open. */
+  running: boolean;
+  /** False where MooshieUI cannot install Patchy itself (Linux flatpak). */
+  can_install: boolean;
+}
+
+/** Installation state for the settings panel and the hand-off dialog. */
+export async function getPatchyStatus(): Promise<PatchyStatus> {
+  return ipcInvoke<PatchyStatus>("patchy_status");
+}
+
+/** Download and install Patchy into the app's managed directory. */
+export async function installPatchy(): Promise<string> {
+  return ipcInvoke<string>("install_patchy");
+}
+
+/** Close the editor MooshieUI started. False when there was none. */
+export async function stopPatchy(): Promise<boolean> {
+  return ipcInvoke<boolean>("stop_patchy");
 }
 
 export async function findModelByHash(

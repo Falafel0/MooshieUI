@@ -85,6 +85,8 @@
     saveModelSidecarThumbnail,
     installCustomNode,
     loadGalleryImageDisplay,
+    getPatchyStatus,
+    launchPatchy,
   } from "./lib/utils/api.js";
   import {
     ARTIST_PREVIEW_RECIPE,
@@ -2785,6 +2787,8 @@
   }
 
   let autoStartEnabled = $state(true); // will be read from config
+  // Open the Patchy editor together with the app, mirroring ComfyUI's auto_start.
+  let patchyAutoStart = $state(false);
   let managedComfyui = $state(false);
 
   /**
@@ -2820,6 +2824,7 @@
       applyTheme(cfg);
       applyFontScale(cfg.font_scale);
       autoStartEnabled = cfg.auto_start !== false;
+      patchyAutoStart = cfg.patchy_auto_start === true;
       managedComfyui = cfg.server_mode === "autolaunch";
       comfyServerUrl = cfg.server_url || `http://127.0.0.1:${cfg.server_port ?? 18288}`;
     } catch {
@@ -3534,6 +3539,18 @@
       void handleModelPreviewAction(event);
     };
     window.addEventListener("mooshie:model-preview-action", modelPreviewActionHandler);
+
+    // Patchy auto-start: open the editor together with the app when the user
+    // asked for it. Skipped when nothing is installed, and never fatal — the
+    // hand-off dialog still offers to install or locate the editor on demand.
+    if (patchyAutoStart && isTauri) {
+      try {
+        const status = await getPatchyStatus();
+        if (status.installed) await launchPatchy(null);
+      } catch (e) {
+        console.warn("Patchy auto-start skipped:", e);
+      }
+    }
 
     // Bring ComfyUI up to the pinned tag before starting it. MooshieUI ships
     // against one exact ComfyUI release, so a MooshieUI update that bumps the

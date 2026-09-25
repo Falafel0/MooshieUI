@@ -1,15 +1,18 @@
 <script lang="ts">
   import { locale } from "../stores/locale.svelte.js";
-  import { patchy } from "../stores/patchy.svelte.js";
   import { generation } from "../stores/generation.svelte.js";
-  import { isTauri } from "../utils/ipc.js";
+  import { isTauri, ipcListen } from "../utils/ipc.js";
   import {
+    getConfig,
+    getPatchyStatus,
+    installPatchy,
     launchPatchy,
     loadGalleryImagePng,
     readImageMetadata,
     readPatchyDocument,
     resolvePatchyPath,
     saveToGalleryBytes,
+    updateConfig,
     writePatchyDocument,
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
@@ -32,9 +35,10 @@
 
   let { open, image, onclose, onsaved, onimport }: Props = $props();
 
-  // preparing: writing the document for Patchy; ready: the user can launch it and
-  // import the result back; missing: no Patchy executable; error: preparation failed.
-  type Phase = "preparing" | "ready" | "missing" | "error";
+  // preparing: writing the document for Patchy; installing: fetching the editor
+  // because it is missing; ready: the user can launch it and import the result
+  // back; missing: no Patchy executable; error: preparation failed.
+  type Phase = "preparing" | "installing" | "ready" | "missing" | "error";
 
   let phase = $state<Phase>("preparing");
   let documentPath = $state<string | null>(null);
@@ -43,6 +47,12 @@
   let launching = $state(false);
   let launched = $state(false);
   let error = $state("");
+  let installPercent = $state(0);
+  let installError = $state("");
+  // False where the platform cannot be provisioned automatically (Linux
+  // flatpak), so the dialog points at the download page instead of a button
+  // that can only fail.
+  let canInstall = $state(true);
 
   function resetState() {
     phase = "preparing";
@@ -52,6 +62,8 @@
     launching = false;
     launched = false;
     error = "";
+    installPercent = 0;
+    installError = "";
   }
 
   function documentName(): string {
@@ -80,14 +92,23 @@
     }
     busy = true;
     try {
-      await patchy.load();
-      executablePath = await resolvePatchyPath(patchy.executablePath);
+      const [config, status] = await Promise.all([getConfig(), getPatchyStatus()]);
+      canInstall = status.can_install;
+      executablePath = await resolvePatchyPath(config.patchy_executable_path);
+      // Install on first use, the way ComfyUI is provisioned, so the user is
+      // not sent to a download page before they can edit anything.
+      if (!executablePath && config.patchy_auto_install !== false) {
+        await installEditor();
+      }
       if (!executablePath) {
         phase = "missing";
         return;
       }
       documentPath = await writePatchyDocument(await sourceBytes(), documentName());
       phase = "ready";
+      // Auto-start: the editor opens as soon as the document exists, so opening
+      // it is not a separate step the user has to know about.
+      await launch();
     } catch (e) {
       phase = "error";
       error = locale.t("patchy.load_failed");
@@ -97,12 +118,45 @@
     }
   }
 
+  /** Download the editor into the managed directory, reporting progress. */
+  async function installEditor() {
+    phase = "installing";
+    installPercent = 0;
+    installError = "";
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await ipcListen("patchy:install_progress", (event) => {
+        const payload = event.payload as {
+          phase?: string;
+          downloaded?: number;
+          total?: number;
+        };
+        if (payload?.phase === "downloading" && payload.total) {
+          installPercent = Math.min(
+            100,
+            Math.round(((payload.downloaded ?? 0) / payload.total) * 100),
+          );
+        }
+      });
+      await installPatchy();
+      // Resolving again picks the freshly installed copy up; the config did not
+      // change, the filesystem did.
+      const config = await getConfig({ force: true });
+      executablePath = await resolvePatchyPath(config.patchy_executable_path);
+    } catch (e) {
+      installError = e instanceof Error ? e.message : String(e);
+      console.error("Patchy: automatic installation failed:", e);
+    } finally {
+      unlisten?.();
+    }
+  }
+
   async function launch() {
     if (!documentPath || launching) return;
     launching = true;
     error = "";
     try {
-      executablePath = await launchPatchy(documentPath, patchy.executablePath);
+      executablePath = await launchPatchy(documentPath, executablePath);
       launched = true;
     } catch (e) {
       error = locale.t("patchy.launch_failed");
@@ -163,10 +217,34 @@
         title: locale.t("patchy.set_path"),
       });
       if (typeof selected !== "string") return;
-      await patchy.setExecutablePath(selected);
+      // The chosen path lives in the config, which is the only place the
+      // backend resolver reads it from.
+      const config = await getConfig();
+      await updateConfig({ ...config, patchy_executable_path: selected });
       await prepare();
     } catch (e) {
       console.error("Patchy: failed to pick the executable:", e);
+    }
+  }
+
+  /** Install the editor on request, then continue the hand-off. */
+  async function installAndPrepare() {
+    busy = true;
+    try {
+      await installEditor();
+      if (!executablePath) {
+        phase = "missing";
+        return;
+      }
+      documentPath = await writePatchyDocument(await sourceBytes(), documentName());
+      phase = "ready";
+      await launch();
+    } catch (e) {
+      phase = "error";
+      error = locale.t("patchy.load_failed");
+      console.error("Patchy: failed to prepare the document after installing:", e);
+    } finally {
+      busy = false;
     }
   }
 
@@ -207,11 +285,40 @@
 
       {#if phase === "preparing"}
         <p class="mt-4 text-xs text-neutral-300">{locale.t("common.loading")}</p>
+      {:else if phase === "installing"}
+        <div class="mt-4 rounded-lg border border-indigo-700/70 bg-indigo-950/40 px-3 py-2 text-xs">
+          <p class="font-medium text-indigo-200">{locale.t("patchy.install_title")}</p>
+          <p class="mt-0.5 text-neutral-300">{locale.t("patchy.install_desc")}</p>
+          <p class="mt-1 text-neutral-300">
+            {locale.t("patchy.install_downloading", { percent: installPercent })}
+          </p>
+          <div class="mt-2 h-1.5 w-full overflow-hidden rounded bg-neutral-800">
+            <div
+              class="h-full bg-indigo-500 transition-all duration-200"
+              style={`width:${installPercent}%`}
+            ></div>
+          </div>
+        </div>
       {:else if phase === "missing"}
         <div class="mt-4 rounded-lg border border-amber-700/70 bg-amber-950/40 px-3 py-2 text-xs">
           <p class="font-medium text-amber-200">{locale.t("patchy.not_found")}</p>
           <p class="mt-0.5 text-neutral-300">{locale.t("patchy.not_found_hint")}</p>
+          {#if installError}
+            <p class="mt-1 text-red-300"
+              >{locale.t("patchy.install_failed", { error: installError })}</p
+            >
+          {:else if !canInstall}
+            <p class="mt-1 text-neutral-300">{locale.t("patchy.install_unsupported")}</p>
+          {/if}
           <div class="mt-2 flex flex-wrap gap-2">
+            {#if canInstall}
+              <button
+                type="button"
+                disabled={busy}
+                class="rounded border border-emerald-600 px-2.5 py-1.5 text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-40"
+                onclick={installAndPrepare}
+              >{locale.t("patchy.install_button")}</button>
+            {/if}
             <button
               type="button"
               class="rounded border border-neutral-600 px-2.5 py-1.5 text-neutral-100 hover:bg-neutral-800"
