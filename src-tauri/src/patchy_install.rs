@@ -478,11 +478,11 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), String> {
     // Flattening the wrapper keeps the executable where `executable_relative`
     // looks for it.
     let wrapper = archive_root(&names);
-    for index in 0..zip.len() {
+    for (index, raw_name) in names.iter().enumerate() {
         let mut entry = zip
             .by_index(index)
             .map_err(|e| format!("Invalid Patchy ZIP entry: {e}"))?;
-        let name = strip_archive_root(&names[index], wrapper.as_deref());
+        let name = strip_archive_root(raw_name, wrapper.as_deref());
         let out = safe_join(dest, &name)?;
         if entry.is_dir() {
             std::fs::create_dir_all(&out).map_err(|e| format!("Could not create {out:?}: {e}"))?;
@@ -838,6 +838,11 @@ notahashline
         let version_dir = root.join("v0.99");
         std::fs::create_dir_all(&version_dir).unwrap();
         let exe = version_dir.join(executable_relative(current_platform()));
+        // On macOS the relative path nests into Patchy.app/Contents/MacOS, and
+        // `write` does not create parents.
+        if let Some(parent) = exe.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&exe, b"stub").unwrap();
 
         assert_eq!(installed_executable(&root), Some(exe));
