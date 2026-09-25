@@ -77,6 +77,7 @@ import type {
 } from "../types/index.js";
 import { models } from "./models.svelte.js";
 import { styles } from "./styles.svelte.js";
+import { macros } from "./macros.svelte.js";
 import { promptPresets } from "./promptPresets.svelte.js";
 
 const STORE_KEY = "generation-settings";
@@ -3601,6 +3602,17 @@ class GenerationStore {
     const styleFragment = options.skipActiveStyles ? "" : styles.buildPromptFragment(this.isNovelAi);
     if (styleFragment) {
       positivePrompt = this.mergeIntoPrompt(positivePrompt, styleFragment, "after");
+    }
+
+    // Inject tags contributed by any currently-active typed macros (style,
+    // artist, character, scene, costume, concept). Same mechanic as Artist
+    // Styles and the same reason: the tags reach the payload without passing
+    // through the prompt textbox, so the Prompt Arena shows them as chips
+    // instead. `skipActiveStyles` covers both, so a preview that asks for no
+    // injected styles does not get macro tags behind its back either.
+    const macroFragment = options.skipActiveStyles ? "" : macros.buildPromptFragment(this.isNovelAi);
+    if (macroFragment) {
+      positivePrompt = this.mergeIntoPrompt(positivePrompt, macroFragment, "after");
     }
     if (options.extraPositive) {
       positivePrompt = this.mergeIntoPrompt(positivePrompt, options.extraPositive, "after");

@@ -5,7 +5,21 @@
   import { gallery } from "../../../stores/gallery.svelte.js";
   import { uploadImageBytes } from "../../../utils/api.js";
   import { prepareOutputImageForEditMode } from "../../../utils/editImagePreparation.js";
+  import { getInpaintComparePair } from "../../../utils/inpaintComparePair.js";
+  import InpaintCompareDialog from "../InpaintCompareDialog.svelte";
   import type { OutputImage } from "../../../types/index.js";
+
+  // Result-vs-original comparison for the result chip. Same registry-linked
+  // pair as the result bar's button (see getInpaintComparePair), so the chip
+  // only offers it when a genuine original is known for the previewed result.
+  const comparePair = $derived(getInpaintComparePair());
+  let compareOpen = $state(false);
+  // Moving to another session result (or dismissing this one) changes the
+  // pair; close then so the dialog always shows the pair it was opened on.
+  $effect(() => {
+    void comparePair;
+    compareOpen = false;
+  });
 
   const editSessionImages = $derived(
     gallery.sessionImages.filter(
@@ -77,6 +91,19 @@
             class="h-9 w-9 rounded border border-indigo-500/60 object-cover"
           />
           <span class="text-[11px] text-indigo-200">{locale.t('canvas.inpaint_result_ready')}</span>
+          {#if comparePair}
+            <!-- Only while a genuine original/result pair is known; without one
+                 the chip stays as it was rather than comparing anything else. -->
+            <button
+              type="button"
+              aria-expanded={compareOpen}
+              class="rounded border border-indigo-400/60 px-2 py-1 text-[11px] text-indigo-200 hover:border-indigo-300 hover:bg-indigo-500/20 focus-visible:outline-2 focus-visible:outline-indigo-400"
+              title={locale.t('gallery.compare.title')}
+              onclick={() => (compareOpen = true)}
+            >
+              {locale.t('gallery.compare.short')}
+            </button>
+          {/if}
         </div>
       {/if}
       <div class="ml-auto flex items-center gap-1">
@@ -161,4 +188,12 @@
       {/each}
     {/if}
   </div>
+
+  {#if compareOpen && comparePair}
+    <InpaintCompareDialog
+      originalUrl={comparePair.originalUrl}
+      resultUrl={comparePair.resultUrl}
+      onclose={() => (compareOpen = false)}
+    />
+  {/if}
 </div>

@@ -637,6 +637,16 @@ export interface AppConfig {
   patchy_keep_alive: boolean;
   /** Explicit Patchy executable chosen by the user. */
   patchy_executable_path: string | null;
+  /** Base URL of the user's monbooru server, e.g. `http://127.0.0.1:8455`. Empty when not configured. */
+  monbooru_base_url: string;
+  /**
+   * monbooru API bearer token, created under monbooru's Settings -> Authentication.
+   * Blanked to null in browser mode; desktop reads it back in full, exactly like
+   * the other provider credentials.
+   */
+  monbooru_api_token: string | null;
+  /** True when a token is stored, so the UI can show "token set" without the value. */
+  monbooru_api_token_configured?: boolean;
   theme: string;
   theme_palette: string;
   font_scale: number;
