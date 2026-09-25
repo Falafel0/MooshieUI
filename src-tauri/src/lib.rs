@@ -17,6 +17,8 @@ pub mod metadata;
 pub mod model_requests;
 pub mod notifications;
 pub mod novelai;
+#[cfg(feature = "desktop")]
+pub mod patchy_install;
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub mod prompt_assistant;
 #[cfg(feature = "desktop")]
@@ -561,6 +563,9 @@ pub fn run() {
             commands::patchy::write_patchy_document,
             commands::patchy::read_patchy_document,
             commands::patchy::launch_patchy,
+            commands::patchy::patchy_status,
+            commands::patchy::stop_patchy,
+            commands::patchy::install_patchy,
             commands::config::get_config,
             commands::config::update_config,
             commands::config::get_gallery_path,
@@ -655,14 +660,19 @@ pub fn run() {
                 commands::music_link::shutdown(&state).await;
                 commands::music_audio_style::shutdown(&state).await;
             });
-            let keep_alive = {
+            let (keep_alive, patchy_keep_alive) = {
                 let config = state.config.blocking_read();
-                config.keep_alive
+                (config.keep_alive, config.patchy_keep_alive)
             };
             if !keep_alive {
                 crate::comfyui::process::stop_comfyui_process_blocking(&state);
             } else {
                 log::info!("Keeping ComfyUI running (keep_alive=true)");
+            }
+            if !patchy_keep_alive && commands::patchy::stop_launched_patchy() {
+                // Only the editor this app started is closed; an instance the
+                // user opened themselves is left alone.
+                log::info!("Closed the Patchy editor started by this app");
             }
             // Always stop the prompt-assistant llama-server on exit — it is never
             // meant to outlive the app, regardless of keep_alive.

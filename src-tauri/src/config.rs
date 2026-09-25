@@ -95,6 +95,17 @@ pub struct AppConfig {
     pub keep_alive: bool,
     /// Automatically start ComfyUI when the app launches (default: true)
     pub auto_start: bool,
+    /// Download and install Patchy automatically when an edit needs it
+    /// (default: true)
+    pub patchy_auto_install: bool,
+    /// Launch Patchy together with the app (default: false)
+    pub patchy_auto_start: bool,
+    /// Keep Patchy running after the app closes (default: false). When false,
+    /// the instance MooshieUI started is closed on exit.
+    pub patchy_keep_alive: bool,
+    /// Explicit Patchy executable chosen by the user. Wins over every
+    /// automatic location, including the managed install.
+    pub patchy_executable_path: Option<String>,
     /// UI theme mode: "dark", "light"
     pub theme: String,
     /// UI color palette shared across dark and light modes.
@@ -285,6 +296,10 @@ impl Default for AppConfig {
             vram_mode: "normal".to_string(),
             keep_alive: false,
             auto_start: true,
+            patchy_auto_install: true,
+            patchy_auto_start: false,
+            patchy_keep_alive: false,
+            patchy_executable_path: None,
             theme: "dark".to_string(),
             theme_palette: "mooshie".to_string(),
             font_scale: 1.0,
