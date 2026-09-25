@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerlab/files/main/tauri/tauri.conf.json.schema",
   "productName": "MooshieUI Fork",
-  "version": "2.3.7-fork.4",
+  "version": "2.3.7-fork.5",
   "identifier": "com.falafel0.mooshieui",
   "build": {
     "frontendDist": "../dist",

@@ -32,9 +32,17 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     next_id = nid;
 
     // Regional prompting (syntax-first): <region:x1,y1,x2,y2>text</region>
-    // Scope-gated to SDXL-family txt2img to keep v1 risk contained.
-    let supports_regions = matches!(params.model_architecture.as_str(), "sdxl" | "illustrious");
-    if params.mode == "txt2img" && supports_regions {
+    //
+    // Two shapes, because they address the latent differently:
+    // - SDXL family: ConditioningSetAreaPercentage. Its area tuple matches those
+    //   models' 2-D latents and the sampler resolves it without extra nodes.
+    // - Anima: latents carry an extra leading dimension, so percentage-area
+    //   tuples do not match the sampler's spatial dimensions. Use a standard
+    //   ConditioningSetMask instead; it scales the region mask to the latent
+    //   shape and conditions only within that area (not an inpaint pass).
+    let area_regions = matches!(params.model_architecture.as_str(), "sdxl" | "illustrious");
+    let masked_regions = params.model_architecture == "anima";
+    if params.mode == "txt2img" && (area_regions || masked_regions) {
         let regional_context = build_regional_context_prompt(params);
         for region in &params.positive_regions {
             let text = merge_regional_encode_text(&regional_context, &region.text)
@@ -65,22 +73,65 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
             );
             next_id += 1;
 
-            let region_area_id = next_id.to_string();
-            workflow.insert(
-                region_area_id.clone(),
-                json!({
-                    "class_type": "ConditioningSetAreaPercentage",
-                    "inputs": {
-                        "conditioning": [region_encode_id, 0],
-                        "x": x,
-                        "y": y,
-                        "width": w,
-                        "height": h,
-                        "strength": region.strength.clamp(0.0, 2.0)
-                    }
-                }),
-            );
-            next_id += 1;
+            let spatial_id = if masked_regions {
+                // Anima's latent keeps a leading frame axis, so percentage-area
+                // conditioning does not match the sampler's spatial dimensions.
+                // Use a standard rank-3 ComfyUI mask to limit influence spatially;
+                // the sampler resizes it to the latent dimensions.
+                let mask_id = next_id.to_string();
+                workflow.insert(
+                    mask_id.clone(),
+                    json!({
+                        "class_type": "MooshieRegionalMask",
+                        "inputs": {
+                            "width": params.width.max(1),
+                            "height": params.height.max(1),
+                            "x": x,
+                            "y": y,
+                            "region_width": w,
+                            "region_height": h
+                        }
+                    }),
+                );
+                next_id += 1;
+
+                let set_mask_id = next_id.to_string();
+                workflow.insert(
+                    set_mask_id.clone(),
+                    json!({
+                        "class_type": "ConditioningSetMask",
+                        "inputs": {
+                            "conditioning": [region_encode_id, 0],
+                            "mask": [mask_id, 0],
+                            "strength": region.strength.clamp(0.0, 2.0),
+                            // Keep conditioning spatially masked without asking
+                            // ComfyUI to derive a 2-D bounding box from Anima's
+                            // extra latent axis.
+                            "set_cond_area": "default"
+                        }
+                    }),
+                );
+                next_id += 1;
+                set_mask_id
+            } else {
+                let region_area_id = next_id.to_string();
+                workflow.insert(
+                    region_area_id.clone(),
+                    json!({
+                        "class_type": "ConditioningSetAreaPercentage",
+                        "inputs": {
+                            "conditioning": [region_encode_id, 0],
+                            "x": x,
+                            "y": y,
+                            "width": w,
+                            "height": h,
+                            "strength": region.strength.clamp(0.0, 2.0)
+                        }
+                    }),
+                );
+                next_id += 1;
+                region_area_id
+            };
 
             let region_combine_id = next_id.to_string();
             workflow.insert(
@@ -89,7 +140,7 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
                     "class_type": "ConditioningCombine",
                     "inputs": {
                         "conditioning_1": [pos_source.0.clone(), pos_source.1],
-                        "conditioning_2": [region_area_id, 0]
+                        "conditioning_2": [spatial_id, 0]
                     }
                 }),
             );
@@ -241,5 +292,95 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         sampler_id,
         refiner_model_source: None,
         base_sources: Some(base_sources),
+    }
+}
+
+#[cfg(test)]
+mod regional_tests {
+    use super::*;
+    use crate::comfyui::types::PositiveRegion;
+
+    fn params_for(architecture: &str) -> GenerationParams {
+        GenerationParams {
+            mode: "txt2img".into(),
+            checkpoint: "model.safetensors".into(),
+            model_architecture: architecture.into(),
+            positive_prompt: "a wide landscape".into(),
+            width: 512,
+            height: 512,
+            batch_size: 1,
+            steps: 2,
+            cfg: 4.0,
+            sampler_name: "euler".into(),
+            scheduler: "normal".into(),
+            positive_regions: vec![PositiveRegion {
+                text: "blue sky".into(),
+                negative_text: None,
+                mask_image: None,
+                x: 0.5,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+                strength: 1.0,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn classes(params: &GenerationParams) -> Vec<String> {
+        build(params, 7)
+            .workflow
+            .values()
+            .filter_map(|node| node["class_type"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// Anima regions are spatial conditioning nodes, not sequential inpaint jobs.
+    #[test]
+    fn anima_regions_use_mask_conditioning_wired_into_the_base_prompt() {
+        let graph = build(&params_for("anima"), 7).workflow;
+        let node_id = |class_type: &str| {
+            graph
+                .iter()
+                .find(|(_, node)| node["class_type"] == class_type)
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| panic!("missing workflow node {class_type}"))
+        };
+        let regional_mask_id = node_id("MooshieRegionalMask");
+        let set_mask_id = node_id("ConditioningSetMask");
+        let combine_id = node_id("ConditioningCombine");
+        let regional_mask = &graph[&regional_mask_id];
+        let set_mask = &graph[&set_mask_id];
+        let combine = &graph[&combine_id];
+
+        assert_eq!(regional_mask["inputs"]["width"], 512);
+        assert_eq!(regional_mask["inputs"]["height"], 512);
+        assert_eq!(regional_mask["inputs"]["x"], 0.5);
+        assert_eq!(regional_mask["inputs"]["y"], 0.0);
+        assert_eq!(regional_mask["inputs"]["region_width"], 0.5);
+        assert_eq!(regional_mask["inputs"]["region_height"], 0.5);
+        assert_eq!(set_mask["inputs"]["mask"], json!([regional_mask_id, 0]));
+        assert_eq!(set_mask["inputs"]["set_cond_area"], "default");
+        assert_eq!(combine["inputs"]["conditioning_2"], json!([set_mask_id, 0]));
+        assert!(!graph
+            .values()
+            .any(|node| node["class_type"] == "ConditioningSetAreaPercentage"));
+        assert!(!graph.values().any(|node| node["class_type"]
+            .as_str()
+            .is_some_and(|kind| kind.contains("Inpaint"))));
+    }
+
+    #[test]
+    fn sdxl_regions_keep_the_percentage_area_path() {
+        let found = classes(&params_for("sdxl"));
+        assert!(found.iter().any(|c| c == "ConditioningSetAreaPercentage"));
+        assert!(!found.iter().any(|c| c == "SolidMask"));
+    }
+
+    #[test]
+    fn unknown_architectures_keep_regions_out_of_the_graph() {
+        let found = classes(&params_for("sd15"));
+        assert!(!found.iter().any(|c| c == "ConditioningSetAreaPercentage"));
+        assert!(!found.iter().any(|c| c == "ConditioningSetMask"));
     }
 }

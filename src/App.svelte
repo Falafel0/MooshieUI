@@ -19,7 +19,7 @@
   import { directorTools, directorToolsAvailable } from "./lib/stores/directorTools.svelte.js";
   import { naiImageEnhance, naiImageEnhanceAvailable } from "./lib/stores/naiImageEnhance.svelte.js";
   import { models } from "./lib/stores/models.svelte.js";
-  import { uploadImageBytes, getConfig, updateConfig, readImageMetadata, getQueue, recoverPromptOutputs, readTempImage } from "./lib/utils/api.js";
+  import { uploadImageBytes, getConfig, updateConfig, readImageMetadata, getQueue, recoverPromptOutputs, readTempImage, readTempImageDisplay } from "./lib/utils/api.js";
   import { loadOutputImageForGenerationInput, uploadOutputImageForGenerationInput, sendImageToVideoFrame, addImageToVideoReference, videoReferenceSlotsFree } from "./lib/utils/galleryActions.js";
   import { H3_MAX_REF_IMAGES } from "./lib/utils/videoParams.js";
   import { UPSCALE_ACTION } from "./lib/utils/novelaiEnhance.js";
@@ -2281,7 +2281,7 @@
     });
 
     gallery.addImages(newImages);
-    progress.setLastOutputForMode(mode, newImages[0]?.url ?? null);
+    progress.setLastOutputForMode(mode, newImages[0]?.url || null);
     if (mode === "inpainting" && newImages[0]) {
       const snapshot = canvas.claimInpaintPrompt(promptId);
       if (snapshot) void prepareLatestInpaintResult(newImages[0], snapshot);
@@ -3074,20 +3074,35 @@
                   const displayFilename = data.display_temp_filename as string | undefined;
                   displayTempFilename = displayFilename;
                   console.log("[output_image] JXL temp path — jxl:", data.temp_filename, "display:", displayFilename, "display_format:", data.display_format);
-                  const [jxlRaw, displayRaw] = await Promise.all([
-                    readTempImage(data.temp_filename),
-                    displayFilename ? readTempImage(displayFilename) : Promise.resolve(null as number[] | null),
-                  ]);
-                  console.log("[output_image] readTempImage done — jxlRaw:", jxlRaw?.length, "displayRaw:", displayRaw?.length ?? "null");
+                  const jxlRaw = await readTempImage(data.temp_filename);
+                  let displayRaw: number[] | null = null;
+                  let displayMime = "image/webp";
+                  if (displayFilename) {
+                    try {
+                      displayRaw = await readTempImage(displayFilename);
+                      if (displayRaw.length > 0 && data.display_format === "png") {
+                        displayMime = "image/png";
+                      }
+                    } catch (e) {
+                      console.warn("[output_image] JXL display copy unavailable; transcoding canonical output:", e);
+                    }
+                  }
+                  if (!displayRaw?.length) {
+                    try {
+                      displayRaw = await readTempImageDisplay(data.temp_filename);
+                    } catch (e) {
+                      console.error("[output_image] failed to transcode canonical JXL for display:", e);
+                    }
+                  }
+                  console.log("[output_image] readTempImage done — jxlRaw:", jxlRaw.length, "displayRaw:", displayRaw?.length ?? "null");
                   blob = new Blob([new Uint8Array(jxlRaw)], { type: "image/jxl" });
-                  if (displayRaw && displayRaw.length > 0) {
-                    const displayMime = data.display_format === "webp" ? "image/webp" : "image/png";
+                  if (displayRaw?.length) {
                     url = URL.createObjectURL(new Blob([new Uint8Array(displayRaw)], { type: displayMime }));
                     console.log("[output_image] display blob URL created, mime:", displayMime, "size:", displayRaw.length);
                   } else {
-                    // No display copy — reuse last preview frame for display
-                    url = progress.displayImage ?? "";
-                    console.log("[output_image] no display copy, using displayImage:", url ? "present" : "EMPTY");
+                    // Never promote a live preview frame as if it were the final result.
+                    url = "";
+                    console.error("[output_image] final JXL has no renderable display copy");
                   }
                 } else {
                   // PNG and WebP are both WebView2-renderable, so the canonical
@@ -3128,10 +3143,20 @@
                     url = URL.createObjectURL(displayBlob);
                   } else {
                     console.warn(
-                      "[output_image] JXL display fetch failed; keeping canonical output:",
+                      "[output_image] JXL display fetch failed; transcoding canonical output:",
                       displayResp.status,
                     );
-                    url = progress.displayImage ?? "";
+                    try {
+                      const fallbackResp = await fetchTempImageWithRetry(
+                        `/internal-api/_temp_image/${encodeURIComponent(data.temp_filename)}?format=webp`,
+                      );
+                      url = fallbackResp.ok
+                        ? URL.createObjectURL(await fallbackResp.blob())
+                        : "";
+                    } catch (e) {
+                      console.error("[output_image] failed to transcode JXL display fallback:", e);
+                      url = "";
+                    }
                   }
                 } else {
                   const resp = await fetchTempImageWithRetry(
@@ -3175,13 +3200,13 @@
             }
           } else if (isJxl && data.jxl_image) {
             // JXL-only fallback: no display copy (WebP/PNG encode both failed in Rust).
-            // Save the JXL to gallery anyway; preview stays on the last blurry frame.
+            // Keep the canonical JXL for the gallery, but never mislabel the last live frame as final.
             console.warn("[output_image] JXL has no display copy — saving to gallery only");
             const jxlRaw = atob(data.jxl_image);
             const jxlBytes = new Uint8Array(jxlRaw.length);
             for (let i = 0; i < jxlRaw.length; i++) jxlBytes[i] = jxlRaw.charCodeAt(i);
             blob = new Blob([jxlBytes], { type: "image/jxl" });
-            url = progress.displayImage ?? "";
+            url = "";
           } else {
             console.warn("[output_image] event has neither temp_filename nor image");
             return;

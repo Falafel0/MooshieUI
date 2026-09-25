@@ -508,6 +508,7 @@ pub fn run() {
             commands::api::load_gallery_image_display,
             commands::api::load_gallery_image_png,
             commands::api::read_temp_image,
+            commands::api::read_temp_image_display,
             commands::api::get_gallery_image_path,
             commands::api::delete_gallery_image,
             commands::api::rename_gallery_image,

@@ -728,6 +728,11 @@ export async function readTempImage(filename: string): Promise<number[]> {
   return ipcInvoke("read_temp_image", { filename });
 }
 
+/** Read a temporary output in a format WebView2 can display (JXL → WebP). */
+export async function readTempImageDisplay(filename: string): Promise<number[]> {
+  return ipcInvoke("read_temp_image_display", { filename });
+}
+
 
 export async function deleteGalleryImage(filename: string): Promise<void> {
   return ipcInvoke("delete_gallery_image", { filename });

@@ -105,7 +105,7 @@
       cancelAnimationFrame(raf);
     }
     thumbRafs.clear();
-    // Drop the restore callback so a stale closure can't fire after unmount.
+    // Drop the pixel callback; document history is owned by the canvas store.
     canvasHistory.setOnRestored(null);
     if (stage) {
       canvas.retainLayerNodes();
@@ -235,7 +235,6 @@
         scheduleThumbRefresh(id);
       }
     });
-
     // Apply initial viewport
     applyViewport();
 
