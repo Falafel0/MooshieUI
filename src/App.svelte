@@ -4172,7 +4172,7 @@
     {/if}
     <div class="relative flex-1 overflow-hidden md:min-h-0 md:rounded-xl md:bg-neutral-950" inert={startup.locked}>
     {#if currentPage === "generate"}
-      <GenerationPage oneditpatchy={editInPatchy} />
+      <GenerationPage oneditpatchy={isTauri ? editInPatchy : undefined} />
     {:else if currentPage === "music"}
       <MusicPage {userRole} />
     {:else if currentPage === "gallery"}
@@ -4444,6 +4444,7 @@
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.37 4.36A9 9 0 0020.49 15"/></svg>
         </button>
+        {#if isTauri}
         <button
           title={locale.t("gallery.edit_patchy")}
           class="flex items-center justify-center w-8 h-8 rounded-lg bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 hover:text-neutral-100 transition-colors"
@@ -4451,6 +4452,7 @@
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
         </button>
+        {/if}
 
         <!-- Separator -->
         <div class="w-px h-5 bg-neutral-700/60 mx-0.5"></div>
