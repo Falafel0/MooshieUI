@@ -1,3 +1,15 @@
+## What's New in v2.3.7-fork.5
+
+### Regional conditioning and live results
+- Text-to-image prompt regions use spatial mask conditioning for Anima instead of sequential inpaint passes. A saved inpaint-chain preference no longer redirects a normal text-to-image generation.
+- A completed result is never replaced by its last live frame. When a result has no display copy, the final JXL is transcoded on demand so the finished image is what stays on screen.
+
+### Layers and Photopea
+- Layer add, delete, duplicate and reorder, plus visibility, opacity, rename and lock changes, are covered by the shared undo/redo history. Undoing a delete restores the same layer with its pixels.
+- A Photopea load failure now reports a timeout with retry and open-in-browser actions instead of hanging on the embedded frame. External network or Cloudflare challenges can still block the embedded editor.
+
+---
+
 ## What's New in v2.3.7-fork.2
 
 ### Inpainting layers, masks and regional prompting

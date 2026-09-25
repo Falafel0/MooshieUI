@@ -7,6 +7,7 @@ import { captureLayer, maskToGrayscale } from "../utils/canvasLayerExport.js";
 import type { InpaintSettings } from "../utils/inpaintSettings.js";
 import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
 import { processMaskCoverage } from "../utils/maskProcessing.js";
+import { canvasHistory } from "./canvasHistory.svelte.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform" | "canvasResize";
 export type CanvasLayerType = "raster" | "mask" | "region";
@@ -905,6 +906,7 @@ class CanvasStore {
 
   // Layers
   addLayer(type: CanvasLayerType = "raster", name?: string): string {
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     const id = genLayerId();
     const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
     const layerName = name ?? (type === "mask"
@@ -948,6 +950,8 @@ class CanvasStore {
   }
 
   removeLayer(id: string) {
+    if (!this.layers.some((layer) => layer.id === id)) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId, [id]);
     this.detachedLayers.get(id)?.destroy();
     this.detachedLayers.delete(id);
     const removed = this.layers.find((l) => l.id === id);
@@ -982,6 +986,7 @@ class CanvasStore {
   duplicateLayer(id: string): string | null {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return null;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     const newId = genLayerId();
     const source = this._stageRef?.getLayers().find((node: any) => node.id() === id);
     // Clone actual canvas nodes, including eraser operations, before publishing metadata.
@@ -1013,6 +1018,7 @@ class CanvasStore {
     const layer = this.layers.find((l) => l.id === id);
     const target = this.getLayerMoveTarget(id, direction);
     if (!layer || !target) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => {
       if (l.id === id) return { ...l, order: target.order };
       if (l.id === target.id) return { ...l, order: layer.order };
@@ -1021,18 +1027,27 @@ class CanvasStore {
   }
 
   renameLayer(id: string, name: string) {
+    if (this.layers.find((layer) => layer.id === id)?.name === name) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, name } : l));
   }
 
   toggleLayerVisibility(id: string) {
+    if (!this.layers.some((layer) => layer.id === id)) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l));
   }
 
-  setLayerOpacity(id: string, opacity: number) {
+  setLayerOpacity(id: string, opacity: number, recordHistory = true) {
+    const layer = this.layers.find((item) => item.id === id);
+    if (!layer || layer.opacity === opacity) return;
+    if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity } : l));
   }
 
   toggleLayerLock(id: string) {
+    if (!this.layers.some((layer) => layer.id === id)) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l));
   }
 
@@ -1332,6 +1347,7 @@ class CanvasStore {
 
   // Canvas init — creates default layers
   initCanvas(width: number, height: number) {
+    canvasHistory.clear();
     for (const node of this.detachedLayers.values()) node.destroy();
     this.detachedLayers.clear();
     this.canvasWidth = width;
@@ -1348,6 +1364,8 @@ class CanvasStore {
     const rasterLayer = this.layers.find((l) => l.type === "raster");
     if (rasterLayer) this.activeLayerId = rasterLayer.id;
 
+    // Default layers are document initialization, not user undo operations.
+    canvasHistory.clear();
     this.boundingBox = { x: 0, y: 0, width, height, locked: false };
   }
 
@@ -1556,3 +1574,12 @@ class CanvasStore {
 }
 
 export const canvas = new CanvasStore();
+
+canvasHistory.setOnDocumentRestored((layers, activeLayerId) => {
+  canvas.layers = layers;
+  canvas.activeLayerId = activeLayerId;
+});
+canvasHistory.setDocumentStateProvider(() => ({
+  layers: canvas.layers,
+  activeLayerId: canvas.activeLayerId,
+}));

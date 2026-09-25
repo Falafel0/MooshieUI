@@ -2,12 +2,27 @@
   import { canvas } from "../../../stores/canvas.svelte.js";
   import { generation } from "../../../stores/generation.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import { canvasHistory } from "../../../stores/canvasHistory.svelte.js";
   import { grayscaleMaskBounds } from "../../../utils/canvasLayerExport.js";
   import InpaintSettings from "../InpaintSettings.svelte";
 
   const layer = $derived(canvas.activeLayer);
   const hasOwnSettings = $derived(!!layer?.inpaintSettings);
   const aspectLocked = $derived(layer?.inpaintAspectLocked !== false);
+  let opacityEditLayerId: string | null = null;
+
+  function setOpacity(value: number) {
+    if (!layer || layer.opacity === value) return;
+    if (opacityEditLayerId !== layer.id) {
+      canvasHistory.snapshotDocument(canvas.layers, canvas.activeLayerId);
+      opacityEditLayerId = layer.id;
+    }
+    canvas.setLayerOpacity(layer.id, value, false);
+  }
+
+  function finishOpacityEdit() {
+    opacityEditLayerId = null;
+  }
 
   function setOwnSettings(enabled: boolean) {
     if (!layer) return;
@@ -59,7 +74,7 @@
     <div class="space-y-2 p-2">
       <label class="flex h-6 items-center gap-2 text-[10px] text-neutral-400">
         <span class="shrink-0">{locale.t('canvas.opacity')}</span>
-        <input type="range" value={layer.opacity} oninput={(event) => canvas.setLayerOpacity(layer.id, Number(event.currentTarget.value))} min="0" max="1" step="0.01" class="min-w-0 flex-1 accent-indigo-500" />
+        <input type="range" value={layer.opacity} oninput={(event) => setOpacity(Number(event.currentTarget.value))} onpointerup={finishOpacityEdit} onkeyup={finishOpacityEdit} onblur={finishOpacityEdit} min="0" max="1" step="0.01" class="min-w-0 flex-1 accent-indigo-500" />
         <span class="w-8 shrink-0 text-right tabular-nums text-neutral-300">{Math.round(layer.opacity * 100)}%</span>
       </label>
 

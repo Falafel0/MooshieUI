@@ -1660,7 +1660,44 @@ class MooshieInpaintConditionMask:
         return (_inpaint_resize(cropped, sample_width, sample_height).squeeze(1).clamp(0, 1),)
 
 
+class MooshieRegionalMask:
+    """Build a normalized rectangle as a standard ComfyUI conditioning mask.
+
+    The output uses ComfyUI's (batch, height, width) MASK layout; the conditioning
+    sampler scales it to the latent spatial dimensions while preserving its mask.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "width": ("INT", {"default": 1024, "min": 1, "max": 16384}),
+                "height": ("INT", {"default": 1024, "min": 1, "max": 16384}),
+                "x": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "y": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "region_width": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
+                "region_height": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "build"
+    CATEGORY = "mooshie/conditioning"
+
+    def build(self, width, height, x, y, region_width, region_height):
+        width = int(width)
+        height = int(height)
+        mask = torch.zeros((1, height, width), dtype=torch.float32)
+        left = max(0, min(width, round(float(x) * width)))
+        top = max(0, min(height, round(float(y) * height)))
+        right = max(left, min(width, round((float(x) + float(region_width)) * width)))
+        bottom = max(top, min(height, round((float(y) + float(region_height)) * height)))
+        mask[:, top:bottom, left:right] = 1.0
+        return (mask,)
+
+
 NODE_CLASS_MAPPINGS = {
+    "MooshieRegionalMask": MooshieRegionalMask,
     "MooshieInpaintControl": MooshieInpaintControl,
     "MooshieInpaintConditionMask": MooshieInpaintConditionMask,
     "MooshieInpaintPrepare": MooshieInpaintPrepare,
@@ -1686,6 +1723,7 @@ NODE_CLASS_MAPPINGS.update(H3_DRAFT_NODES)
 register_h3_draft_routes()
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MooshieRegionalMask": "Mooshie Regional Mask",
     "MooshieInpaintControl": "Mooshie Inpaint Control",
     "MooshieInpaintConditionMask": "Mooshie Inpaint Condition Mask",
     "MooshieInpaintPrepare": "Mooshie Inpaint Prepare",

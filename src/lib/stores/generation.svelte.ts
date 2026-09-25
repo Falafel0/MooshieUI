@@ -941,7 +941,7 @@ class GenerationStore {
   /** When true, checkpoint/model swaps never overwrite width/height, regardless of advancedMode. */
   resolutionLocked = $state(false);
   regionalPrompts = $state<RegionalPromptSelection[]>([]);
-  /** SDXL/Illustrious: conditioning areas vs sequential inpaint. Anima always uses inpaint chain. */
+  /** Persisted legacy choice; txt2img always uses spatial conditioning, while inpaint uses mode-specific behavior. */
   regionalPromptStrategy = $state<RegionalPromptStrategy>("conditioning");
 
   // --- Video mode (MiniMax H3) ---
@@ -1794,40 +1794,43 @@ class GenerationStore {
     }
   }
 
-  /** SDXL-style area conditioning (ConditioningSetArea). */
+  /** Spatial conditioning: SDXL area regions or Anima mask regions. */
   get supportsRegionalConditioning(): boolean {
     if (this.mode !== "txt2img" && this.mode !== "inpainting") return false;
     // Both regional strategies are ComfyUI graph rewrites. NovelAI takes a
     // finished prompt over HTTP, so neither can apply there.
     if (this.isNovelAi) return false;
+    // Anima takes area conditioning in txt2img. Its inpaint workspace keeps the
+    // sequential masked-region chain, because there a region layer is an edit
+    // mask rather than an area of influence.
+    if (this.isAnima) return this.mode === "txt2img";
     return this.isSdxlLike;
   }
 
-  /** Sequential masked-region generation for txt2img and Anima inpainting. */
+  /** Sequential masked-region generation is only for inpainting edit masks. */
   get supportsRegionalInpaintChain(): boolean {
-    if (this.isNovelAi) return false;
-    return (
-      (this.mode === "txt2img" && (this.isAnima || this.isSdxlLike)) ||
-      (this.mode === "inpainting" && this.isAnima)
-    );
+    return !this.isNovelAi && this.mode === "inpainting" && this.isAnima;
   }
 
   get effectiveRegionalStrategy(): RegionalPromptStrategy {
+    if (this.mode === "txt2img") {
+      // Text-to-image regions are areas of influence, never sequential edits.
+      // Ignore any persisted legacy `inpaint_chain` preference.
+      return "conditioning";
+    }
     if (!this.supportsRegionalInpaintChain && !this.supportsRegionalConditioning) {
       return "conditioning";
     }
+    // Inpainting regions are painted edit masks: use area conditioning where
+    // available, otherwise retain the sequential masked-region workflow.
     if (this.mode === "inpainting") {
       return this.supportsRegionalConditioning ? "conditioning" : "inpaint_chain";
     }
-    if (this.isAnima) return "inpaint_chain";
-    if (this.supportsRegionalConditioning && this.regionalPromptStrategy === "conditioning") {
-      return "conditioning";
-    }
-    return "inpaint_chain";
+    return "conditioning";
   }
 
   get canChooseRegionalStrategy(): boolean {
-    return this.supportsRegionalConditioning && this.supportsRegionalInpaintChain && !this.isAnima;
+    return this.supportsRegionalConditioning && this.supportsRegionalInpaintChain;
   }
 
   /** txt2img regional prompting (GUI regions + <region> tags). */

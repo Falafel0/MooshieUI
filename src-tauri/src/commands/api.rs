@@ -1948,6 +1948,24 @@ pub async fn read_temp_image(filename: String) -> Result<Vec<u8>, AppError> {
         .ok_or_else(|| AppError::Other(format!("Temp image not found: {}", filename)))
 }
 
+/// Read a temporary output in a WebView2-renderable format. JXL is transcoded
+/// to WebP so final results can replace the live preview even when the normal
+/// display-copy encoder did not produce a companion file.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn read_temp_image_display(filename: String) -> Result<Vec<u8>, AppError> {
+    let bytes = crate::temp_images::load(&filename)
+        .ok_or_else(|| AppError::Other(format!("Temp image not found: {}", filename)))?;
+    if filename.to_ascii_lowercase().ends_with(".jxl") {
+        tokio::task::spawn_blocking(move || transcode_jxl_to_webp(&bytes))
+            .await
+            .map_err(|e| AppError::Other(format!("Task panicked: {}", e)))?
+            .map_err(AppError::Other)
+    } else {
+        Ok(bytes)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GalleryPathResolveError {
     InvalidFilename,
@@ -8556,4 +8574,38 @@ pub async fn get_logs(source: String, lines: Option<usize>) -> Result<Vec<String
         _ => Vec::new(),
     };
     Ok(out)
+}
+
+#[cfg(test)]
+mod jxl_transcode_tests {
+    fn assert_webp_signature(webp: &[u8]) {
+        assert!(webp.starts_with(b"RIFF"));
+        assert_eq!(&webp[8..12], b"WEBP");
+    }
+
+    #[test]
+    fn valid_jxl_output_transcodes_to_webp() {
+        let rgba = [
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ];
+        let jxl = crate::jxl::encode_rgba8_visually_lossless(&rgba, 2, 2).expect("encode JXL");
+        let webp = super::transcode_jxl_to_webp(&jxl).expect("transcode to WebP");
+
+        assert_webp_signature(&webp);
+    }
+
+    #[cfg(feature = "desktop")]
+    #[tokio::test]
+    async fn read_temp_image_display_transcodes_saved_jxl() {
+        let rgba = [
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ];
+        let jxl = crate::jxl::encode_rgba8_visually_lossless(&rgba, 2, 2).expect("encode JXL");
+        let filename = crate::temp_images::save(&jxl, "jxl").expect("save temp JXL");
+        let result = super::read_temp_image_display(filename.clone()).await;
+        crate::temp_images::remove(&filename);
+        let webp = result.expect("read and transcode temp JXL");
+
+        assert_webp_signature(&webp);
+    }
 }

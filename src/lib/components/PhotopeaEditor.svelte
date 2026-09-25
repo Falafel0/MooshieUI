@@ -2,6 +2,7 @@
   import { locale } from "../stores/locale.svelte.js";
   import { generation } from "../stores/generation.svelte.js";
   import { loadGalleryImagePng, saveToGalleryBytes, readImageMetadata } from "../utils/api.js";
+  import { openExternalUrl } from "../utils/openExternal.js";
   import type { OutputImage } from "../types/index.js";
 
   interface Props {
@@ -34,12 +35,40 @@
     );
 
   let iframeEl = $state<HTMLIFrameElement | null>(null);
+  let iframeSrc = $state(photopeaUrl);
+  let bootTimeout: ReturnType<typeof setTimeout> | undefined;
   // boot: waiting for Photopea's initial "done"; opening: waiting for the source
   // image to finish opening; ready: user can edit and save.
   let phase = $state<"boot" | "opening" | "ready">("boot");
   let saving = $state(false);
   let pendingAction = $state<"gallery" | "base" | "raster" | "mask" | "region" | null>(null);
   let error = $state("");
+
+  function clearBootTimeout() {
+    if (bootTimeout) clearTimeout(bootTimeout);
+    bootTimeout = undefined;
+  }
+
+  function armBootTimeout() {
+    clearBootTimeout();
+    bootTimeout = setTimeout(() => {
+      if (phase === "boot") error = locale.t("photopea.connection_timeout");
+    }, 20_000);
+  }
+
+  function retryPhotopea() {
+    phase = "boot";
+    error = "";
+    armBootTimeout();
+    iframeSrc = "about:blank";
+    setTimeout(() => { iframeSrc = photopeaUrl; }, 50);
+  }
+
+  function openPhotopeaExternally() {
+    void openExternalUrl(PHOTOPEA_ORIGIN).catch((e) =>
+      console.error("Photopea: failed to open external browser:", e),
+    );
+  }
 
   async function sendImageToPhotopea() {
     if (!image || !iframeEl?.contentWindow) return;
@@ -106,6 +135,8 @@
     error = "";
     saving = false;
     pendingAction = null;
+    iframeSrc = photopeaUrl;
+    armBootTimeout();
 
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== PHOTOPEA_ORIGIN) return;
@@ -116,6 +147,8 @@
       }
       if (e.data === "done") {
         if (phase === "boot") {
+          clearBootTimeout();
+          error = "";
           phase = "opening";
           void sendImageToPhotopea();
         } else if (phase === "opening") {
@@ -126,7 +159,10 @@
     };
 
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      clearBootTimeout();
+      window.removeEventListener("message", onMessage);
+    };
   });
 </script>
 
@@ -165,11 +201,25 @@
         aria-label={locale.t("common.cancel")}
       >×</button>
     </div>
-    <iframe
-      bind:this={iframeEl}
-      src={photopeaUrl}
-      title={locale.t("photopea.title")}
-      class="flex-1 w-full rounded-lg border border-neutral-700 bg-neutral-900"
-    ></iframe>
+    <div class="relative min-h-0 flex-1">
+      <iframe
+        bind:this={iframeEl}
+        src={iframeSrc}
+        title={locale.t("photopea.title")}
+        class="h-full w-full rounded-lg border border-neutral-700 bg-neutral-900"
+      ></iframe>
+      {#if error && phase === "boot"}
+        <div class="pointer-events-none absolute inset-x-3 top-3 flex justify-center">
+          <div class="pointer-events-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-amber-700/70 bg-neutral-950/95 px-3 py-2 text-xs shadow-lg">
+            <div class="min-w-48 flex-1">
+              <p class="font-medium text-amber-200">{error}</p>
+              <p class="mt-0.5 text-neutral-300">{locale.t("photopea.proxy_hint")}</p>
+            </div>
+            <button type="button" class="rounded border border-neutral-600 px-2.5 py-1.5 text-neutral-100 hover:bg-neutral-800" onclick={retryPhotopea}>{locale.t("photopea.retry")}</button>
+            <button type="button" class="rounded border border-indigo-600 px-2.5 py-1.5 text-indigo-200 hover:bg-indigo-900/40" onclick={openPhotopeaExternally}>{locale.t("photopea.open_browser")}</button>
+          </div>
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
