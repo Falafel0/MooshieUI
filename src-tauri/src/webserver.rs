@@ -149,20 +149,48 @@ fn resolve_username(state: &WebState, headers: &HeaderMap, remote: &SocketAddr) 
     None
 }
 
-/// Blank the instance owner's NovelAI key out of a config payload and replace
-/// the "configured" flag with this account's own answer.
+/// Blank the instance owner's credentials out of a config payload and replace
+/// the NovelAI "configured" flag with this account's own answer.
 ///
 /// Split out and pure so the redaction is unit-testable: `get_config` hands
-/// moderators `include_secrets = true`, which used to include the host's real
-/// NovelAI token.
-fn scrub_nai_key_for_user(value: &mut serde_json::Value, has_key: bool) {
-    if let Some(obj) = value.as_object_mut() {
-        obj.insert("novelai_api_key".to_string(), serde_json::Value::Null);
-        obj.insert(
-            "novelai_api_key_configured".to_string(),
-            serde_json::json!(has_key),
-        );
+/// named accounts `include_secrets = true` (moderators included), which used to
+/// include the host's real NovelAI token. NovelAI is the one credential an
+/// account can hold a copy of its own, hence the flag parameter; the CivitAI
+/// key and external-LLM credentials exist only on the host,
+/// so their configured flags survive and the values do not.
+///
+/// As with NovelAI this applies to every browser client, the owner's included:
+/// a LAN payload carries the "configured" booleans and never the host's keys.
+/// The desktop app reads the config directly and is unaffected.
+fn scrub_host_secrets_for_user(value: &mut serde_json::Value, has_nai_key: bool) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    obj.insert("novelai_api_key".to_string(), serde_json::Value::Null);
+    obj.insert(
+        "novelai_api_key_configured".to_string(),
+        serde_json::json!(has_nai_key),
+    );
+    for (key, flag) in [
+        ("civitai_api_key", "civitai_api_key_configured"),
+        ("llm_external_api_key", "llm_external_api_key_configured"),
+    ] {
+        // `config_to_client_json(false)` has already blanked these values for
+        // regular users and supplied the true configured flags. Moderators get
+        // the raw value here, so calculate their flags from that value instead.
+        let configured = match obj.get(key).and_then(|v| v.as_str()) {
+            Some("") => obj.get(flag).and_then(|v| v.as_bool()).unwrap_or(false),
+            Some(value) => !value.trim().is_empty(),
+            None => obj.get(flag).and_then(|v| v.as_bool()).unwrap_or(false),
+        };
+        obj.insert(key.to_string(), serde_json::Value::Null);
+        obj.insert(flag.to_string(), serde_json::json!(configured));
     }
+    // The refresh token can mint new LLM access tokens and has no UI flag.
+    obj.insert(
+        "llm_oauth_refresh_token".to_string(),
+        serde_json::Value::String(String::new()),
+    );
 }
 
 /// A moderator can edit shared settings, but cannot replace the owner's
@@ -1544,7 +1572,9 @@ async fn thumbnail_handler(
             StatusCode::OK,
             [
                 ("content-type", "image/webp".to_string()),
-                ("cache-control", "no-cache".to_string()),
+                // Same reasoning as the Tauri protocol handler: the request URL
+                // carries `?v=`, so the answer is only reused for those bytes.
+                ("cache-control", "max-age=3600".to_string()),
             ],
             data,
         )
@@ -2184,7 +2214,7 @@ async fn dispatch_command(
             // about its own key and never about the host's -- including
             // moderators, who take the include_secrets branch above.
             if let Some(user) = username {
-                scrub_nai_key_for_user(&mut value, crate::user_secrets::has_nai_key(user));
+                scrub_host_secrets_for_user(&mut value, crate::user_secrets::has_nai_key(user));
             }
             Ok(value)
         }
@@ -7884,7 +7914,8 @@ mod watchdog_tests {
 #[cfg(test)]
 mod nai_key_tests {
     use super::{
-        min_role_for_command, preserve_config_secrets_for_role, scrub_nai_key_for_user, UserRole,
+        min_role_for_command, preserve_config_secrets_for_role, scrub_host_secrets_for_user,
+        UserRole,
     };
     use crate::config::AppConfig;
 
@@ -7938,7 +7969,7 @@ mod nai_key_tests {
             "novelai_api_key_configured": true,
             "server_port": 8188,
         });
-        scrub_nai_key_for_user(&mut value, false);
+        scrub_host_secrets_for_user(&mut value, false);
 
         assert_eq!(value["novelai_api_key"], serde_json::Value::Null);
         assert_eq!(
@@ -7949,13 +7980,78 @@ mod nai_key_tests {
         assert_eq!(value["server_port"], serde_json::json!(8188));
     }
 
+    /// A moderator takes the `include_secrets` branch, so the host's CivitAI
+    /// and external-LLM keys used to travel to them in the clear. Only the
+    /// boolean "configured" answer may survive; a non-admin never reads the
+    /// owner's paid credentials.
+    #[test]
+    fn host_only_keys_are_blanked_but_still_reported_as_configured() {
+        let mut value = serde_json::json!({
+            "civitai_api_key": "host-civitai-key",
+            "civitai_api_key_configured": false,
+            "llm_external_api_key": "host-llm-key",
+            "llm_external_api_key_configured": false,
+            "llm_oauth_refresh_token": "host-refresh-token",
+            "an_untouched_field": "kept",
+        });
+
+        scrub_host_secrets_for_user(&mut value, false);
+
+        assert_eq!(value["civitai_api_key"], serde_json::Value::Null);
+        assert_eq!(value["civitai_api_key_configured"], serde_json::json!(true));
+        assert_eq!(value["llm_external_api_key"], serde_json::Value::Null);
+        assert_eq!(
+            value["llm_external_api_key_configured"],
+            serde_json::json!(true)
+        );
+        assert_eq!(value["llm_oauth_refresh_token"], serde_json::json!(""));
+        assert_eq!(value["an_untouched_field"], serde_json::json!("kept"));
+    }
+
+    /// An empty host key is not a configured one: the flag the UI reads has to
+    /// match what the host actually holds.
+    #[test]
+    fn an_empty_host_key_is_reported_as_not_configured() {
+        let mut value = serde_json::json!({
+            "civitai_api_key": "   ",
+            "civitai_api_key_configured": true,
+        });
+
+        scrub_host_secrets_for_user(&mut value, false);
+
+        assert_eq!(value["civitai_api_key"], serde_json::Value::Null);
+        assert_eq!(
+            value["civitai_api_key_configured"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn regular_user_keeps_host_configured_flags_after_both_redactions() {
+        let config = AppConfig {
+            civitai_api_key: Some("host-civitai-key".to_string()),
+            llm_external_api_key: "host-llm-key".to_string(),
+            ..AppConfig::default()
+        };
+        let mut value = crate::config::config_to_client_json(&config, false).unwrap();
+        scrub_host_secrets_for_user(&mut value, false);
+
+        assert_eq!(value["civitai_api_key"], serde_json::Value::Null);
+        assert_eq!(value["civitai_api_key_configured"], serde_json::json!(true));
+        assert_eq!(value["llm_external_api_key"], serde_json::Value::Null);
+        assert_eq!(
+            value["llm_external_api_key_configured"],
+            serde_json::json!(true)
+        );
+    }
+
     #[test]
     fn a_named_account_with_its_own_key_is_reported_as_configured() {
         let mut value = serde_json::json!({
             "novelai_api_key": "pst-host-owner-token",
             "novelai_api_key_configured": false,
         });
-        scrub_nai_key_for_user(&mut value, true);
+        scrub_host_secrets_for_user(&mut value, true);
 
         assert_eq!(value["novelai_api_key"], serde_json::Value::Null);
         assert_eq!(value["novelai_api_key_configured"], serde_json::json!(true));

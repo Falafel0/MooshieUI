@@ -1,3 +1,22 @@
+## What's New in v2.3.7-fork.9
+
+### Patchy hand-off
+- Patchy gains a Return to MooshieUI script with five explicit destinations, installed when launching a hand-off.
+- Preparing a file or installing Patchy no longer opens the editor unexpectedly. Launch is an explicit action in the dialog; the separate start-with-app setting remains opt-in.
+- Importing before a save now reports that no edited result is available. A failed layered export cannot reuse a stale PNG or claim success; Patchy's documented headless scripting API exports a neighbouring PSD/PSB into an app-managed PNG.
+- The import panel identifies the chosen destination. Saving an image to the gallery does not warn about resizing the canvas, while a resized mask or region is refused instead of being misaligned.
+- A live connection to the open Patchy window can preview and import unsaved edits into any of the five destinations. It also offers Undo, Redo and an explicit action to add the original MooshieUI image as a reference layer; state tokens reject edits against a changed document.
+
+### Simpler workspace
+- Removed monbooru completely from the app: desktop and mobile navigation, browse and prompt arena, automatic install and process lifecycle, settings, API commands and generated-prompt macro injection. Existing external monbooru installations and their data are left untouched.
+- Video and music navigation is hidden in this fork's main workspace.
+
+### Reliability
+- Live generation frames replace a previous persisted output correctly, including after switching generation tabs.
+- LAN config responses keep credential values private and still report the correct configured state for each named account. Windows CI now checks both Rust build modes and runs the native library tests.
+
+---
+
 ## What's New in v2.3.7-fork.8
 
 ### Canvas: one tool for moving and resizing

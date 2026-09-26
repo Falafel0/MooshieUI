@@ -1,15 +1,19 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { locale } from "../stores/locale.svelte.js";
   import { generation } from "../stores/generation.svelte.js";
   import { isTauri, ipcListen } from "../utils/ipc.js";
   import {
     getConfig,
+    disconnectPatchyLive,
     getPatchyStatus,
     installPatchy,
     launchPatchy,
     loadGalleryImagePng,
+    patchyLiveAction,
     readImageMetadata,
     readPatchyDocument,
+    readPatchyLiveDocument,
     resolvePatchyPath,
     type PatchyDocumentRead,
     saveToGalleryBytes,
@@ -17,7 +21,7 @@
     writePatchyDocument,
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
-  import { resultOriginText } from "../utils/patchyHandoff.js";
+  import { fingerprint, pngDimensions, resultOriginText } from "../utils/patchyHandoff.js";
   import type { OutputImage } from "../types/index.js";
   import PatchyTransferPanel from "./patchy/PatchyTransferPanel.svelte";
 
@@ -101,6 +105,10 @@
   /** Which file the read-back came from — a layered save may not be the one we
    *  handed over, and the panel has to say so instead of implying otherwise. */
   let importOrigin = $state("");
+  /** True when the last read came from a layered save, flattened for the import. */
+  let importLayered = $state(false);
+  /** Name of a layered save that is there but could not be read back. */
+  let importLayeredFailure = $state<string | null>(null);
   // Object URL for the edited file coming back; revoked whenever it is replaced.
   let importPreviewUrl = $state<string | null>(null);
   let importError = $state("");
@@ -110,6 +118,14 @@
   // A read-back whose dimensions differ from the export is held here until the
   // user confirms: applying it resizes the document underneath their layers.
   let pendingImport = $state<{ target: ApplyTarget; bytes: number[] } | null>(null);
+  let liveEnabled = $state(false);
+  let liveReading = $state(false);
+  let liveError = $state("");
+  let livePreviewUrl = $state<string | null>(null);
+  let livePreviewFingerprint = "";
+  let liveToken = $state("");
+  let liveCanUndo = $state(false);
+  let liveCanRedo = $state(false);
 
   const sourcePreviewUrl = $derived(image?.thumbnailUrl || image?.url || null);
 
@@ -128,7 +144,7 @@
   );
 
   const importStepState = $derived<StepState>(
-    importError
+    importError || (liveEnabled && liveError)
       ? "failed"
       : importStatus === "reading" || importStatus === "applying"
         ? "running"
@@ -152,19 +168,48 @@
   const importStatusText = $derived(
     importError
       ? importError
+      : liveEnabled && liveError
+        ? liveError
       : importStatus === "applied"
         ? appliedText()
+        : liveEnabled
+          ? liveError || locale.t("patchy.live_hint")
         : importStatus === "ready"
           ? ""
-          : locale.t("patchy.result_missing"),
+          : importLayeredFailure
+            ? locale.t("patchy.result_flatten_failed", { name: importLayeredFailure })
+            : locale.t("patchy.result_missing"),
   );
-  // Kept standing while the loaded result is a different size, so the warning is
-  // visible before the user reaches for an apply button, not only after.
-  const importSizeMismatch = $derived(hasSizeMismatch(importInfo, exportInfo));
+  // Warn only after a canvas target is selected; a gallery copy does not
+  // change canvas dimensions.
+  // Gallery copies do not resize the canvas. A read-only refresh may show
+  // dimensions, but must not warn about a canvas action nobody has chosen.
+  const importSizeMismatch = $derived(
+    lastImportTarget !== "gallery" && lastImportTarget !== "read" &&
+    hasSizeMismatch(importInfo, exportInfo),
+  );
 
   function releaseImportPreview() {
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
     importPreviewUrl = null;
+  }
+
+  function releaseLivePreview() {
+    if (livePreviewUrl) URL.revokeObjectURL(livePreviewUrl);
+    livePreviewUrl = null;
+    livePreviewFingerprint = "";
+  }
+
+  function reportNoSavedResult(layeredSource: string | null) {
+    importLayeredFailure = layeredSource;
+    importLayered = false;
+    importInfo = null;
+    importOrigin = "";
+    releaseImportPreview();
+    importStatus = "idle";
+    importError = layeredSource
+      ? locale.t("patchy.result_flatten_failed", { name: layeredSource })
+      : locale.t("patchy.result_missing");
   }
 
   function resetState() {
@@ -182,35 +227,26 @@
     exportBytes = null;
     importInfo = null;
     importOrigin = "";
+    importLayered = false;
+    importLayeredFailure = null;
     importError = "";
     importStatus = "idle";
     lastImportTarget = null;
     appliedTarget = null;
     pendingImport = null;
     releaseImportPreview();
+    liveEnabled = false;
+    liveReading = false;
+    liveError = "";
+    liveToken = "";
+    liveCanUndo = false;
+    liveCanRedo = false;
+    releaseLivePreview();
   }
 
   function documentName(): string {
     const base = (image?.filename ?? "image.png").replace(/\.(jxl|webp|jpe?g|psd|psb)$/i, ".png");
     return base.includes(".") ? base : `${base}.png`;
-  }
-
-  /** PNG width/height from the IHDR chunk, or null for anything else. */
-  function pngDimensions(bytes: number[]): { width: number; height: number } | null {
-    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-    if (bytes.length < 24) return null;
-    for (let i = 0; i < signature.length; i += 1) {
-      if (bytes[i] !== signature[i]) return null;
-    }
-    const readU32 = (offset: number) =>
-      ((bytes[offset] << 24) |
-        (bytes[offset + 1] << 16) |
-        (bytes[offset + 2] << 8) |
-        bytes[offset + 3]) >>>
-      0;
-    const width = readU32(16);
-    const height = readU32(20);
-    return width > 0 && height > 0 ? { width, height } : null;
   }
 
   /** Describe a file in flight: name, size, and pixel size when readable. */
@@ -222,20 +258,6 @@
       width: dims?.width ?? null,
       height: dims?.height ?? null,
     };
-  }
-
-  /**
-   * Cheap fingerprint used for one question only: "has Patchy saved over our
-   * hand-off file yet?". Comparing lengths alone would misreport a re-encode of
-   * the same size as "not saved", so the bytes are hashed (FNV-1a, 32 bits).
-   */
-  function fingerprint(bytes: number[]): string {
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < bytes.length; i += 1) {
-      hash ^= bytes[i];
-      hash = Math.imul(hash, 0x01000193);
-    }
-    return `${(hash >>> 0).toString(16)}:${bytes.length}`;
   }
 
   /** True only when both files' pixel sizes are known and they disagree. */
@@ -275,8 +297,7 @@
     if (target === "gallery" || target === null || target === "read") {
       return image?.filename ?? "—";
     }
-    // The canvas targets all edit the document currently open in MooshieUI.
-    return locale.t("canvas.use_document_settings");
+    return locale.t(TARGET_LABELS[target]);
   }
 
   /** PNG bytes for the document Patchy opens. */
@@ -327,9 +348,6 @@
         return;
       }
       await exportDocument();
-      // Auto-start: the editor opens as soon as the document exists, so opening
-      // it is not a separate step the user has to know about.
-      await launch();
     } catch (e) {
       phase = "error";
       error = locale.t("patchy.load_failed");
@@ -379,6 +397,7 @@
     try {
       executablePath = await launchPatchy(documentPath, executablePath);
       launched = true;
+      liveEnabled = true;
     } catch (e) {
       error = locale.t("patchy.launch_failed");
       console.error("Patchy: failed to launch the editor:", e);
@@ -398,7 +417,15 @@
     // guard routes Save to Save As once a document has layers, so the result can
     // be a `.psd` sitting beside the hand-off file instead of the file itself.
     const read = await readPatchyDocument(documentPath, true);
-    if (fingerprint(read.bytes) === exportFingerprint) return null;
+    if (fingerprint(read.bytes) === exportFingerprint) {
+      // Nothing new came back. When a layered save *is* there, the edit exists
+      // but could not be read: that is a different situation from "not saved",
+      // and the panel says which one it is.
+      reportNoSavedResult(read.flattened ? null : read.layered_source);
+      return null;
+    }
+    importLayeredFailure = null;
+    importLayered = read.flattened;
     importInfo = describePayload(documentName(), read.bytes);
     importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
@@ -410,9 +437,93 @@
     return read.bytes;
   }
 
+  async function refreshLivePreview() {
+    if (!documentPath || !liveEnabled || liveReading || busy || pendingImport) return;
+    const handoffPath = documentPath;
+    liveReading = true;
+    try {
+      const read = await readPatchyLiveDocument(handoffPath, true, executablePath, liveToken);
+      if (!open || !liveEnabled || documentPath !== handoffPath) return;
+      liveToken = read.state_token;
+      liveCanUndo = read.can_undo;
+      liveCanRedo = read.can_redo;
+      const currentFingerprint = read.bytes.length ? fingerprint(read.bytes) : livePreviewFingerprint;
+      if (read.bytes.length && currentFingerprint !== livePreviewFingerprint) {
+        releaseLivePreview();
+        livePreviewUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(read.bytes)], { type: "image/png" }),
+        );
+        livePreviewFingerprint = currentFingerprint;
+      }
+      if (read.bytes.length && importStatus !== "applied" && importStatus !== "applying") {
+        importInfo = {
+          name: documentName(),
+          sizeBytes: read.bytes.length,
+          width: read.document_width,
+          height: read.document_height,
+        };
+        importStatus = "ready";
+      }
+      liveError = "";
+      if (read.requested_target && !busy) {
+        void importResult(read.requested_target);
+      }
+    } catch (e) {
+      if (open && liveEnabled && documentPath === handoffPath) {
+        liveError = e instanceof Error ? e.message : String(e);
+        liveToken = "";
+        liveCanUndo = false;
+        liveCanRedo = false;
+        releaseLivePreview();
+      }
+    } finally {
+      liveReading = false;
+    }
+  }
+
+  function toggleLive() {
+    liveEnabled = !liveEnabled;
+    liveError = "";
+    pendingImport = null;
+    importError = "";
+    importOrigin = "";
+    importInfo = null;
+    importStatus = "idle";
+    releaseImportPreview();
+    if (!liveEnabled) {
+      liveToken = "";
+      releaseLivePreview();
+    }
+  }
+
+  async function runLiveAction(action: "undo" | "redo" | "add_reference_layer") {
+    if (!documentPath || !liveToken || busy) return;
+    busy = true;
+    liveError = "";
+    importError = "";
+    try {
+      await patchyLiveAction(
+        documentPath,
+        action,
+        liveToken,
+        action === "add_reference_layer" ? exportBytes : null,
+        executablePath,
+      );
+    } catch (e) {
+      importError = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+      void refreshLivePreview();
+    }
+  }
+
   /** Re-check what Patchy has saved, without applying anything. */
   async function refreshImportResult() {
     if (!documentPath || busy) return;
+    if (liveEnabled) {
+      await refreshLivePreview();
+      return;
+    }
     busy = true;
     importError = "";
     lastImportTarget = "read";
@@ -421,10 +532,9 @@
       const bytes = await readImportBytes();
       // A fresh look invalidates a confirmation prompt held for older bytes.
       pendingImport = null;
-      importStatus = bytes ? "ready" : "idle";
+      if (bytes) importStatus = "ready";
     } catch (e) {
-      importStatus = "idle";
-      importError = locale.t("patchy.result_missing");
+      reportNoSavedResult(null);
       console.error("Patchy: no saved document to read back:", e);
     } finally {
       busy = false;
@@ -440,28 +550,64 @@
    */
   async function importResult(target: ApplyTarget) {
     if (!documentPath || busy) return;
+    const handoffPath = documentPath;
     busy = true;
     importError = "";
     pendingImport = null;
     lastImportTarget = target;
     importStatus = "reading";
+    if (liveEnabled) {
+      try {
+        const read = await readPatchyLiveDocument(handoffPath, false, executablePath);
+        if (!open || !liveEnabled || documentPath !== handoffPath) {
+          busy = false;
+          return;
+        }
+        importLayeredFailure = null;
+        importLayered = false;
+        importOrigin = locale.t("patchy.live_source");
+        importInfo = describePayload(documentName(), read.bytes);
+        releaseImportPreview();
+        importPreviewUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(read.bytes)], { type: "image/png" }),
+        );
+        importStatus = "ready";
+        if (target !== "gallery" && hasSizeMismatch(importInfo, exportInfo)) {
+          pendingImport = { target, bytes: read.bytes };
+          busy = false;
+          return;
+        }
+        await applyImportResult(target, read.bytes);
+      } catch (e) {
+        importStatus = "idle";
+        importError = e instanceof Error ? e.message : String(e);
+        busy = false;
+      }
+      return;
+    }
     let read: PatchyDocumentRead;
     try {
-      read = await readPatchyDocument(documentPath, true);
+      read = await readPatchyDocument(handoffPath, true);
+      if (!open || documentPath !== handoffPath) {
+        busy = false;
+        return;
+      }
     } catch (e) {
-      importStatus = "idle";
+      reportNoSavedResult(null);
       busy = false;
-      importError = locale.t("patchy.result_missing");
       console.error("Patchy: no saved document to read back:", e);
       return;
     }
     if (fingerprint(read.bytes) === exportFingerprint) {
-      // Still the file this dialog exported: Patchy has not saved yet. That is
-      // not a failure — the card keeps showing the "save in Patchy first" hint.
-      importStatus = "idle";
+      // Still the file this dialog exported: Patchy has not saved over it. A
+      // layered save beside it means the edit exists and could not be read —
+      // the card says which of the two it is.
+      reportNoSavedResult(read.flattened ? null : read.layered_source);
       busy = false;
       return;
     }
+    importLayeredFailure = null;
+    importLayered = read.flattened;
     const bytes = read.bytes;
     importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     importInfo = describePayload(documentName(), bytes);
@@ -470,7 +616,7 @@
       new Blob([new Uint8Array(bytes)], { type: "image/png" }),
     );
     importStatus = "ready";
-    if (hasSizeMismatch(importInfo, exportInfo)) {
+    if (target !== "gallery" && hasSizeMismatch(importInfo, exportInfo)) {
       pendingImport = { target, bytes };
       busy = false;
       return;
@@ -525,6 +671,7 @@
   async function confirmPendingImport() {
     if (!pendingImport || busy) return;
     const { target, bytes } = pendingImport;
+    busy = true;
     await applyImportResult(target, bytes);
   }
 
@@ -572,7 +719,6 @@
         return;
       }
       await exportDocument();
-      await launch();
     } catch (e) {
       phase = "error";
       error = locale.t("patchy.load_failed");
@@ -588,12 +734,32 @@
     );
   }
 
+  // Re-runs on the dialog and the image only. Everything prepare()/resetState()
+  // touches is read untracked: otherwise a read-back result would re-trigger the
+  // hand-off, re-export the document, and wipe the result the user just asked for.
   $effect(() => {
-    if (!open) {
-      resetState();
+    const isOpen = open;
+    const source = image;
+    if (!isOpen || !source) {
+      untrack(() => resetState());
       return;
     }
-    void prepare();
+    untrack(() => {
+      void prepare();
+    });
+  });
+
+  // A separate effect owns the live polling session. The hand-off preparation
+  // above stays dependent only on open/image, so preview updates never rewrite
+  // the document Patchy is editing.
+  $effect(() => {
+    if (!open || !liveEnabled) return;
+    untrack(() => { void refreshLivePreview(); });
+    const timer = setInterval(() => { void refreshLivePreview(); }, 3000);
+    return () => {
+      clearInterval(timer);
+      void disconnectPatchyLive().catch((e) => console.warn("Patchy: live disconnect failed", e));
+    };
   });
 </script>
 
@@ -615,7 +781,7 @@
         >×</button>
       </div>
 
-      <p class="mt-1 text-xs text-neutral-400">{locale.t("patchy.save_hint")}</p>
+      <p class="mt-1 text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>
 
       {#if phase === "preparing"}
         <p class="mt-4 text-xs text-neutral-300" role="status">{locale.t("common.loading")}</p>
@@ -713,17 +879,27 @@
             sizeBytes={importInfo?.sizeBytes ?? null}
             width={importInfo?.width ?? null}
             height={importInfo?.height ?? null}
-            previewUrl={importPreviewUrl}
+            previewUrl={pendingImport ? importPreviewUrl : liveEnabled ? livePreviewUrl ?? importPreviewUrl : importPreviewUrl}
             statusWord={importStatusWord}
             statusText={importStatusText}
             statusRole={importStepState === "failed" ? "alert" : undefined}
           >
             {#if importOrigin}
               <p class="mb-1 text-[11px] text-neutral-500">
-                {locale.t("patchy.import_from", { name: importOrigin })}
+                {locale.t(
+                  importLayered ? "patchy.import_from_layered" : "patchy.import_from",
+                  { name: importOrigin },
+                )}
               </p>
             {/if}
             <div class="mt-0.5">
+              <button
+                type="button"
+                disabled={busy}
+                aria-pressed={liveEnabled}
+                class="mr-2 h-7 rounded border px-2 text-[11px] disabled:opacity-40 {liveEnabled ? 'border-emerald-500 text-emerald-200' : 'border-neutral-700 text-neutral-200'}"
+                onclick={toggleLive}
+              >{locale.t(liveEnabled ? "patchy.live_disconnect" : "patchy.live_connect")}</button>
               <button
                 type="button"
                 disabled={busy}
@@ -746,6 +922,22 @@
                 {locale.t("patchy.refresh_result")}
               </button>
             </div>
+            {#if liveEnabled}
+              <p class="mt-1 text-[11px] text-neutral-400" role="status">
+                {liveReading ? locale.t("patchy.live_waiting") : liveError || locale.t("patchy.live_hint")}
+              </p>
+              <div class="mt-1.5 flex flex-wrap gap-1.5">
+                <button type="button" disabled={busy || !liveToken || !liveCanUndo}
+                  class="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("undo")}>{locale.t("patchy.live_undo")}</button>
+                <button type="button" disabled={busy || !liveToken || !liveCanRedo}
+                  class="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("redo")}>{locale.t("patchy.live_redo")}</button>
+                <button type="button" disabled={busy || !liveToken || !exportBytes}
+                  class="rounded border border-indigo-700 px-2 py-1 text-[11px] text-indigo-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("add_reference_layer")}>{locale.t("patchy.live_reference")}</button>
+              </div>
+            {/if}
 
             <!-- A differently sized result reshapes the document underneath the
                  user's layers, so that consequence is stated before any apply. -->
@@ -851,7 +1043,7 @@
               <div>
                 <p class="truncate text-[10px] text-neutral-500">
                   {locale.t("patchy.transfer_target")}:
-                  <span class="text-neutral-300">{locale.t("canvas.use_document_settings")}</span>
+                  <span class="text-neutral-300">{locale.t("canvas.workspace_title")}</span>
                 </p>
                 {#if onimport}
                   <div class="mt-1 flex flex-wrap gap-2">

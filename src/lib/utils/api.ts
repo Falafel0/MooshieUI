@@ -512,6 +512,57 @@ export async function readPatchyDocument(
   });
 }
 
+/** Capture the matching document in the user's open Patchy window, including
+ * unsaved edits. A preview is bounded to 1024 pixels; a full read preserves
+ * every pixel and rejects edits made while its tiles were being captured. */
+export interface PatchyLiveRead {
+  bytes: number[];
+  modified: boolean;
+  state_token: string;
+  can_undo: boolean;
+  can_redo: boolean;
+  document_width: number;
+  document_height: number;
+  width: number;
+  height: number;
+  full_resolution: boolean;
+  requested_target: "gallery" | "base" | "raster" | "mask" | "region" | null;
+}
+
+export async function readPatchyLiveDocument(
+  path: string,
+  previewOnly: boolean,
+  explicit?: string | null,
+  knownState?: string | null,
+): Promise<PatchyLiveRead> {
+  return ipcInvoke<PatchyLiveRead>("read_patchy_live_document", {
+    path,
+    previewOnly,
+    explicit: explicit ?? null,
+    knownState: knownState ?? null,
+  });
+}
+
+export async function disconnectPatchyLive(): Promise<void> {
+  await ipcInvoke("disconnect_patchy_live");
+}
+
+export async function patchyLiveAction(
+  path: string,
+  action: "undo" | "redo" | "add_reference_layer",
+  expectedState: string,
+  sourceBytes?: number[] | null,
+  explicit?: string | null,
+): Promise<boolean> {
+  return ipcInvoke<boolean>("patchy_live_action", {
+    path,
+    action,
+    expectedState,
+    sourceBytes: sourceBytes ?? null,
+    explicit: explicit ?? null,
+  });
+}
+
 /** Launch Patchy on a document (null opens the editor empty) and return the executable path used. */
 export async function launchPatchy(documentPath: string | null, explicit?: string | null): Promise<string> {
   return ipcInvoke<string>("launch_patchy", {
@@ -1756,158 +1807,3 @@ export const refineVideoDraft = (filename: string, steps: number, sigma: number)
   ipcInvoke<{ prompt_id: string }>("refine_video_draft", { filename, steps, sigma });
 
 // ---------------------------------------------------------------------------
-// monbooru (self-hosted booru library)
-//
-// The HTTP client lives in Rust, so these commands take no URL: the host comes
-// from `monbooru_base_url` in config and the bearer token never reaches the
-// webview. Endpoint responses are monbooru's own JSON, passed through as-is —
-// only `monbooru_status` and `monbooru_search` have a shape worth naming here.
-// The module that consumes these is src/lib/monbooru/.
-// ---------------------------------------------------------------------------
-
-/** Connection state from `monbooru_status`. `error` is null while connected. */
-export interface MonbooruStatus {
-  configured: boolean;
-  connected: boolean;
-  version: string | null;
-  error: string | null;
-}
-
-/** monbooru JSON passed straight through: an object, or a bare array. */
-export type MonbooruRawJson = Record<string, unknown> | unknown[];
-
-/** One search hit. Only `id` is guaranteed; the rest varies by monbooru version. */
-export interface MonbooruImage {
-  id: number;
-  width?: number;
-  height?: number;
-  file_size?: number;
-  mime_type?: string;
-  created_at?: string;
-  source?: string;
-  rating?: string;
-  score?: number;
-  /** Tag names already attached to the hit by the search endpoint. */
-  tags?: string[];
-  [key: string]: unknown;
-}
-
-/** Page envelope returned by `monbooru_search`. */
-export interface MonbooruSearchResult {
-  images: MonbooruImage[];
-  page: number;
-  per_page: number;
-  total: number;
-  has_more: boolean;
-}
-
-/** API info and capabilities — the connection test. */
-export async function monbooruStatus(): Promise<MonbooruStatus> {
-  return ipcInvoke("monbooru_status");
-}
-
-/**
- * Set or clear the monbooru bearer token. Pass an empty string to clear it.
- *
- * The token is never sent to the frontend — `get_config` replaces it with the
- * `monbooru_api_token_configured` boolean — so it cannot travel back inside a
- * normal config save. This command is the only way to change it. Returns
- * whether a token is now configured.
- */
-export async function setMonbooruApiToken(token: string): Promise<boolean> {
-  return ipcInvoke("set_monbooru_api_token", { token });
-}
-
-/** Search images. `query` is booru syntax and passes through untouched. */
-export async function monbooruSearch(
-  query: string,
-  page: number,
-  perPage: number,
-  sort: string,
-): Promise<MonbooruSearchResult> {
-  return ipcInvoke("monbooru_search", { query, page, perPage, sort });
-}
-
-/** Configured galleries. Raw JSON: monbooru's shape, not ours. */
-export async function monbooruGalleries(): Promise<MonbooruRawJson> {
-  return ipcInvoke("monbooru_galleries");
-}
-
-/** Tags attached to one image. Raw JSON; the store normalizes it. */
-export async function monbooruImageTags(id: number): Promise<MonbooruRawJson> {
-  return ipcInvoke("monbooru_image_tags", { id });
-}
-
-/**
- * Metadata for one image (monbooru `GET /images/{id}`), including any
- * generation data it parsed out of the file. Raw JSON; the store normalizes it.
- */
-export async function monbooruImage(id: number): Promise<MonbooruRawJson> {
-  return ipcInvoke("monbooru_image", { id });
-}
-
-/** Tag list filtered by name prefix. Raw JSON; used by the tag/artist browser. */
-export async function monbooruTags(prefix: string, limit: number): Promise<MonbooruRawJson> {
-  return ipcInvoke("monbooru_tags", { prefix, limit });
-}
-
-/** Tag categories. Raw JSON; the store normalizes it. */
-export async function monbooruCategories(): Promise<MonbooruRawJson> {
-  return ipcInvoke("monbooru_categories");
-}
-
-/** Thumbnail bytes as a `data:` URL, ready for `<img src>`. */
-export async function monbooruThumbnail(id: number): Promise<string> {
-  return ipcInvoke("monbooru_thumbnail", { id });
-}
-
-/** Managed install of the monbooru server: what is on disk, and what an
- *  install would choose for this platform. */
-export interface MonbooruInstallStatus {
-  installed: boolean;
-  /** Version directory of the managed install (`v1.21.1`), when present. */
-  version: string | null;
-  /** Executable of the managed install, when present. */
-  executable: string | null;
-  /** False on platforms monbooru publishes no build for. */
-  canInstall: boolean;
-  /** `"lite"` or `"bundled"` — the archive an install would pick. */
-  flavor: string;
-}
-
-/** The monbooru process this app manages. `running` means *ours*: spawned by
- *  this app, or reclaimed from the keep-alive record of an earlier session. */
-export interface MonbooruServerStatus {
-  running: boolean;
-  pid: number | null;
-  version: string | null;
-  executable: string | null;
-  url: string;
-  /** monbooru answered on the local URL — whoever started it. */
-  responding: boolean;
-}
-
-/** What is installed, and whether this platform can install at all. */
-export async function monbooruInstallStatus(): Promise<MonbooruInstallStatus> {
-  return ipcInvoke("monbooru_install_status");
-}
-
-/** Install the managed monbooru build. Never overwrites a URL the user set. */
-export async function monbooruInstallStart(): Promise<MonbooruInstallStatus> {
-  return ipcInvoke("monbooru_install_start");
-}
-
-/** State of the managed monbooru server, without starting anything. */
-export async function monbooruServerStatus(): Promise<MonbooruServerStatus> {
-  return ipcInvoke("monbooru_server_status");
-}
-
-/** Start the managed monbooru server (no-op when one is already running). */
-export async function monbooruServerStart(): Promise<MonbooruServerStatus> {
-  return ipcInvoke("monbooru_server_start");
-}
-
-/** Stop the server this app started; a server the user runs is left alone. */
-export async function monbooruServerStop(): Promise<MonbooruServerStatus> {
-  return ipcInvoke("monbooru_server_stop");
-}

@@ -15,7 +15,6 @@
   let confirmingDelete = $state<string | null>(null);
   let renamingId = $state<string | null>(null);
   let renameValue = $state("");
-  let busy = $state<string | null>(null);
 
   onMount(() => {
     void projects.refreshList();
@@ -28,13 +27,10 @@
   }
 
   function handleOpen(id: string) {
-    busy = id;
     confirmingDelete = null;
-    projects.requestGuarded(async () => {
-      await projects.open(id);
-      busy = null;
-    });
-    busy = null;
+    // The busy mark lives in the store, because this action can wait behind the
+    // unsaved-changes guard and only runs once the question is answered.
+    projects.requestGuarded(() => projects.runBusy(id, () => projects.open(id)));
   }
 
   function startRename(id: string, name: string) {
@@ -44,11 +40,9 @@
   }
 
   async function confirmRename(id: string) {
-    busy = id;
-    await projects.rename(id, renameValue);
+    await projects.runBusy(id, () => projects.rename(id, renameValue));
     renamingId = null;
     renameValue = "";
-    busy = null;
   }
 
   async function handleDelete(id: string) {
@@ -58,10 +52,8 @@
       renamingId = null;
       return;
     }
-    busy = id;
-    await projects.remove(id);
+    await projects.runBusy(id, () => projects.remove(id));
     confirmingDelete = null;
-    busy = null;
   }
 </script>
 
@@ -110,7 +102,7 @@
               {#if renamingId === project.id}
                 <button
                   class="px-3 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer disabled:opacity-50"
-                  disabled={busy !== null || !renameValue.trim()}
+                  disabled={projects.busyId !== null || !renameValue.trim()}
                   onclick={() => void confirmRename(project.id)}
                 >
                   {locale.t("projects.save_short")}
@@ -124,7 +116,7 @@
               {:else}
                 <button
                   class="px-3 py-1.5 text-xs rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-100 transition-colors cursor-pointer disabled:opacity-50"
-                  disabled={busy !== null}
+                  disabled={projects.busyId !== null}
                   aria-label="{locale.t('projects.load')} {project.name}"
                   onclick={() => handleOpen(project.id)}
                 >
@@ -132,7 +124,7 @@
                 </button>
                 <button
                   class="px-3 py-1.5 text-xs rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer disabled:opacity-50"
-                  disabled={busy !== null}
+                  disabled={projects.busyId !== null}
                   aria-label="{locale.t('projects.rename')} {project.name}"
                   onclick={() => startRename(project.id, project.name)}
                 >
@@ -142,7 +134,7 @@
                   class="px-3 py-1.5 text-xs rounded {confirmingDelete === project.id
                     ? 'bg-red-700 hover:bg-red-600'
                     : 'bg-neutral-800 hover:bg-neutral-700'} text-white transition-colors cursor-pointer disabled:opacity-50"
-                  disabled={busy !== null}
+                  disabled={projects.busyId !== null}
                   aria-label="{confirmingDelete === project.id
                     ? locale.t('projects.delete_confirm')
                     : locale.t('projects.delete')} {project.name}"

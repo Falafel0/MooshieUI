@@ -56,6 +56,8 @@ class ProjectsStore {
   projects = $state<ProjectRecord[]>([]);
   /** The unsaved-changes guard, driven by whichever surface asked for it. */
   guard = $state<ProjectGuardState>({ open: false, action: null });
+  /** The project row whose action is running, if any. */
+  busyId = $state<string | null>(null);
 
   private savedDocument = "none";
   private savedSettings = "none";
@@ -106,6 +108,23 @@ class ProjectsStore {
       return;
     }
     this.guard = { open: true, action };
+  }
+
+  /**
+   * Run a project action with its row marked busy.
+   *
+   * The mark belongs to whoever runs the action, not to the click: an open can
+   * wait behind the unsaved-changes guard, and a flag cleared at the call site
+   * would let a second project be opened while the first is still loading. A
+   * cancelled guard never runs the action, so nothing is ever left marked.
+   */
+  async runBusy(id: string, action: () => void | Promise<unknown>): Promise<void> {
+    this.busyId = id;
+    try {
+      await action();
+    } finally {
+      this.busyId = null;
+    }
   }
 
   /** Answer the guard: save first, drop the changes, or cancel the action. */

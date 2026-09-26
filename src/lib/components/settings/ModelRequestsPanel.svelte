@@ -54,6 +54,16 @@
     await modelRequests.fetchRequests(statusFilter || undefined);
   }
 
+  /** The status the chip shows: the same three words the filter uses, so the
+   * chip never prints a raw value next to localized text. */
+  function statusLabel(status: string): string {
+    switch (status) {
+      case "approved": return locale.t("model_requests.filter_approved");
+      case "denied": return locale.t("model_requests.filter_denied");
+      default: return locale.t("model_requests.filter_pending");
+    }
+  }
+
   function statusBadge(status: string): string {
     switch (status) {
       case "pending": return "bg-amber-900/50 text-amber-300 border-amber-700/50";
@@ -115,7 +125,7 @@
               </p>
             </div>
             <span class="shrink-0 px-2 py-0.5 text-[10px] rounded-full border {statusBadge(req.status)}">
-              {req.status}
+              {statusLabel(req.status)}
             </span>
           </div>
 

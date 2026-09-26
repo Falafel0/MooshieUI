@@ -1,48 +1,12 @@
 /**
- * The Patchy hand-off contract, as pure functions.
+ * What both ends of the Patchy hand-off have to agree on, as pure functions.
  *
- * The document travels through the filesystem, so both halves of the round trip
- * have to agree on *one* file: the name it is written under, and the way the
- * file that comes back is recognised as a real save rather than MooshieUI's own
- * export read again. Keeping those rules here (no DOM, no Tauri) makes them
- * testable on their own and stops the dialog from re-deriving them inline.
+ * Two questions the dialog asks on every read: is the file that came back a
+ * real save from the editor, or MooshieUI's own export read again (the
+ * fingerprint), and what did the editor actually produce (the PNG's pixel size,
+ * and the name of the layered file when the result had to be flattened). Both
+ * live here — no DOM, no Tauri — so the dialog never re-derives them inline.
  */
-
-/** What the hand-off is for. A mask hand-off sends a blank mask to paint. */
-export type PatchyPurpose = "image" | "mask";
-
-/** The `file_name` the backend was given, as a stem plus a document name. */
-export interface PatchyDocumentName {
-  /** Extension-less stem, so the editor's Save As default keeps the same stem. */
-  stem: string;
-  /** File name handed out, e.g. `ComfyUI_0001_.png` or `base_17-mask.png`. */
-  fileName: string;
-}
-
-/** Strip anything a file name cannot carry, and any extension we replace. */
-function safeStem(name: string): string {
-  const withoutPath = name.split(/[\\/]/).pop() ?? name;
-  const withoutExtension = withoutPath.replace(/\.(jxl|webp|jpe?g|psd|psb|png)$/i, "");
-  const cleaned = withoutExtension.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._-]+/, "");
-  return cleaned || "document";
-}
-
-/**
- * Name the document for one hand-off.
- *
- * The mask purpose gets its own stem so the two documents of the same image can
- * never be confused, and every hand-off is unique on disk: the backend appends
- * its own token, so a later hand-off can never overwrite the file an earlier one
- * (and whatever the editor saved beside it) still owns.
- */
-export function handoffDocumentName(
-  imageFilename: string | undefined,
-  purpose: PatchyPurpose,
-): PatchyDocumentName {
-  const stem = safeStem(imageFilename ?? "document.png");
-  const masked = purpose === "mask" ? `${stem}-mask` : stem;
-  return { stem: masked, fileName: `${masked}.png` };
-}
 
 /**
  * Cheap fingerprint used for one question only: "has Patchy saved over our
@@ -77,43 +41,7 @@ export function pngDimensions(bytes: number[]): { width: number; height: number 
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
-/** Coverage at least this bright counts as painted on a mask document. */
-export const MASK_COVERAGE_MIN_LUMA = 8;
-
-/**
- * Whether a returned mask document carries anything the user painted.
- *
- * A mask hand-off starts as a flat black canvas, so coverage is the brightness
- * the user painted: white = use this area, black = leave it alone. This is the
- * check the dialog refuses on — reading it here means an empty mask is reported
- * before the bytes are handed to the canvas at all.
- */
-export function maskCoverageOf(pixels: Uint8ClampedArray): {
-  covered: boolean;
-  /** Painted share of the document, 0..1, for the message. */
-  ratio: number;
-  /** Brightest pixel found, so a faint brush is still recognised as paint. */
-  peak: number;
-} {
-  let coveredPixels = 0;
-  let peak = 0;
-  const total = Math.floor(pixels.length / 4);
-  for (let i = 0; i < pixels.length; i += 4) {
-    const luma = Math.round(0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2]);
-    if (luma > peak) peak = luma;
-    if (luma >= MASK_COVERAGE_MIN_LUMA) coveredPixels += 1;
-  }
-  return {
-    covered: coveredPixels > 0,
-    ratio: total > 0 ? coveredPixels / total : 0,
-    peak,
-  };
-}
-
-/** The byte prefix of a layered Patchy document (PSD and PSB alike). */
-export const LAYERED_DOCUMENT_MAGIC = "8BPS";
-
-/** Describe which file the read-back came from, for the import card. */
+/** Name the file the import came from: the layered save, or the hand-off one. */
 export function resultOriginText(
   flattened: boolean,
   layeredSource: string | null,

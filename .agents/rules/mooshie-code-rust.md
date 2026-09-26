@@ -35,7 +35,7 @@ Deeper Rust/Tauri conventions: `.github/instructions/tauri-backend.instructions.
 
 ## Secrets & config
 
-- **A secret that is blanked on serialize must also be carried forward in `preserve_secrets` (`config.rs`).** `get_config` replaces such fields with `*_configured` booleans so they never reach the webview, which means every config save sends them back empty — without a carry-forward, changing an unrelated setting silently erases the secret. Blanked field + carry-forward + a dedicated setter for clearing (`set_novelai_api_key("")`, `set_monbooru_api_token("")`) are one unit; never clear through `update_config`.
+- **A secret that is blanked on serialize must also be carried forward in `preserve_secrets` (`config.rs`).** `get_config` replaces such fields with `*_configured` booleans so they never reach the webview, which means every config save sends them back empty — without a carry-forward, changing an unrelated setting silently erases the secret. Blanked field + carry-forward + a dedicated setter for clearing (for example `set_novelai_api_key("")`) are one unit; never clear through `update_config`.
 - `preserve_secrets` also runs in the browser-mode save path (`webserver.rs`), so one rule covers both builds.
 - Test the carry-forward in `config.rs` (`mod tests`): blanked and whitespace-only inputs must keep the stored value, a non-empty input must win.
 

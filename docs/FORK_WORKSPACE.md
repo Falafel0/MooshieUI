@@ -8,9 +8,9 @@ Inpainting always opens the canvas. The right workspace groups Base, Layers and 
 
 - **Base:** load a source or work on the blank colored document. A blank document without painted masks generates over the full canvas.
 - **Raster:** paint or insert images, then move, resize, rotate or flip them. Visibility and opacity affect the generation input.
-- **Mask:** paint the area to change. Local prompts, denoise, growth and mask processing can override document settings.
-- **Region:** a special mask layer with its own regional prompt. Visible masks and regions run from bottom to top; the layer list shows their step numbers. Hidden or empty ordinary masks are skipped. Regions require a prompt and painted area.
-- **Patchy:** open the current base, selected raster/mask/region layer, or a generated result in the local Patchy editor. Save there, then import the result back as a new base or layer. Transparent masks use alpha coverage; fully opaque mask and region imports use brightness (black = no coverage, white = full coverage).
+- **Mask:** paint the area to change. Each visible, nonempty mask starts an inpainting pass using the document prompt and its own denoise and mask processing. Overlapping prompt regions add conditioning; masks do not have local prompts.
+- **Region:** a prompt conditioning area with its own positive and negative text and strength. It does not edit pixels or start an inpainting pass by itself. Multiple visible regions can overlap a mask; text-to-image also reads painted regions.
+- **Patchy:** prepare the base, a selected layer, or a result as a PNG, then press Launch Patchy. Save the edit there and choose a gallery, base, raster, mask or region destination here. For a mask or region, the changed pixels relative to the sent image form the painted area; resizing that image makes the mask import invalid. A layered PSD/PSB save can be flattened on read-back, but its layer structure does not transfer to this canvas.
 - **ControlNet:** configure its source, strength and start/end range in the dedicated tab. The canvas overlay helps align the control source.
 
 The context eye toggles the selected mask's affected bounds and padding guides. Guides use a reduced-resolution preview for responsiveness and are excluded from exported pixels. Precise output still depends on the model and ComfyUI processing.
@@ -25,7 +25,7 @@ The queue tracks source versions and submission order. Canceling a regional chai
 
 Anima can run sequential inpainting from a painted prompt region without a separate ordinary mask. SDXL prompt regions only influence conditioning and still need an inpaint mask to select pixels for editing.
 
-Layer nodes and viewport survive mode changes and canvas remounts within the current session. This is not a saved layered project format: export work before closing or reloading the application.
+Layer nodes and viewport survive mode changes and canvas remounts. Named projects save document dimensions, base and layer pixels, and generation settings; use the project bar's Save action before closing or switching projects. An older settings-only project can still open without canvas pixels.
 
 ## Validation
 

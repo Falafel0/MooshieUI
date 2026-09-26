@@ -51,6 +51,9 @@ const COPY = [
   ['patchy.mask_paint_hint', true],
   ['patchy.mask_nothing_painted', true],
   ['patchy.mask_size_mismatch', true],
+  ['patchy.save_hint', true],
+  ['patchy.import_from_layered', true],
+  ['patchy.result_flatten_failed', true],
   ['canvas.compare_with_original', true],
   ['canvas.compare_original_hint', true],
 ];
