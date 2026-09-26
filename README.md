@@ -4,7 +4,7 @@
 
 MooshieUI is a beginner-friendly interface for image, video and music generation through [ComfyUI](https://github.com/comfyanonymous/ComfyUI), with optional image generation through the **NovelAI API** using your own key. It runs in two modes:
 
-- **Desktop app** via Tauri (Windows/Linux; [native Apple Silicon macOS candidates](docs/MACOS.md))
+- **Desktop app** via Tauri (Windows; this fork ships the Windows installer only, and the [macOS candidates](docs/MACOS.md) are a manual build rather than part of a release)
 - **Browser/server mode** via the built-in web server (LAN/Docker friendly, mobile UI)
 
 Built with **Svelte 5** + **Rust**, it hides ComfyUI's node-graph complexity behind a clean, guided workflow so you can generate without hand-editing graphs.

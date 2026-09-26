@@ -18,9 +18,10 @@ open an issue with the feature template and ask.
   library, playlists, playback, manual lyric timing and audio export.
 - Self-hosting with LAN accounts, roles, per-user galleries and configured GPU
   workers. Regular users and moderators manage their own NovelAI credentials.
-- Windows/Linux releases and experimental Apple Silicon macOS candidates,
-  with native desktop and embedded browser-server modes sharing one codebase.
-  See [Mac support status](docs/MACOS.md).
+- Windows-only releases in this fork: the Linux bundles, the headless server
+  binary, the container image and the macOS candidates are no longer produced by
+  the release workflow. Native desktop and embedded browser-server modes still
+  share one codebase. See [Mac support status](docs/MACOS.md).
 - Localized (i18n across all supported locales) and accessible (a11y).
 
 ## What MooshieUI is not
