@@ -79,7 +79,7 @@ gh pr merge --squash --delete-branch
 ```powershell
 git checkout main
 git fetch origin main
-git reset --hard origin/main
+git reset --hard origin/main   # discards uncommitted work: commit or stash first
 ```
 
 ### 8. Cleanup

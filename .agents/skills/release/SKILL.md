@@ -183,7 +183,7 @@ If bots post **after** a green run (common on squash-merge), re-poll comments on
 gh pr merge <PR_NUMBER> --squash --delete-branch
 git checkout main
 git fetch origin main
-git reset --hard origin/main
+git reset --hard origin/main   # discards uncommitted work: commit or stash first
 ```
 
 ### 11. Post-merge bot pass (before tag)
