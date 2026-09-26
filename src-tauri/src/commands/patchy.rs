@@ -27,7 +27,7 @@
 //! export as "not saved yet" while the user's work sits in the PSD beside it,
 //! which is the failure the read step exists to close: a layered save written
 //! at or after the hand-off is flattened through Patchy itself
-//! (`--headless --export <png> <layered>`, unattended) and returned as the
+//! (a headless script using `doc.exportAs` on the layered document) and returned as the
 //! result.
 
 use std::path::{Path, PathBuf};
@@ -210,7 +210,7 @@ fn managed_version(executable: &Path) -> Option<String> {
 // --- document storage -----------------------------------------------------
 
 /// Directory holding Patchy hand-off documents, creating it if needed.
-fn documents_dir() -> Result<PathBuf, AppError> {
+pub(super) fn documents_dir() -> Result<PathBuf, AppError> {
     let base = crate::config::app_data_dir()
         .ok_or_else(|| AppError::Other("Failed to determine app data directory".to_string()))?;
     let dir = base.join(DOCUMENTS_SUBDIR);
@@ -431,19 +431,38 @@ fn prune_documents(dir: &Path, now: SystemTime, ttl: Duration, keep_newest: usiz
 
 /// Flatten a layered save through Patchy itself, into `output`.
 ///
-/// `--headless --export <png> <layered>` is the editor's own unattended "open,
-/// save as, exit" mode: prompts are suppressed, no running instance is reused,
-/// and it exits once the PNG is written. Nothing the editor prints can reach the
-/// app (stdio is null) and the wait is bounded.
+/// The script calls Patchy's documented `doc.exportAs` API. A headless run
+/// never reuses an existing GUI instance and has a bounded wait. The script
+/// output gives a concrete error if Patchy cannot open or export the document.
 fn flatten_layered_document(
     executable: &Path,
     layered: &Path,
     output: &Path,
 ) -> Result<(), AppError> {
+    // A previous read may have produced this deterministic filename. Never
+    // accept that old image as the result of a failed or interrupted export.
+    if output.exists() {
+        std::fs::remove_file(output)?;
+    }
+    // Each hand-off has its own script path so simultaneous imports do not
+    // overwrite a script while another headless Patchy process is reading it.
+    let script = output.with_extension("export.js");
+    std::fs::write(
+        &script,
+        include_str!("../../resources/patchy/mooshieui-export.js"),
+    )?;
+    let log = output.with_extension("patchy-log");
+    if log.exists() {
+        std::fs::remove_file(&log)?;
+    }
     let mut child = Command::new(executable)
         .arg("--headless")
-        .arg("--export")
-        .arg(output)
+        .arg("--run-script")
+        .arg(&script)
+        .arg("--script-output")
+        .arg(&log)
+        .arg("--script-arg")
+        .arg(format!("out={}", output.display()))
         .arg(layered)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -454,9 +473,9 @@ fn flatten_layered_document(
         })?;
 
     let started = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) => {
                 if started.elapsed() > FLATTEN_TIMEOUT {
                     let _ = child.kill();
@@ -474,11 +493,20 @@ fn flatten_layered_document(
                 return Err(AppError::Other(format!("Failed to wait for Patchy: {}", e)));
             }
         }
-    }
+    };
 
-    if !output.exists() {
+    if !status.success() || !output.exists() {
         return Err(AppError::Other(format!(
-            "Patchy did not write the flattened document at {}",
+            "Patchy export failed (status {}) for {}: {}",
+            status,
+            layered.display(),
+            std::fs::read_to_string(&log).unwrap_or_default().trim()
+        )));
+    }
+    let bytes = std::fs::read(output)?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(AppError::Other(format!(
+            "Patchy export did not produce a PNG at {}",
             output.display()
         )));
     }
@@ -551,7 +579,8 @@ pub struct PatchyDocumentRead {
     /// True when the result was a layered save (PSD/PSB) flattened through
     /// Patchy instead of the hand-off file itself.
     pub flattened: bool,
-    /// File name of that layered save, so the UI can name what it imported.
+    /// File name of that layered save: what was imported, or the save that is
+    /// there and could not be read back.
     pub layered_source: Option<String>,
 }
 
@@ -565,7 +594,9 @@ pub struct PatchyDocumentRead {
 /// defaulting to `<stem>.psd` beside the hand-off file, so a layered save
 /// written at or after the hand-off outranks the untouched export. Flattening
 /// needs the editor, so a missing executable degrades to returning the hand-off
-/// file rather than failing the read.
+/// file rather than failing the read — and in that case the layered save is
+/// still named in the result, so the panel can say the edit exists and could
+/// not be read instead of claiming nothing was saved.
 #[tauri::command]
 pub async fn read_patchy_document(
     path: String,
@@ -575,30 +606,52 @@ pub async fn read_patchy_document(
     let handoff = PathBuf::from(&path);
     let bytes = read_document_from(&handoff)?;
 
-    if flatten_layered == Some(true) && !looks_layered_document(&bytes) {
-        if let Some(layered) = newest_layered_save(&handoff) {
-            if let Some(executable) = resolve_patchy_executable(explicit.as_deref()) {
-                let output = flattened_path(&handoff)?;
-                let layered_for_task = layered.clone();
-                let output_for_task = output.clone();
-                let flattened = tokio::task::spawn_blocking(move || {
-                    flatten_layered_document(&executable, &layered_for_task, &output_for_task)
-                })
-                .await
-                .map_err(|e| AppError::Other(format!("Flatten task failed: {}", e)))?;
-                if flattened.is_ok() {
+    // A layered save beside the hand-off is the user's real edit: Patchy's
+    // flat-save guard routes Save to Save As once a document has layers, so the
+    // result can be a `.psd` sitting next to the file we handed out.
+    let layered = if flatten_layered == Some(true) && !looks_layered_document(&bytes) {
+        newest_layered_save(&handoff)
+    } else {
+        None
+    };
+
+    if let Some(layered) = layered {
+        let layered_source = layered
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string());
+        if let Some(executable) = resolve_patchy_executable(explicit.as_deref()) {
+            let output = flattened_path(&handoff)?;
+            let layered_for_task = layered.clone();
+            let output_for_task = output.clone();
+            let flattened = tokio::task::spawn_blocking(move || {
+                flatten_layered_document(&executable, &layered_for_task, &output_for_task)
+            })
+            .await
+            .map_err(|e| AppError::Other(format!("Flatten task failed: {}", e)))?;
+            match flattened {
+                Ok(()) => {
                     let flattened_bytes = std::fs::read(&output)?;
                     return Ok(PatchyDocumentRead {
                         path: output.to_string_lossy().to_string(),
                         bytes: flattened_bytes,
                         flattened: true,
-                        layered_source: layered
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string()),
+                        layered_source: layered_source.clone(),
                     });
+                }
+                Err(error) => {
+                    log::warn!("Patchy could not flatten {}: {}", layered.display(), error);
                 }
             }
         }
+        // The save is there, but it could not be read back. Naming it is the
+        // difference between "the editor has not saved yet" and "your edit is
+        // there and could not be read" — the panel says which one it is.
+        return Ok(PatchyDocumentRead {
+            path: handoff.to_string_lossy().to_string(),
+            bytes,
+            flattened: false,
+            layered_source,
+        });
     }
 
     Ok(PatchyDocumentRead {
@@ -628,6 +681,7 @@ pub async fn launch_patchy(
     let mut command = Command::new(&executable);
     // No document means "just open the editor", which is what auto-start does.
     if let Some(path) = document_path.as_deref() {
+        super::patchy_live::install_return_script(Path::new(path))?;
         command.arg(path);
     }
     let child = command
@@ -863,6 +917,76 @@ mod tests {
         assert_eq!(read_back.path, path);
         assert!(!read_back.flattened);
         assert!(read_back.layered_source.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_layered_save_that_cannot_be_flattened_is_still_reported() {
+        let dir = scratch_dir("unflattenable");
+        let handoff = write_document_to(&dir, b"handed-out", "base_1700.png").unwrap();
+        // The editor's layered save beside it, written after the hand-off.
+        let stem = Path::new(&handoff)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let layered = dir.join(format!("{}.psd", stem));
+        std::fs::write(&layered, b"8BPS0000").unwrap();
+        set_modified(
+            Path::new(&handoff),
+            SystemTime::now() - Duration::from_secs(60),
+        );
+        // Something that exists, so path resolution accepts it, but cannot run.
+        let impostor = touch(&dir, "not-really-patchy.exe");
+        let stale_output = flattened_path(Path::new(&handoff)).unwrap();
+        std::fs::write(&stale_output, b"an old flattened result").unwrap();
+
+        let read = read_patchy_document(
+            handoff.clone(),
+            Some(true),
+            Some(impostor.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            read.bytes, b"handed-out",
+            "the hand-off file is what comes back when the save cannot be read"
+        );
+        assert!(!read.flattened);
+        assert!(
+            !stale_output.exists(),
+            "a failed export must remove the previous flattened result"
+        );
+        assert_eq!(
+            read.layered_source.as_deref(),
+            Some(format!("{}.psd", stem).as_str()),
+            "the unread layered save is named, not dropped"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_flatten_cannot_reuse_an_older_export() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_dir("stale-flatten");
+        let executable = dir.join("patchy-fails");
+        std::fs::write(&executable, b"#!/bin/sh\nexit 4\n").unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        let layered = touch(&dir, "edited.psd");
+        let output = touch(&dir, "edited-import.png");
+
+        assert!(flatten_layered_document(&executable, &layered, &output).is_err());
+        assert!(
+            !output.exists(),
+            "a stale PNG must never be imported as the new edit"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

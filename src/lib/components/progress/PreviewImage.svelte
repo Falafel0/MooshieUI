@@ -384,10 +384,13 @@
    *  For JXL gallery files, always use the blob URL: WebView2 cannot natively
    *  decode JXL so the gallery:// URL would render nothing. */
   const previewSrc = $derived.by(() => {
-    const saved = getActiveSavedImage();
+    // Read the current frame first on every evaluation. Looking up the last
+    // saved output first can return early and stop tracking live preview frames.
+    const visibleUrl = progress.displayImage;
+    const saved = getSavedImageForUrl(visibleUrl);
     const isJxlGallery = saved?.gallery_filename?.endsWith(".jxl") ?? false;
     if (saved?.fullImageUrl && !isJxlGallery) return saved.fullImageUrl;
-    return progress.displayImage;
+    return visibleUrl;
   });
 
   /** Total generation time for the currently shown output, ms (badge). */
@@ -412,7 +415,7 @@
   }
 
   function handleSave() {
-    const savedImage = getActiveSavedImage();
+    const savedImage = getSavedImageForUrl(progress.displayImage);
     if (savedImage) {
       void gallery.saveImageAs(savedImage);
       return;
@@ -427,7 +430,7 @@
   }
 
   function handleCopy() {
-    const savedImage = getActiveSavedImage();
+    const savedImage = getSavedImageForUrl(progress.displayImage);
     if (savedImage) {
       void gallery.copyToClipboard(savedImage);
       return;

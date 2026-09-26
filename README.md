@@ -34,9 +34,8 @@ A mask has no prompt of its own: it runs the global prompt, and the text of a pr
 
 **The rest of the branch's own work:**
 
-- **Prompt arena and macro palette** against a local [monbooru](https://github.com/monbooru/monbooru) server, with the client implemented in Rust so the API token never enters the webview. monbooru can be installed and launched from Settings, the same way Patchy is handled.
 - **Patchy hand-off** — install, send the canvas to [Patchy](https://github.com/SethRobinson/Patchy), and take the edited document back, with the file locations and the direction of the exchange stated in the UI.
-- **Projects** — save the current local state (prompts, presets, styles and the rest) under a name and load it back later.
+- **Projects** — save the canvas dimensions, base and layer pixels together with the workspace settings under a name, and load them back later.
 - **Recommended parameters can be hidden completely**, for people who already know what they are doing.
 - **Windows-only release pipeline** — one NSIS build, a manifest with a single `windows-x86_64` entry, and an artifact check that fails the release if a second installer sneaks into the upload set.
 
@@ -55,10 +54,9 @@ Updates arrive through the app's own updater, signed against this fork's release
 
 | Tool | Hand-off | How it is installed |
 |------|----------|---------------------|
-| Patchy | The canvas is written out and opened in Patchy; the edited document is read back by the app | Auto-installed from its release, under this app's data directory |
-| monbooru | The server keeps its own `monbooru.toml` and data directory; the app talks to it over its REST API on port 8455 | Auto-installed from its release (portable lite archive, SHA-256 verified), started and stopped from Settings |
+| Patchy | The source PNG is prepared; **Launch Patchy** explicitly opens it. Save there, then choose where to import the edited pixels | Auto-installed from its release, under this app's data directory |
 
-Both tools run as separate programs in their own process; the app starts, supervises and stops them.
+Patchy runs as a separate program; the app supervises the instance it starts.
 
 ---
 
@@ -122,7 +120,6 @@ Any `tauri` reference outside a `#[cfg(feature = "desktop")]` gate compiles loca
 |----------|--------|
 | [docs/FORK_WORKSPACE.md](docs/FORK_WORKSPACE.md) | What this branch is, and how to work in it |
 | [docs/PATCHY_INTEGRATION.md](docs/PATCHY_INTEGRATION.md) | The Patchy hand-off, end to end |
-| [docs/MONBOORU_PROMPT_WORKBENCH.md](docs/MONBOORU_PROMPT_WORKBENCH.md) | The prompt arena and the monbooru client |
 | [docs/METADATA_CARRIERS.md](docs/METADATA_CARRIERS.md) | Where generation metadata is stored and read |
 | [docs/README.md](docs/README.md) | Index of technical references and planning notes |
 | [CHANGELOG.md](CHANGELOG.md) / [RELEASE_NOTES.md](RELEASE_NOTES.md) | Version history and the current release |
@@ -143,8 +140,8 @@ bash scripts/setup-hooks.sh
 
 ## Credits and license
 
-This branch is a fork of **[MooshieUI](https://github.com/Mooshieblob1/MooshieUI)** by Mooshieblob1, and most of what the app can do is upstream's work: the generation pipeline, the ComfyUI integration and custom nodes, the model hub, video and music generation, the NovelAI backend, the prompt assistant, the gallery, server mode, the twelve translations, and the documentation the [wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) keeps. The canvas layer work, the prompt arena, the monbooru client and install, the Patchy hand-off, projects and the Windows-only release pipeline are this branch's additions.
+This branch is a fork of **[MooshieUI](https://github.com/Mooshieblob1/MooshieUI)** by Mooshieblob1, and most of what the app can do is upstream's work: the generation pipeline, the ComfyUI integration and custom nodes, the model hub, video and music generation, the NovelAI backend, the prompt assistant, the gallery, server mode, the twelve translations, and the documentation the [wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) keeps. The canvas layer work, the Patchy hand-off, projects and the Windows-only release pipeline are this branch's additions.
 
-The ecosystem credit list — ComfyUI, Tauri, Svelte, Tailwind, PyTorch, uv, llama.cpp, ONNX Runtime, the bundled ComfyUI nodes, the research behind MultiDiffusion/SpotDiffusion/CFG Rescale/OmniSR, the model creators, and the data and service providers — is maintained upstream; see [Acknowledgments in the upstream README](https://github.com/Mooshieblob1/MooshieUI#-acknowledgments). Patchy is by [Seth Robinson](https://github.com/SethRobinson/Patchy); monbooru is by the [monbooru](https://github.com/monbooru/monbooru) project.
+The ecosystem credit list — ComfyUI, Tauri, Svelte, Tailwind, PyTorch, uv, llama.cpp, ONNX Runtime, the bundled ComfyUI nodes, the research behind MultiDiffusion/SpotDiffusion/CFG Rescale/OmniSR, the model creators, and the data and service providers — is maintained upstream; see [Acknowledgments in the upstream README](https://github.com/Mooshieblob1/MooshieUI#-acknowledgments). Patchy is by [Seth Robinson](https://github.com/SethRobinson/Patchy).
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE), as upstream is. If your work is used here and credited poorly, [open an issue](https://github.com/Falafel0/MooshieUI/issues) and it will be fixed.

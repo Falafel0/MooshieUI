@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ensureLinuxdeploy } from "./ensure-linuxdeploy.mjs";
 
 const args = process.argv.slice(2);
@@ -49,16 +53,36 @@ function linuxBuildEnv() {
 }
 
 async function runTauri(pm, tauriArgs, env = process.env) {
-  await run(pm, ["exec", "tauri", ...tauriArgs], { env });
+  // `--` matters: without it `npm exec` swallows tauri's own flags (--config among
+  // them) as its own, and the value ends up in cargo's argv as a stray argument.
+  await run(pm, ["exec", "--", "tauri", ...tauriArgs], { env });
 }
 
-function tauriBuildArgs(args) {
-  const subcommand = args[0]?.toLowerCase();
-  if (subcommand !== "build" || process.env.TAURI_SIGNING_PRIVATE_KEY) {
-    return args;
+/**
+ * Arguments for a local `tauri build` without release signing keys.
+ *
+ * The override goes in a real file instead of inline JSON: this command runs
+ * through a shell on Windows, and the shell eats the quotes inside
+ * '{"bundle":…}' before tauri can parse it, so the build died in cargo's
+ * argument parser. A path the shell cannot mangle survives everywhere.
+ */
+export function prepareLocalConfig({ argv = args, env = process.env } = {}) {
+  if (argv[0]?.toLowerCase() !== "build" || env.TAURI_SIGNING_PRIVATE_KEY) {
+    return { args: argv, cleanup: () => {} };
   }
-  // Local builds without release signing keys should still succeed.
-  return [...args, "--config", '{"bundle":{"createUpdaterArtifacts":false}}'];
+  const dir = mkdtempSync(path.join(tmpdir(), "mooshie-tauri-"));
+  const file = path.join(dir, "tauri.local.json");
+  writeFileSync(file, JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  return {
+    args: [...argv, "--config", /[\s"]/.test(file) ? `"${file}"` : file],
+    cleanup: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // A leftover temp file is not worth failing a finished build over.
+      }
+    },
+  };
 }
 
 async function main() {
@@ -74,10 +98,17 @@ async function main() {
   }
 
   const env = firstArg === "build" ? linuxBuildEnv() : process.env;
-  await runTauri(pm, tauriBuildArgs(args), env);
+  const config = prepareLocalConfig();
+  try {
+    await runTauri(pm, config.args, env);
+  } finally {
+    config.cleanup();
+  }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

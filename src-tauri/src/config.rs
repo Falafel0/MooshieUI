@@ -82,13 +82,6 @@ pub struct AppConfig {
     pub comfyui_path: String,
     pub venv_path: String,
     pub extra_args: Vec<String>,
-    pub default_checkpoint: Option<String>,
-    pub default_sampler: String,
-    pub default_scheduler: String,
-    pub default_steps: u32,
-    pub default_cfg: f64,
-    pub default_width: u32,
-    pub default_height: u32,
     /// VRAM management mode: "auto", "high", "normal", "low", "none"
     pub vram_mode: String,
     /// Keep ComfyUI running after the app closes (default: false)
@@ -253,33 +246,6 @@ pub struct AppConfig {
     /// persist the clip. Mirrors the image-side `manualSaveMode` toggle.
     #[serde(default)]
     pub manual_save_mode: bool,
-    /// Base URL of the user's monbooru server, e.g. `http://127.0.0.1:8455`.
-    /// Empty means monbooru is not configured and the tab stays inert.
-    #[serde(default)]
-    pub monbooru_base_url: String,
-    /// monbooru API bearer token (created under Settings -> Authentication).
-    /// Secret: never logged, never returned to the frontend, and reported to
-    /// clients only as a `monbooru_api_token_configured` boolean.
-    #[serde(default)]
-    pub monbooru_api_token: Option<String>,
-    /// Download and install the monbooru server automatically the first time
-    /// the tab opens without one (default: true). Mirrors Patchy's
-    /// `patchy_auto_install`; only ever acts when no remote URL is configured.
-    #[serde(default)]
-    pub monbooru_auto_install: bool,
-    /// Start the installed monbooru server together with the app
-    /// (default: false).
-    #[serde(default)]
-    pub monbooru_auto_start: bool,
-    /// Keep the monbooru server running after the app closes (default: false).
-    /// When false, the server MooshieUI started is stopped on exit.
-    #[serde(default)]
-    pub monbooru_keep_alive: bool,
-    /// Which portable monbooru archive to install: `"lite"` (single binary) or
-    /// `"bundled"` (ffmpeg + ONNX Runtime beside it, for video thumbnails and
-    /// local CPU auto-tagging). Unknown values fall back to `"lite"`.
-    #[serde(default)]
-    pub monbooru_flavor: String,
 }
 
 /// Default report proxy endpoint. In-app error reports post here unless the
@@ -313,13 +279,6 @@ impl Default for AppConfig {
             comfyui_path: String::new(),
             venv_path: String::new(),
             extra_args: vec![],
-            default_checkpoint: None,
-            default_sampler: "euler_cfg_pp".to_string(),
-            default_scheduler: "sgm_uniform".to_string(),
-            default_steps: 20,
-            default_cfg: 1.4,
-            default_width: 1024,
-            default_height: 1024,
             vram_mode: "normal".to_string(),
             keep_alive: false,
             auto_start: true,
@@ -372,12 +331,6 @@ impl Default for AppConfig {
             report_endpoint: default_report_endpoint(),
             gallery_never_expire: false,
             manual_save_mode: false,
-            monbooru_base_url: String::new(),
-            monbooru_api_token: None,
-            monbooru_auto_install: true,
-            monbooru_auto_start: false,
-            monbooru_keep_alive: false,
-            monbooru_flavor: "lite".to_string(),
         }
     }
 }
@@ -435,18 +388,6 @@ pub fn config_to_client_json(
             obj.insert(
                 "llm_oauth_refresh_token".to_string(),
                 serde_json::Value::String(String::new()),
-            );
-            // The monbooru token reads and (in later phases) writes the user's
-            // entire library, so it is treated like the other provider
-            // credentials: the client learns only whether one is set.
-            let monbooru_configured = obj
-                .get("monbooru_api_token")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| !s.is_empty());
-            obj.insert("monbooru_api_token".to_string(), serde_json::Value::Null);
-            obj.insert(
-                "monbooru_api_token_configured".to_string(),
-                serde_json::json!(monbooru_configured),
             );
         }
     }
@@ -600,7 +541,6 @@ pub(crate) fn normalize_config_fields(config: &mut AppConfig) {
         &mut config.theme_profile_id,
         &mut config.tls_cert_path,
         &mut config.tls_key_path,
-        &mut config.monbooru_api_token,
     ] {
         match field {
             Some(p) if p.trim().is_empty() => *field = None,
@@ -608,9 +548,6 @@ pub(crate) fn normalize_config_fields(config: &mut AppConfig) {
             None => {}
         }
     }
-    // The monbooru client rejects a base URL with surrounding whitespace, so a
-    // paste with a stray space is normalised here rather than failing at use.
-    config.monbooru_base_url = config.monbooru_base_url.trim().to_string();
     for worker in &mut config.gpu_workers {
         if let Some(label) = &mut worker.label {
             let trimmed = label.trim().to_string();
@@ -697,20 +634,18 @@ pub(crate) fn preserve_secrets(incoming: &mut AppConfig, current: &AppConfig) {
             .novelai_api_key
             .clone_from(&current.novelai_api_key);
     }
-    // Same reasoning as the NovelAI key: the monbooru token is stripped from
-    // every config the frontend receives and replaced with a boolean, so the
-    // snapshot an autosave sends back can never contain it. Without this
-    // carry-forward, changing any unrelated setting would silently erase the
-    // token and the monbooru tab would go back to "not configured". Clearing
-    // goes through `set_monbooru_api_token("")`.
+    // Same reasoning again for the CivitAI key: `config_to_client_json` blanks
+    // it and reports `civitai_api_key_configured` instead, so the snapshot an
+    // autosave sends back is always empty and must not be read as "clear it".
+    // Clearing goes through the CivitAI key field itself.
     if incoming
-        .monbooru_api_token
+        .civitai_api_key
         .as_deref()
-        .is_none_or(|t| t.trim().is_empty())
+        .is_none_or(|k| k.trim().is_empty())
     {
         incoming
-            .monbooru_api_token
-            .clone_from(&current.monbooru_api_token);
+            .civitai_api_key
+            .clone_from(&current.civitai_api_key);
     }
 }
 
@@ -742,61 +677,65 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// A full-config save sends back a snapshot that can never contain the
-    /// secrets the frontend is not given, so a blanked field has to be read as
-    /// a stale echo rather than an intent to clear.
-    ///
-    /// Regression guard for the monbooru token specifically: it is stripped
-    /// from every config the UI receives, so without the carry-forward in
-    /// `preserve_secrets` changing any unrelated setting would silently erase
-    /// it and the monbooru tab would fall back to "not configured".
+    /// Regression guard for the CivitAI key: `config_to_client_json` blanks it
+    /// and reports `civitai_api_key_configured` instead, so every config the UI
+    /// holds has an empty key. Without the carry-forward, saving any unrelated
+    /// setting — or anything that round-trips a full config — erased it.
     #[test]
-    fn blanked_monbooru_token_is_carried_forward() {
+    fn blanked_civitai_key_is_carried_forward() {
         let current = AppConfig {
-            monbooru_api_token: Some("stored-token".to_string()),
+            civitai_api_key: Some("stored-civitai-key".to_string()),
             ..AppConfig::default()
         };
         let mut incoming = AppConfig::default();
-        assert!(incoming.monbooru_api_token.is_none());
+        assert!(incoming.civitai_api_key.is_none());
 
         preserve_secrets(&mut incoming, &current);
 
-        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("stored-token"));
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("stored-civitai-key")
+        );
     }
 
-    /// A non-empty incoming token is a real change, so it must win over the
-    /// stored one — otherwise `set_monbooru_api_token` could never replace it.
+    /// A key the user actually typed must win, otherwise the field could never
+    /// be set through a full-config save.
     #[test]
-    fn a_new_monbooru_token_replaces_the_stored_one() {
+    fn a_new_civitai_key_replaces_the_stored_one() {
         let current = AppConfig {
-            monbooru_api_token: Some("stored-token".to_string()),
+            civitai_api_key: Some("stored-civitai-key".to_string()),
             ..AppConfig::default()
         };
         let mut incoming = AppConfig {
-            monbooru_api_token: Some("typed-token".to_string()),
+            civitai_api_key: Some("typed-civitai-key".to_string()),
             ..AppConfig::default()
         };
 
         preserve_secrets(&mut incoming, &current);
 
-        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("typed-token"));
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("typed-civitai-key")
+        );
     }
 
-    /// Whitespace is not a token: a field holding only spaces is the same
-    /// stale echo as an empty one, and must not overwrite a real stored token.
+    /// Whitespace is not a key: it is the same stale echo as an empty string.
     #[test]
-    fn a_whitespace_monbooru_token_does_not_clear_a_stored_one() {
+    fn a_whitespace_civitai_key_does_not_clear_a_stored_one() {
         let current = AppConfig {
-            monbooru_api_token: Some("stored-token".to_string()),
+            civitai_api_key: Some("stored-civitai-key".to_string()),
             ..AppConfig::default()
         };
         let mut incoming = AppConfig {
-            monbooru_api_token: Some("   ".to_string()),
+            civitai_api_key: Some("   ".to_string()),
             ..AppConfig::default()
         };
 
         preserve_secrets(&mut incoming, &current);
 
-        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("stored-token"));
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("stored-civitai-key")
+        );
     }
 }
