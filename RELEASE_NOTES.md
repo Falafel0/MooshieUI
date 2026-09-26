@@ -1,3 +1,58 @@
+## What's New in v2.3.7-fork.7
+
+### Regions, masks and layers
+- Prompt regions and inpaint masks are two separate mechanisms now, instead of two ways of doing the same thing. A region shapes what is generated inside its area; a mask is what actually edits pixels.
+- Every visible mask layer is its own inpaint pass, painted from the bottom layer upwards, so the settings on a mask (denoise, grow, blur, size) apply to that mask's own pass. The layer list numbers the passes in the order they run, and the hint in the mask group says the same.
+- A mask no longer carries a prompt of its own. It runs the document's prompt, and where it overlaps a prompt region, that region's text is added to the conditioning. Mask layers show the denoise and mask settings only; their prompt fields are gone.
+- Prompt regions no longer start an inpaint run in any mode, including when a region is the only thing painted, and the "apply regions via" switch is gone, because there is nothing left to choose. A painted region is no longer accepted in place of a mask.
+- Several overlapping regions add up instead of replacing one another, in text-to-image and in inpainting alike.
+- Raster layers are the picture being edited: never a pass, never prompt influence, and never exported as a mask.
+
+### Density, colour and the overlay
+- A mask layer's opacity is now named for what it is: its density. Density multiplies the mask's coverage, so a lightly painted area rests that much more lightly on the picture — and the canvas draws each overlay at that same strength, so what you see is the value a run reads. The layer panel carries one slider for how strongly the overlays are drawn on top of the picture; it is a display convenience and changes nothing else.
+- Every mask can be told to let its own density set the denoise: the painted core is edited at full denoise and the fringes fade out, instead of the whole mask being edited uniformly. The panel says which of the two will happen and shows the strength range (0 up to the mask's denoise). The existing automatic behaviour — one denoise across the mask, density only softening the blend — stays the default.
+- Masks and prompt regions can each be given a display colour, so a stack of them on one picture can be told apart, and the layer list, the status bar and the canvas outline all use that one colour. The colour is cosmetic by construction: generation never reads it.
+- Fixed: the canvas drew every region asset in the raw image colour, and a colour change did not repaint a layer that was already on the canvas — a recoloured mask kept its old colour until the next reload. Both now follow the layer's own colour immediately.
+
+### Canvas interaction
+- Typing no longer reaches the canvas: a hotkey used to fire while a prompt was being written, so letters switched tools and cleared layers under the cursor. Space in a prompt no longer starts panning, and Ctrl+Z inside a text box is the text box's own undo again. Every canvas shortcut now asks the same question first — is this keystroke aimed at a field.
+- Right-click on the picture opens the actions a canvas is asked for: undo, redo, fit to view, and duplicate, clear or delete the active layer, using the layer list's own wording. Escape or a click anywhere closes it.
+- Every layer kind can be rotated now, not just resized: masks and regions turn as a group of strokes, raster layers as before. Shift keeps the proportions and Alt scales from the centre, and the upright angles snap. A rotation is one undo step, and the export bakes whatever is on the canvas.
+- Shift-drag with the rectangle or ellipse tool fills a square or a circle, and the fill preview now shows the density it will actually commit instead of a fixed sample strength.
+- The eyedropper appears only when it can do something: a mask and a region draw in their own display colour, so there is nothing for it to pick, and the tool, its hotkey and the Alt quick-pick all agree on that now.
+
+### Regions
+- Fixed: a region painted on the canvas only influenced a run in the inpaint workspace. In text-to-image the region layer was ignored outright, so its prompt did nothing at all; painted regions now condition text-to-image as well, alongside the regions written in the prompt bar, and the mode rule stays in one place.
+
+### monbooru
+- MooshieUI can now browse a self-hosted monbooru server from its own tab: the artist list, the image grid and a detail drawer, in the same shape as the artist gallery.
+- The detail drawer shows the generation data monbooru parses out of the file — prompt, negative prompt, seed, sampler, checkpoint, LoRAs and the workflow — and that prompt can be sent straight back into MooshieUI's prompt authoring.
+- The search syntax is listed in the tab itself (operators, ranges, wildcards, category and file filters), so queries do not have to be memorised.
+- Settings gains a monbooru section: server address, API token and a connection test. The token stays in the local process and is never exposed to the interface.
+- Fixed: the monbooru token is no longer erased when an unrelated setting is changed. Because the token is stripped from every configuration the interface receives, a save used to come back without it and silently clear it. It is now preserved across saves, and clearing it is an explicit action.
+
+### Prompt arena and macros
+- A prompt-writing surface with block editing and a macro palette, with macro types visually distinguished (styles, artists, characters, scenes, costumes, concepts).
+- Macros extend the existing styles engine: a style is simply another macro type.
+
+### Projects
+- Named projects save the whole local state to disk and restore it in one action, so a setup can be switched without rebuilding it by hand.
+
+### Patchy
+- The hand-off between MooshieUI and Patchy is no longer opaque: both directions of the transfer are shown, with the file name, its size and pixel dimensions, what an import will replace, and a retry for whichever step failed.
+- The exported file is fingerprinted, so an untouched export is no longer offered as the editor's result — importing too early used to save the unedited original.
+- When the edited image comes back with different dimensions, the dialog says that applying it resizes the document underneath existing layers, and asks before doing so.
+
+### Inpainting
+- After an inpainting run finishes, the result can be compared with the original it replaced, using the existing comparison widget: divider, fade, difference or side by side. The comparison appears with the result, labels which side is which, and only for a result whose original is known.
+
+### Settings
+- New: "Hide all recommended parameters" removes every recommendation from the interface — the per-model recommendation panels, the steps and CFG range row with its apply button, and the recommended badges and hints on presets and dimensions. It is display only, so nothing about a run changes, and the CFG 1 warning stays because that one warns about breakage rather than recommending anything.
+
+### Release platforms
+- This fork now ships one installer: the Windows NSIS setup. The release workflow no longer builds the Linux bundles (AppImage, deb, rpm), the headless server binary, the container image or a macOS bundle. The updater manifest therefore carries a single Windows entry, and the release page has a single download.
+
+---
 ## What's New in v2.3.7-fork.6
 
 ### Patchy replaces Photopea
