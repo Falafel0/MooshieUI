@@ -2,6 +2,7 @@
   import { progress } from "../../stores/progress.svelte.js";
   import { connection } from "../../stores/connection.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { videoWorkspaceVisible, musicWorkspaceVisible } from "../../utils/workspaces.js";
 
 export type MobileTab = "generate" | "video" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "monbooru" | "settings";
 
@@ -18,8 +19,8 @@ export type MobileTab = "generate" | "video" | "music" | "gallery" | "modelhub" 
     (
       [
         { id: "generate", labelKey: "nav.generate" },
-        ...(showVideo ? [{ id: "video", labelKey: "generation.mode.video" }] : []),
-        { id: "music", labelKey: "nav.music" },
+        ...(showVideo && videoWorkspaceVisible ? [{ id: "video", labelKey: "generation.mode.video" }] : []),
+        ...(musicWorkspaceVisible ? [{ id: "music", labelKey: "nav.music" }] : []),
         { id: "gallery", labelKey: "nav.gallery" },
         ...(showModelhub ? [{ id: "modelhub", labelKey: "nav.modelhub" }] : []),
         { id: "artists", labelKey: "nav.artists" },

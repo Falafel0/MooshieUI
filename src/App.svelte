@@ -23,6 +23,7 @@
   import { uploadImageBytes, getConfig, updateConfig, readImageMetadata, getQueue, recoverPromptOutputs, readTempImage, readTempImageDisplay } from "./lib/utils/api.js";
   import { loadOutputImageForGenerationInput, uploadOutputImageForGenerationInput, sendImageToVideoFrame, addImageToVideoReference, videoReferenceSlotsFree } from "./lib/utils/galleryActions.js";
   import { H3_MAX_REF_IMAGES } from "./lib/utils/videoParams.js";
+  import { videoWorkspaceVisible, musicWorkspaceVisible } from "./lib/utils/workspaces.js";
   import { UPSCALE_ACTION } from "./lib/utils/novelaiEnhance.js";
   import { prepareOutputImageForEditMode } from "./lib/utils/editImagePreparation.js";
   import { shouldSuppressRegionalChainGallerySave, clearRegionalChainGallerySuppress } from "./lib/utils/regionalChainGallery.js";
@@ -3952,7 +3953,7 @@
         </div>
       {/if}
     </div>
-    {#if !generation.isNovelAi}
+    {#if !generation.isNovelAi && videoWorkspaceVisible}
       <div class="relative mx-auto">
         <button
           class="touch-target flex items-center justify-center rounded-lg transition-colors {currentPage === 'generate' && generation.mode === 'video' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
@@ -3970,14 +3971,16 @@
         {/if}
       </div>
     {/if}
-    <button
-      class="touch-target mx-auto flex items-center justify-center rounded-lg transition-colors {currentPage === 'music' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
-      onclick={() => (currentPage = "music")}
-      title={locale.t("nav.music")}
-      aria-label={locale.t("nav.music")}
-    >
-      <svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="18" cy="16" rx="3" ry="3"/></svg>
-    </button>
+    {#if musicWorkspaceVisible}
+      <button
+        class="touch-target mx-auto flex items-center justify-center rounded-lg transition-colors {currentPage === 'music' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+        onclick={() => (currentPage = "music")}
+        title={locale.t("nav.music")}
+        aria-label={locale.t("nav.music")}
+      >
+        <svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="18" cy="16" rx="3" ry="3"/></svg>
+      </button>
+    {/if}
     <button
       class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
       'gallery'
