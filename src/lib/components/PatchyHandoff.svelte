@@ -11,11 +11,13 @@
     readImageMetadata,
     readPatchyDocument,
     resolvePatchyPath,
+    type PatchyDocumentRead,
     saveToGalleryBytes,
     updateConfig,
     writePatchyDocument,
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
+  import { resultOriginText } from "../utils/patchyHandoff.js";
   import type { OutputImage } from "../types/index.js";
   import PatchyTransferPanel from "./patchy/PatchyTransferPanel.svelte";
 
@@ -96,6 +98,9 @@
   // editor changed. Without it a mask import can only guess from luminance.
   let exportBytes = $state<number[] | null>(null);
   let importInfo = $state<PayloadInfo | null>(null);
+  /** Which file the read-back came from — a layered save may not be the one we
+   *  handed over, and the panel has to say so instead of implying otherwise. */
+  let importOrigin = $state("");
   // Object URL for the edited file coming back; revoked whenever it is replaced.
   let importPreviewUrl = $state<string | null>(null);
   let importError = $state("");
@@ -176,6 +181,7 @@
     exportFingerprint = null;
     exportBytes = null;
     importInfo = null;
+    importOrigin = "";
     importError = "";
     importStatus = "idle";
     lastImportTarget = null;
@@ -388,16 +394,20 @@
    */
   async function readImportBytes(): Promise<number[] | null> {
     if (!documentPath) return null;
-    const bytes = await readPatchyDocument(documentPath);
-    if (fingerprint(bytes) === exportFingerprint) return null;
-    importInfo = describePayload(documentName(), bytes);
+    // `flattenLayered` resolves the shape a real edit takes: Patchy's flat-save
+    // guard routes Save to Save As once a document has layers, so the result can
+    // be a `.psd` sitting beside the hand-off file instead of the file itself.
+    const read = await readPatchyDocument(documentPath, true);
+    if (fingerprint(read.bytes) === exportFingerprint) return null;
+    importInfo = describePayload(documentName(), read.bytes);
+    importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
     // A real object URL for the bytes that were really read back — the only
     // preview that can exist for a file that is not in the gallery yet.
     importPreviewUrl = URL.createObjectURL(
-      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+      new Blob([new Uint8Array(read.bytes)], { type: "image/png" }),
     );
-    return bytes;
+    return read.bytes;
   }
 
   /** Re-check what Patchy has saved, without applying anything. */
@@ -435,9 +445,9 @@
     pendingImport = null;
     lastImportTarget = target;
     importStatus = "reading";
-    let bytes: number[];
+    let read: PatchyDocumentRead;
     try {
-      bytes = await readPatchyDocument(documentPath);
+      read = await readPatchyDocument(documentPath, true);
     } catch (e) {
       importStatus = "idle";
       busy = false;
@@ -445,13 +455,15 @@
       console.error("Patchy: no saved document to read back:", e);
       return;
     }
-    if (fingerprint(bytes) === exportFingerprint) {
+    if (fingerprint(read.bytes) === exportFingerprint) {
       // Still the file this dialog exported: Patchy has not saved yet. That is
       // not a failure — the card keeps showing the "save in Patchy first" hint.
       importStatus = "idle";
       busy = false;
       return;
     }
+    const bytes = read.bytes;
+    importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     importInfo = describePayload(documentName(), bytes);
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
     importPreviewUrl = URL.createObjectURL(
@@ -706,6 +718,11 @@
             statusText={importStatusText}
             statusRole={importStepState === "failed" ? "alert" : undefined}
           >
+            {#if importOrigin}
+              <p class="mb-1 text-[11px] text-neutral-500">
+                {locale.t("patchy.import_from", { name: importOrigin })}
+              </p>
+            {/if}
             <div class="mt-0.5">
               <button
                 type="button"

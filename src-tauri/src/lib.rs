@@ -17,6 +17,10 @@ pub mod metadata;
 pub mod model_requests;
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub mod monbooru;
+#[cfg(any(feature = "desktop", feature = "server"))]
+pub mod monbooru_install;
+#[cfg(any(feature = "desktop", feature = "server"))]
+pub mod monbooru_server;
 pub mod notifications;
 pub mod novelai;
 #[cfg(feature = "desktop")]
@@ -166,6 +170,32 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     media_tools::start(shared_state.clone());
                     *shared_state.app_handle.lock().await = Some(handle);
+                });
+            }
+
+            // monbooru autostart: the managed server comes up with the app when
+            // the user asked for it. Only an install this app made is started,
+            // and a server that is already running (ours or the user's) is left
+            // exactly as it is.
+            {
+                let shared_state: Arc<AppState> = _app.state::<Arc<AppState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let auto_start = shared_state.config.read().await.monbooru_auto_start;
+                    if !auto_start {
+                        return;
+                    }
+                    match commands::monbooru::start_managed_server(&shared_state).await {
+                        Ok(status) if status.running => {
+                            log::info!("monbooru autostart: server running at {}", status.url);
+                        }
+                        Ok(status) => log::info!(
+                            "monbooru autostart: nothing to start (responding: {})",
+                            status.responding
+                        ),
+                        Err(error) => {
+                            log::warn!("monbooru autostart did not start a server: {error}");
+                        }
+                    }
                 });
             }
 
@@ -578,6 +608,11 @@ pub fn run() {
             commands::monbooru::monbooru_tags,
             commands::monbooru::monbooru_categories,
             commands::monbooru::monbooru_thumbnail,
+            commands::monbooru::monbooru_install_status,
+            commands::monbooru::monbooru_install_start,
+            commands::monbooru::monbooru_server_start,
+            commands::monbooru::monbooru_server_stop,
+            commands::monbooru::monbooru_server_status,
             commands::projects::list_projects,
             commands::projects::save_project,
             commands::projects::load_project,
@@ -676,9 +711,13 @@ pub fn run() {
                 commands::music_link::shutdown(&state).await;
                 commands::music_audio_style::shutdown(&state).await;
             });
-            let (keep_alive, patchy_keep_alive) = {
+            let (keep_alive, patchy_keep_alive, monbooru_keep_alive) = {
                 let config = state.config.blocking_read();
-                (config.keep_alive, config.patchy_keep_alive)
+                (
+                    config.keep_alive,
+                    config.patchy_keep_alive,
+                    config.monbooru_keep_alive,
+                )
             };
             if !keep_alive {
                 crate::comfyui::process::stop_comfyui_process_blocking(&state);
@@ -689,6 +728,24 @@ pub fn run() {
                 // Only the editor this app started is closed; an instance the
                 // user opened themselves is left alone.
                 log::info!("Closed the Patchy editor started by this app");
+            }
+            // Same ownership rule for the monbooru server: only the process
+            // whose recorded identity still matches is stopped, and a server
+            // the user runs themselves is never claimed.
+            if !monbooru_keep_alive {
+                if let Some(base) = crate::config::app_data_dir() {
+                    let record = crate::monbooru_server::record_path(&base);
+                    if crate::monbooru_server::status(&record).running {
+                        match crate::monbooru_server::stop(&record) {
+                            Ok(()) => log::info!("Stopped the monbooru server managed by this app"),
+                            Err(error) => {
+                                log::warn!("Could not stop the monbooru server: {error}")
+                            }
+                        }
+                    }
+                }
+            } else {
+                log::info!("Keeping monbooru running (monbooru_keep_alive=true)");
             }
             // Always stop the prompt-assistant llama-server on exit — it is never
             // meant to outlive the app, regardless of keep_alive.

@@ -262,6 +262,24 @@ pub struct AppConfig {
     /// clients only as a `monbooru_api_token_configured` boolean.
     #[serde(default)]
     pub monbooru_api_token: Option<String>,
+    /// Download and install the monbooru server automatically the first time
+    /// the tab opens without one (default: true). Mirrors Patchy's
+    /// `patchy_auto_install`; only ever acts when no remote URL is configured.
+    #[serde(default)]
+    pub monbooru_auto_install: bool,
+    /// Start the installed monbooru server together with the app
+    /// (default: false).
+    #[serde(default)]
+    pub monbooru_auto_start: bool,
+    /// Keep the monbooru server running after the app closes (default: false).
+    /// When false, the server MooshieUI started is stopped on exit.
+    #[serde(default)]
+    pub monbooru_keep_alive: bool,
+    /// Which portable monbooru archive to install: `"lite"` (single binary) or
+    /// `"bundled"` (ffmpeg + ONNX Runtime beside it, for video thumbnails and
+    /// local CPU auto-tagging). Unknown values fall back to `"lite"`.
+    #[serde(default)]
+    pub monbooru_flavor: String,
 }
 
 /// Default report proxy endpoint. In-app error reports post here unless the
@@ -356,6 +374,10 @@ impl Default for AppConfig {
             manual_save_mode: false,
             monbooru_base_url: String::new(),
             monbooru_api_token: None,
+            monbooru_auto_install: true,
+            monbooru_auto_start: false,
+            monbooru_keep_alive: false,
+            monbooru_flavor: "lite".to_string(),
         }
     }
 }
