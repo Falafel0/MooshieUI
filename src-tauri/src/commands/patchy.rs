@@ -967,7 +967,10 @@ mod tests {
         let output = touch(&dir, "edited-import.png");
 
         assert!(flatten_layered_document(&executable, &layered, &output).is_err());
-        assert!(!output.exists(), "a stale PNG must never be imported as the new edit");
+        assert!(
+            !output.exists(),
+            "a stale PNG must never be imported as the new edit"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

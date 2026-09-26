@@ -8009,7 +8009,10 @@ mod nai_key_tests {
         );
         assert_eq!(value["llm_oauth_refresh_token"], serde_json::json!(""));
         assert_eq!(value["monbooru_api_token"], serde_json::Value::Null);
-        assert_eq!(value["monbooru_api_token_configured"], serde_json::json!(true));
+        assert_eq!(
+            value["monbooru_api_token_configured"],
+            serde_json::json!(true)
+        );
         assert_eq!(value["an_untouched_field"], serde_json::json!("kept"));
     }
 
@@ -8045,9 +8048,15 @@ mod nai_key_tests {
         assert_eq!(value["civitai_api_key"], serde_json::Value::Null);
         assert_eq!(value["civitai_api_key_configured"], serde_json::json!(true));
         assert_eq!(value["llm_external_api_key"], serde_json::Value::Null);
-        assert_eq!(value["llm_external_api_key_configured"], serde_json::json!(true));
+        assert_eq!(
+            value["llm_external_api_key_configured"],
+            serde_json::json!(true)
+        );
         assert_eq!(value["monbooru_api_token"], serde_json::Value::Null);
-        assert_eq!(value["monbooru_api_token_configured"], serde_json::json!(true));
+        assert_eq!(
+            value["monbooru_api_token_configured"],
+            serde_json::json!(true)
+        );
     }
 
     #[test]
