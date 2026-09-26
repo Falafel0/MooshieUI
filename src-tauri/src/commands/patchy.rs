@@ -551,7 +551,8 @@ pub struct PatchyDocumentRead {
     /// True when the result was a layered save (PSD/PSB) flattened through
     /// Patchy instead of the hand-off file itself.
     pub flattened: bool,
-    /// File name of that layered save, so the UI can name what it imported.
+    /// File name of that layered save: what was imported, or the save that is
+    /// there and could not be read back.
     pub layered_source: Option<String>,
 }
 
@@ -565,7 +566,9 @@ pub struct PatchyDocumentRead {
 /// defaulting to `<stem>.psd` beside the hand-off file, so a layered save
 /// written at or after the hand-off outranks the untouched export. Flattening
 /// needs the editor, so a missing executable degrades to returning the hand-off
-/// file rather than failing the read.
+/// file rather than failing the read — and in that case the layered save is
+/// still named in the result, so the panel can say the edit exists and could
+/// not be read instead of claiming nothing was saved.
 #[tauri::command]
 pub async fn read_patchy_document(
     path: String,
@@ -575,30 +578,47 @@ pub async fn read_patchy_document(
     let handoff = PathBuf::from(&path);
     let bytes = read_document_from(&handoff)?;
 
-    if flatten_layered == Some(true) && !looks_layered_document(&bytes) {
-        if let Some(layered) = newest_layered_save(&handoff) {
-            if let Some(executable) = resolve_patchy_executable(explicit.as_deref()) {
-                let output = flattened_path(&handoff)?;
-                let layered_for_task = layered.clone();
-                let output_for_task = output.clone();
-                let flattened = tokio::task::spawn_blocking(move || {
-                    flatten_layered_document(&executable, &layered_for_task, &output_for_task)
-                })
-                .await
-                .map_err(|e| AppError::Other(format!("Flatten task failed: {}", e)))?;
-                if flattened.is_ok() {
-                    let flattened_bytes = std::fs::read(&output)?;
-                    return Ok(PatchyDocumentRead {
-                        path: output.to_string_lossy().to_string(),
-                        bytes: flattened_bytes,
-                        flattened: true,
-                        layered_source: layered
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string()),
-                    });
-                }
+    // A layered save beside the hand-off is the user's real edit: Patchy's
+    // flat-save guard routes Save to Save As once a document has layers, so the
+    // result can be a `.psd` sitting next to the file we handed out.
+    let layered = if flatten_layered == Some(true) && !looks_layered_document(&bytes) {
+        newest_layered_save(&handoff)
+    } else {
+        None
+    };
+
+    if let Some(layered) = layered {
+        let layered_source = layered
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string());
+        if let Some(executable) = resolve_patchy_executable(explicit.as_deref()) {
+            let output = flattened_path(&handoff)?;
+            let layered_for_task = layered.clone();
+            let output_for_task = output.clone();
+            let flattened = tokio::task::spawn_blocking(move || {
+                flatten_layered_document(&executable, &layered_for_task, &output_for_task)
+            })
+            .await
+            .map_err(|e| AppError::Other(format!("Flatten task failed: {}", e)))?;
+            if flattened.is_ok() {
+                let flattened_bytes = std::fs::read(&output)?;
+                return Ok(PatchyDocumentRead {
+                    path: output.to_string_lossy().to_string(),
+                    bytes: flattened_bytes,
+                    flattened: true,
+                    layered_source: layered_source.clone(),
+                });
             }
         }
+        // The save is there, but it could not be read back. Naming it is the
+        // difference between "the editor has not saved yet" and "your edit is
+        // there and could not be read" — the panel says which one it is.
+        return Ok(PatchyDocumentRead {
+            path: handoff.to_string_lossy().to_string(),
+            bytes,
+            flattened: false,
+            layered_source,
+        });
     }
 
     Ok(PatchyDocumentRead {
@@ -863,6 +883,47 @@ mod tests {
         assert_eq!(read_back.path, path);
         assert!(!read_back.flattened);
         assert!(read_back.layered_source.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_layered_save_that_cannot_be_flattened_is_still_reported() {
+        let dir = scratch_dir("unflattenable");
+        let handoff = write_document_to(&dir, b"handed-out", "base_1700.png").unwrap();
+        // The editor's layered save beside it, written after the hand-off.
+        let stem = Path::new(&handoff)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let layered = dir.join(format!("{}.psd", stem));
+        std::fs::write(&layered, b"8BPS0000").unwrap();
+        set_modified(
+            Path::new(&handoff),
+            SystemTime::now() - Duration::from_secs(60),
+        );
+        // Something that exists, so path resolution accepts it, but cannot run.
+        let impostor = touch(&dir, "not-really-patchy.exe");
+
+        let read = read_patchy_document(
+            handoff.clone(),
+            Some(true),
+            Some(impostor.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            read.bytes, b"handed-out",
+            "the hand-off file is what comes back when the save cannot be read"
+        );
+        assert!(!read.flattened);
+        assert_eq!(
+            read.layered_source.as_deref(),
+            Some(format!("{}.psd", stem).as_str()),
+            "the unread layered save is named, not dropped"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

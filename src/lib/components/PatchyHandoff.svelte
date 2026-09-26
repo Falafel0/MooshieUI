@@ -17,7 +17,7 @@
     writePatchyDocument,
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
-  import { resultOriginText } from "../utils/patchyHandoff.js";
+  import { fingerprint, pngDimensions, resultOriginText } from "../utils/patchyHandoff.js";
   import type { OutputImage } from "../types/index.js";
   import PatchyTransferPanel from "./patchy/PatchyTransferPanel.svelte";
 
@@ -101,6 +101,10 @@
   /** Which file the read-back came from — a layered save may not be the one we
    *  handed over, and the panel has to say so instead of implying otherwise. */
   let importOrigin = $state("");
+  /** True when the last read came from a layered save, flattened for the import. */
+  let importLayered = $state(false);
+  /** Name of a layered save that is there but could not be read back. */
+  let importLayeredFailure = $state<string | null>(null);
   // Object URL for the edited file coming back; revoked whenever it is replaced.
   let importPreviewUrl = $state<string | null>(null);
   let importError = $state("");
@@ -156,7 +160,9 @@
         ? appliedText()
         : importStatus === "ready"
           ? ""
-          : locale.t("patchy.result_missing"),
+          : importLayeredFailure
+            ? locale.t("patchy.result_flatten_failed", { name: importLayeredFailure })
+            : locale.t("patchy.result_missing"),
   );
   // Kept standing while the loaded result is a different size, so the warning is
   // visible before the user reaches for an apply button, not only after.
@@ -182,6 +188,8 @@
     exportBytes = null;
     importInfo = null;
     importOrigin = "";
+    importLayered = false;
+    importLayeredFailure = null;
     importError = "";
     importStatus = "idle";
     lastImportTarget = null;
@@ -195,24 +203,6 @@
     return base.includes(".") ? base : `${base}.png`;
   }
 
-  /** PNG width/height from the IHDR chunk, or null for anything else. */
-  function pngDimensions(bytes: number[]): { width: number; height: number } | null {
-    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-    if (bytes.length < 24) return null;
-    for (let i = 0; i < signature.length; i += 1) {
-      if (bytes[i] !== signature[i]) return null;
-    }
-    const readU32 = (offset: number) =>
-      ((bytes[offset] << 24) |
-        (bytes[offset + 1] << 16) |
-        (bytes[offset + 2] << 8) |
-        bytes[offset + 3]) >>>
-      0;
-    const width = readU32(16);
-    const height = readU32(20);
-    return width > 0 && height > 0 ? { width, height } : null;
-  }
-
   /** Describe a file in flight: name, size, and pixel size when readable. */
   function describePayload(name: string, bytes: number[]): PayloadInfo {
     const dims = pngDimensions(bytes);
@@ -222,20 +212,6 @@
       width: dims?.width ?? null,
       height: dims?.height ?? null,
     };
-  }
-
-  /**
-   * Cheap fingerprint used for one question only: "has Patchy saved over our
-   * hand-off file yet?". Comparing lengths alone would misreport a re-encode of
-   * the same size as "not saved", so the bytes are hashed (FNV-1a, 32 bits).
-   */
-  function fingerprint(bytes: number[]): string {
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < bytes.length; i += 1) {
-      hash ^= bytes[i];
-      hash = Math.imul(hash, 0x01000193);
-    }
-    return `${(hash >>> 0).toString(16)}:${bytes.length}`;
   }
 
   /** True only when both files' pixel sizes are known and they disagree. */
@@ -398,7 +374,15 @@
     // guard routes Save to Save As once a document has layers, so the result can
     // be a `.psd` sitting beside the hand-off file instead of the file itself.
     const read = await readPatchyDocument(documentPath, true);
-    if (fingerprint(read.bytes) === exportFingerprint) return null;
+    if (fingerprint(read.bytes) === exportFingerprint) {
+      // Nothing new came back. When a layered save *is* there, the edit exists
+      // but could not be read: that is a different situation from "not saved",
+      // and the panel says which one it is.
+      importLayeredFailure = read.layered_source;
+      return null;
+    }
+    importLayeredFailure = null;
+    importLayered = read.flattened;
     importInfo = describePayload(documentName(), read.bytes);
     importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
@@ -456,12 +440,16 @@
       return;
     }
     if (fingerprint(read.bytes) === exportFingerprint) {
-      // Still the file this dialog exported: Patchy has not saved yet. That is
-      // not a failure — the card keeps showing the "save in Patchy first" hint.
+      // Still the file this dialog exported: Patchy has not saved over it. A
+      // layered save beside it means the edit exists and could not be read —
+      // the card says which of the two it is.
+      importLayeredFailure = read.layered_source;
       importStatus = "idle";
       busy = false;
       return;
     }
+    importLayeredFailure = null;
+    importLayered = read.flattened;
     const bytes = read.bytes;
     importOrigin = resultOriginText(read.flattened, read.layered_source, documentName());
     importInfo = describePayload(documentName(), bytes);
@@ -720,7 +708,10 @@
           >
             {#if importOrigin}
               <p class="mb-1 text-[11px] text-neutral-500">
-                {locale.t("patchy.import_from", { name: importOrigin })}
+                {locale.t(
+                  importLayered ? "patchy.import_from_layered" : "patchy.import_from",
+                  { name: importOrigin },
+                )}
               </p>
             {/if}
             <div class="mt-0.5">
