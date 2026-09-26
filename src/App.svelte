@@ -2210,7 +2210,6 @@
     return galleryImagesPerRow;
   }
 
-  const thumbSize = $derived(viewColumns(galleryView) <= 3 ? 480 : 384);
 
   // Reset pagination when the user changes sort/filter/group (but NOT on new image additions).
   $effect(() => {

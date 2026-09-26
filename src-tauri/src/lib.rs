@@ -307,7 +307,11 @@ pub fn run() {
                             tauri::http::Response::builder()
                                 .status(200)
                                 .header("Content-Type", "image/webp")
-                                .header("Cache-Control", "no-cache")
+                                // The frontend asks for a thumbnail through a URL
+                                // carrying `?v=<modified>-<size>`, so a cached answer
+                                // can only be used for the very same bytes. Without
+                                // this the grid re-decoded every JXL it scrolled past.
+                                .header("Cache-Control", "max-age=3600")
                                 .body(data)
                                 .unwrap(),
                         );

@@ -1563,7 +1563,9 @@ async fn thumbnail_handler(
             StatusCode::OK,
             [
                 ("content-type", "image/webp".to_string()),
-                ("cache-control", "no-cache".to_string()),
+                // Same reasoning as the Tauri protocol handler: the request URL
+                // carries `?v=`, so the answer is only reused for those bytes.
+                ("cache-control", "max-age=3600".to_string()),
             ],
             data,
         )
