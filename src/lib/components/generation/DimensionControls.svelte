@@ -497,12 +497,12 @@
           class="relative text-xs px-2 py-1 rounded transition-colors {sideLength === side
             ? 'bg-indigo-600 text-white'
             : 'bg-neutral-800 border border-neutral-700 text-neutral-400 hover:bg-neutral-700'}"
-          title={isRecommended && familyLabel
+          title={isRecommended && familyLabel && !generation.hideRecommendedParams
             ? locale.t('generation.dimensions.recommended', { model: familyLabel, res: recommendedLabel })
             : String(side)}
         >
           {side}
-          {#if isRecommended}
+          {#if isRecommended && !generation.hideRecommendedParams}
             <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true"></span>
           {/if}
         </button>
@@ -517,7 +517,7 @@
       step={quantum}
       class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
     />
-    {#if recommended && familyLabel}
+    {#if recommended && familyLabel && !generation.hideRecommendedParams}
       <p class="text-[10px] text-neutral-500 mt-1">
         <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 mr-1 align-middle" aria-hidden="true"></span>{locale.t('generation.dimensions.recommended', { model: familyLabel, res: recommendedLabel })}
       </p>

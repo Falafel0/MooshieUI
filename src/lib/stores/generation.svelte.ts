@@ -8,6 +8,12 @@ import {
 } from "../utils/promptSchedule.js";
 import { parseSegmentDetailPrompt } from "../utils/promptSegmentDetail.js";
 import {
+  supportsRegionalConditioning as familySupportsRegionalConditioning,
+  supportsRegionalPrompting as familySupportsRegionalPrompting,
+  supportsSequentialEditMasks as modeSupportsSequentialEditMasks,
+  type RegionalRunFacts,
+} from "../utils/regionalStrategy.js";
+import {
   joinPromptBoxes,
   mergeNovelAiTags,
   sanitizePromptForSend,
@@ -67,7 +73,6 @@ import type {
   NovelAiVibe,
   NovelAiVibeEncoding,
   RegionalPromptSelection,
-  RegionalPromptStrategy,
   ResumeStage,
   VideoAspectRatio,
   VideoVariant,
@@ -939,11 +944,14 @@ class GenerationStore {
    *  The first-ever preset application (while `modelPresetAppliedKey` is still unset) is
    *  exempt so a fresh profile still gets sane defaults; every later swap preserves. */
   advancedMode = $state(false);
+  /** Hides every recommended-parameter surface: the per-model recommendation
+   * panels, the steps/CFG range row with its apply button, the recommended
+   * badges and hints. Display only — nothing about the run changes. The CFG 1
+   * warning stays: that one warns about breakage, it does not recommend. */
+  hideRecommendedParams = $state(false);
   /** When true, checkpoint/model swaps never overwrite width/height, regardless of advancedMode. */
   resolutionLocked = $state(false);
   regionalPrompts = $state<RegionalPromptSelection[]>([]);
-  /** Persisted legacy choice; txt2img always uses spatial conditioning, while inpaint uses mode-specific behavior. */
-  regionalPromptStrategy = $state<RegionalPromptStrategy>("conditioning");
 
   // --- Video mode (MiniMax H3) ---
   /** "fl2va" (first/last frame, also plain text-to-video) or "ref2va" (reference images). */
@@ -1795,75 +1803,30 @@ class GenerationStore {
     }
   }
 
-  /** Spatial conditioning: SDXL area regions or Anima mask regions. */
+  /** What this run's regional rules are decided from: mode and model family only. */
+  private regionalRunFacts(): RegionalRunFacts {
+    return {
+      mode: this.mode,
+      isAnima: this.isAnima,
+      isSdxlLike: this.isSdxlLike,
+      isNovelAi: this.isNovelAi,
+    };
+  }
+
+  /** Prompt regions as areas of influence — this mode's own answer. */
   get supportsRegionalConditioning(): boolean {
-    if (this.mode !== "txt2img" && this.mode !== "inpainting") return false;
-    // Both regional strategies are ComfyUI graph rewrites. NovelAI takes a
-    // finished prompt over HTTP, so neither can apply there.
-    if (this.isNovelAi) return false;
-    // Anima takes area conditioning in txt2img. Its inpaint workspace keeps the
-    // sequential masked-region chain, because there a region layer is an edit
-    // mask rather than an area of influence.
-    if (this.isAnima) return this.mode === "txt2img";
-    return this.isSdxlLike;
+    return familySupportsRegionalConditioning(this.regionalRunFacts());
   }
 
-  /** Sequential masked-region generation is only for inpainting edit masks. */
-  get supportsRegionalInpaintChain(): boolean {
-    return !this.isNovelAi && this.mode === "inpainting" && this.isAnima;
+  /** Sequential edit passes, one per visible mask layer: the inpaint workspace's own answer. */
+  get supportsSequentialEditMasks(): boolean {
+    return modeSupportsSequentialEditMasks(this.regionalRunFacts());
   }
 
-  get effectiveRegionalStrategy(): RegionalPromptStrategy {
-    if (this.mode === "txt2img") {
-      // Text-to-image regions are areas of influence, never sequential edits.
-      // Ignore any persisted legacy `inpaint_chain` preference.
-      return "conditioning";
-    }
-    if (!this.supportsRegionalInpaintChain && !this.supportsRegionalConditioning) {
-      return "conditioning";
-    }
-    // Inpainting regions are painted edit masks: use area conditioning where
-    // available, otherwise retain the sequential masked-region workflow.
-    if (this.mode === "inpainting") {
-      return this.supportsRegionalConditioning ? "conditioning" : "inpaint_chain";
-    }
-    return "conditioning";
-  }
-
-  get canChooseRegionalStrategy(): boolean {
-    return this.supportsRegionalConditioning && this.supportsRegionalInpaintChain;
-  }
-
-  /** txt2img regional prompting (GUI regions + <region> tags). */
+  /** Whether painted regions do anything in this run; where they do not, the
+   * interface warns that they are dropped rather than ignoring them silently. */
   get supportsRegionalPrompting(): boolean {
-    return this.supportsRegionalConditioning || this.supportsRegionalInpaintChain;
-  }
-
-  /** GUI + inline `<region>` tags with valid geometry and prompt text (for inpaint chain). */
-  getValidRegionalSelectionsForInpaint(): RegionalPromptSelection[] {
-    const fromGui = this.regionalPrompts.filter(
-      (r) => r.text.trim() && r.width > 0 && r.height > 0,
-    );
-    if (fromGui.length > 0) {
-      const seen = new Set<string>();
-      return fromGui.filter((r) => {
-        const key = r.id || `${r.x},${r.y},${r.width},${r.height},${r.text.trim()}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    }
-    const parsed = parseRegionalPrompt(this.positivePrompt);
-    return parsed.regions.map((region, index) => ({
-      id: `region-tag-${index}`,
-      shape: "box" as const,
-      text: region.text,
-      strength: 1,
-      x: region.x,
-      y: region.y,
-      width: region.width,
-      height: region.height,
-    }));
+    return familySupportsRegionalPrompting(this.regionalRunFacts());
   }
 
   private _storeReady = false;
@@ -2941,11 +2904,9 @@ class GenerationStore {
         if (saved.osNotifyOnlyWhenUnfocused !== undefined) this.osNotifyOnlyWhenUnfocused = saved.osNotifyOnlyWhenUnfocused;
         if (saved.manualSaveMode !== undefined) this.manualSaveMode = saved.manualSaveMode;
         if (saved.advancedMode !== undefined) this.advancedMode = saved.advancedMode;
+        if (saved.hideRecommendedParams !== undefined) this.hideRecommendedParams = saved.hideRecommendedParams;
         if (saved.resolutionLocked !== undefined) this.resolutionLocked = saved.resolutionLocked;
         if (Array.isArray(saved.autoSaveDirs)) this.autoSaveDirs = saved.autoSaveDirs;
-        if (saved.regionalPromptStrategy === "conditioning" || saved.regionalPromptStrategy === "inpaint_chain") {
-          this.regionalPromptStrategy = saved.regionalPromptStrategy;
-        }
         if (Array.isArray(saved.regionalPrompts)) {
           this.regionalPrompts = saved.regionalPrompts
             .filter((item: unknown) => !!item && typeof item === "object")
@@ -3110,10 +3071,10 @@ class GenerationStore {
         osNotifyOnlyWhenUnfocused: this.osNotifyOnlyWhenUnfocused,
         manualSaveMode: this.manualSaveMode,
         advancedMode: this.advancedMode,
-        resolutionLocked: this.resolutionLocked,
+                hideRecommendedParams: this.hideRecommendedParams,
+                resolutionLocked: this.resolutionLocked,
         autoSaveDirs: this.autoSaveDirs,
         regionalPrompts: this.regionalPrompts,
-        regionalPromptStrategy: this.regionalPromptStrategy,
         videoVariant: this.videoVariant,
         videoDurationSeconds: this.videoDurationSeconds,
         videoMegapixels: this.videoMegapixels,
@@ -3275,10 +3236,10 @@ class GenerationStore {
       osNotifyOnlyWhenUnfocused: this.osNotifyOnlyWhenUnfocused,
       manualSaveMode: this.manualSaveMode,
       advancedMode: this.advancedMode,
-      resolutionLocked: this.resolutionLocked,
+              hideRecommendedParams: this.hideRecommendedParams,
+              resolutionLocked: this.resolutionLocked,
       autoSaveDirs: this.autoSaveDirs,
       regionalPrompts: this.regionalPrompts,
-      regionalPromptStrategy: this.regionalPromptStrategy,
       modelFamilyOverrides: this.modelFamilyOverrides,
       videoVariant: this.videoVariant,
       videoDurationSeconds: this.videoDurationSeconds,
@@ -3758,10 +3719,11 @@ class GenerationStore {
       start: s.start,
       end: s.end,
     }));
+    // Regions are sent when this mode conditions on them. The chain passes the
+    // same regions to its own base pass, so a mask pass never loses them.
     const includeConditioningRegions =
       regionalPromptingSupported &&
-      (options.includeConditioningRegions ??
-        this.effectiveRegionalStrategy === "conditioning");
+      (options.includeConditioningRegions ?? this.supportsRegionalConditioning);
 
     const builtRegions = includeConditioningRegions
       ? parsedRegions.regions.map((region) => ({

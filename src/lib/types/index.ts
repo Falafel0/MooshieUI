@@ -57,9 +57,6 @@ export interface PositiveRegion {
 
 export type RegionalPromptShape = "box" | "circle" | "lasso";
 
-/** How regional prompts are applied in txt2img. Inpainting always uses conditioning. */
-export type RegionalPromptStrategy = "conditioning" | "inpaint_chain";
-
 export interface RegionalPromptPoint {
   x: number;
   y: number;

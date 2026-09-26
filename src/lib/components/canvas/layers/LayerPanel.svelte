@@ -4,6 +4,8 @@
   import LayerItem from "./LayerItem.svelte";
   import LayerProperties from "./LayerProperties.svelte";
   import { generation } from "../../../stores/generation.svelte.js";
+  import { editMaskPassOrder } from "../../../utils/inpaintingRegions.js";
+  import { resolveTint } from "../../../utils/layerTints.js";
   import { ArrowUp, ArrowDown, Copy, Trash2 } from "@lucide/svelte";
 
   let { oneditpatchy }: { oneditpatchy?: () => void } = $props();
@@ -16,7 +18,7 @@
   const maskLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "mask"));
   const regionLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "region"));
   const rasterLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "raster"));
-  const processingOrder = $derived(canvas.sortedLayers.filter((l) => l.type === 'mask' && l.visible && l.opacity > 0).reverse());
+  const processingOrder = $derived(editMaskPassOrder(canvas.sortedLayers));
   const activeType = $derived(canvas.activeLayer?.type ?? null);
   const canMoveUp = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "up") !== null : false);
   const canMoveDown = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "down") !== null : false);
@@ -52,6 +54,13 @@
       <span class="tabular-nums text-neutral-400">#1 → #{processingOrder.length}</span>
     </div>
   {/if}
+  <!-- How strongly the mask and region overlays are drawn. Display only: what a
+       run reads is each layer's own density. -->
+  <label class="flex h-6 items-center gap-2 rounded bg-neutral-950/50 px-2 text-[9px] text-neutral-500" title={locale.t('canvas.overlay_strength_tip')}>
+    <span class="shrink-0">{locale.t('canvas.overlay_strength')}</span>
+    <input type="range" min="0.1" max="1" step="0.05" value={canvas.maskOverlayOpacity} oninput={(event) => (canvas.maskOverlayOpacity = Number(event.currentTarget.value))} class="min-w-0 flex-1 accent-indigo-500" />
+    <span class="w-7 shrink-0 text-right tabular-nums text-neutral-400">{Math.round(canvas.maskOverlayOpacity * 100)}%</span>
+  </label>
   {#each groups as group (group.key)}
     <div>
       <!-- Group header -->
@@ -74,7 +83,7 @@
           >
             <polyline points="9 18 15 12 9 6" />
           </svg>
-          <span class="text-[11px] font-medium {activeType === group.key ? group.key === 'region' ? 'text-violet-300' : group.key === 'mask' ? 'text-rose-300' : 'text-sky-300' : 'text-neutral-500'}">
+          <span class="text-[11px] font-medium" style="color: {activeType === group.key ? resolveTint({ type: group.key }) : ''}">
             {locale.t(group.titleKey)}
           </span>
           <span class="px-1.5 rounded-full bg-neutral-800 text-[10px] text-neutral-400 tabular-nums">
@@ -95,6 +104,11 @@
 
       <!-- Group body -->
       {#if !collapsed[group.key]}
+        {#if group.key === "mask"}
+          <!-- Masks are the edits; regions only influence what happens inside
+               them. Saying it here, next to the layers, is where it matters. -->
+          <p class="mb-1 px-1 text-[10px] leading-relaxed text-neutral-500">{locale.t('canvas.regions_chain_hint')}</p>
+        {/if}
         <div class="space-y-0.5 mt-1">
           {#if group.layers.length > 0}
             {#each group.layers as layer (layer.id)}
@@ -110,7 +124,7 @@
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveUp || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'up')} aria-label={locale.t('canvas.move_up_title')} title={locale.t('canvas.move_up_title')}><ArrowUp size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveDown || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'down')} aria-label={locale.t('canvas.move_down_title')} title={locale.t('canvas.move_down_title')}><ArrowDown size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.duplicateLayer(canvas.activeLayerId)} aria-label={locale.t('canvas.duplicate')} title={locale.t('canvas.duplicate')}><Copy size={14} class="mx-auto" /></button>
-    <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-25" disabled={!canvas.activeLayerId || canvas.layers.length <= 1} onclick={() => canvas.activeLayerId && canvas.removeLayer(canvas.activeLayerId)} aria-label={locale.t('canvas.delete_layer')} title={locale.t('canvas.delete_layer')}><Trash2 size={14} class="mx-auto" /></button>
+    <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-25" disabled={!canvas.canDeleteActiveLayer} onclick={() => canvas.activeLayerId && canvas.removeLayer(canvas.activeLayerId)} aria-label={locale.t('canvas.delete_layer')} title={locale.t('canvas.delete_layer')}><Trash2 size={14} class="mx-auto" /></button>
   </div>
   <LayerProperties />
 </div>

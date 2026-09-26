@@ -1,6 +1,7 @@
 <script lang="ts">
   import { canvas } from "../../stores/canvas.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { resolveTint } from "../../utils/layerTints.js";
   const maskCount = $derived(canvas.layers.filter((layer) => layer.type === 'mask').length);
   const regionCount = $derived(canvas.layers.filter((layer) => layer.type === 'region').length);
 </script>
@@ -11,10 +12,10 @@
     {#if canvas.cursorPos}
       <span class="hidden shrink-0 tabular-nums sm:inline">X {Math.round(canvas.cursorPos.x)} · Y {Math.round(canvas.cursorPos.y)}</span>
     {/if}
-    <span class="shrink-0 text-rose-300/80">M {maskCount}</span>
-    <span class="shrink-0 text-violet-300/80">R {regionCount}</span>
+    <span class="shrink-0" style="color: {resolveTint({ type: 'mask' })}; opacity: 0.8">M {maskCount}</span>
+    <span class="shrink-0" style="color: {resolveTint({ type: 'region' })}; opacity: 0.8">R {regionCount}</span>
     {#if canvas.activeLayer}
-      <span class="h-1.5 w-1.5 shrink-0 rounded-full {canvas.activeLayer.type === 'region' ? 'bg-violet-400' : canvas.activeLayer.type === 'mask' ? 'bg-rose-400' : 'bg-sky-400'}"></span>
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full" style="background: {resolveTint(canvas.activeLayer)}"></span>
       <span class="truncate text-neutral-400">{canvas.activeLayer.name}</span>
     {/if}
   </div>

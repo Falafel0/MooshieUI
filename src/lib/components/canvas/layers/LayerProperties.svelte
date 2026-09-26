@@ -4,11 +4,16 @@
   import { locale } from "../../../stores/locale.svelte.js";
   import { canvasHistory } from "../../../stores/canvasHistory.svelte.js";
   import { grayscaleMaskBounds } from "../../../utils/canvasLayerExport.js";
+  import { LAYER_TINT_KEYS, LAYER_TINTS, resolveTint, resolveTintKey } from "../../../utils/layerTints.js";
   import InpaintSettings from "../InpaintSettings.svelte";
 
   const layer = $derived(canvas.activeLayer);
   const hasOwnSettings = $derived(!!layer?.inpaintSettings);
   const aspectLocked = $derived(layer?.inpaintAspectLocked !== false);
+  /** Masks and regions are drawn as overlays; a raster layer is the picture. */
+  const isOverlay = $derived(!!layer && layer.type !== "raster");
+  /** The denoise this mask's pass runs with, whichever side provides it. */
+  const effectiveDenoise = $derived((layer?.denoise ?? generation.denoise).toFixed(2));
   let opacityEditLayerId: string | null = null;
 
   function setOpacity(value: number) {
@@ -65,7 +70,7 @@
     <header class="flex h-8 items-center justify-between gap-2 border-b border-neutral-800 px-2">
       <span class="truncate text-xs font-medium text-neutral-200" title={layer.name}>{layer.name}</span>
       <div class="flex shrink-0 items-center gap-1">
-        <span class="rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide {layer.type === 'region' ? 'bg-violet-500/15 text-violet-300' : layer.type === 'mask' ? 'bg-rose-500/15 text-rose-300' : 'bg-sky-500/15 text-sky-300'}">
+        <span class="rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide" style="color: {resolveTint(layer)}; background: color-mix(in srgb, {resolveTint(layer)} 15%, transparent)">
           {locale.t(layer.type === 'region' ? 'canvas.type_region' : layer.type === 'mask' ? 'canvas.type_mask' : 'canvas.type_raster')}
         </span>
       </div>
@@ -73,10 +78,31 @@
 
     <div class="space-y-2 p-2">
       <label class="flex h-6 items-center gap-2 text-[10px] text-neutral-400">
-        <span class="shrink-0">{locale.t('canvas.opacity')}</span>
+        <span class="shrink-0" title={locale.t(isOverlay ? 'canvas.density_title' : 'canvas.opacity')}>{locale.t(isOverlay ? 'canvas.density' : 'canvas.opacity')}</span>
         <input type="range" value={layer.opacity} oninput={(event) => setOpacity(Number(event.currentTarget.value))} onpointerup={finishOpacityEdit} onkeyup={finishOpacityEdit} onblur={finishOpacityEdit} min="0" max="1" step="0.01" class="min-w-0 flex-1 accent-indigo-500" />
         <span class="w-8 shrink-0 text-right tabular-nums text-neutral-300">{Math.round(layer.opacity * 100)}%</span>
       </label>
+
+      {#if isOverlay}
+        <!-- A mask's and a region's opacity is how much of them applies, not how
+             see-through they are: say so, and colour the layer next to it. -->
+        <p class="text-[9px] leading-relaxed text-neutral-500">{locale.t(layer.type === 'mask' ? 'canvas.density_hint_mask' : 'canvas.density_hint_region')}</p>
+        <div class="flex items-center gap-1.5">
+          <span class="shrink-0 text-[10px] text-neutral-400">{locale.t('canvas.tint_label')}</span>
+          {#each LAYER_TINT_KEYS as key}
+            <button
+              type="button"
+              class="h-4 w-4 shrink-0 rounded-full {resolveTintKey(layer) === key ? 'ring-2 ring-neutral-300' : 'hover:ring-1 hover:ring-neutral-500'}"
+              style="background: {LAYER_TINTS[key]}"
+              aria-label={locale.t('canvas.tint_swatch', { name: key })}
+              aria-pressed={resolveTintKey(layer) === key}
+              title={key}
+              onclick={() => canvas.setLayerTint(layer.id, key)}
+            ></button>
+          {/each}
+        </div>
+        <p class="text-[9px] leading-relaxed text-neutral-500">{locale.t('canvas.tint_note')}</p>
+      {/if}
 
       {#if layer.locked || !layer.visible}
         <p class="rounded bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">{locale.t(layer.locked ? 'canvas.state_locked' : 'canvas.state_hidden')}</p>
@@ -133,18 +159,19 @@
               <input type="range" min="0" max="64" step="1" value={layer.maskGrow ?? generation.growMaskBy} oninput={(event) => canvas.updateLayerGeneration(layer.id, { maskGrow: Number(event.currentTarget.value) })} class="w-full accent-indigo-500" />
             </label>
             {#if layer.type === 'mask'}
-              <label class="block text-[10px] text-neutral-400">
-                {locale.t('canvas.layer_prompt')}
-                <textarea rows="2" value={layer.positivePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { positivePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500"></textarea>
-              </label>
-              <label class="block text-[10px] text-neutral-400">
-                {locale.t('canvas.layer_negative_prompt')}
-                <textarea rows="1" value={layer.negativePrompt ?? ''} oninput={(event) => canvas.updateLayerGeneration(layer.id, { negativePrompt: event.currentTarget.value })} placeholder={locale.t('canvas.layer_prompt_optional')} class="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-950 p-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500"></textarea>
-              </label>
+              <p class="rounded bg-rose-500/10 px-2 py-1.5 text-[9px] leading-relaxed text-rose-200/80">{locale.t('canvas.mask_prompt_note')}</p>
               <label class="block text-[10px] text-neutral-400">
                 {locale.t('generation.image.denoise')} <span class="float-right tabular-nums text-neutral-300">{(layer.denoise ?? generation.denoise).toFixed(2)}</span>
                 <input type="range" min="0" max="1" step="0.01" value={layer.denoise ?? generation.denoise} oninput={(event) => canvas.updateLayerGeneration(layer.id, { denoise: Number(event.currentTarget.value) })} class="w-full accent-indigo-500" />
               </label>
+              <label class="flex items-center justify-between gap-2 text-[10px] text-neutral-400">
+                <span class="leading-tight">{locale.t('canvas.mask_density_denoise')}</span>
+                <input type="checkbox" checked={!!layer.densityDenoise} onchange={(event) => canvas.setLayerDensityDenoise(layer.id, event.currentTarget.checked)} class="accent-indigo-500" />
+              </label>
+              <p class="text-[9px] leading-relaxed text-neutral-500">{locale.t(layer.densityDenoise ? 'canvas.mask_density_on_note' : 'canvas.mask_density_off_note')}</p>
+              <p class="rounded px-2 py-1 text-[9px] leading-relaxed {layer.densityDenoise ? 'bg-indigo-500/10 text-indigo-200/80' : 'bg-neutral-800/60 text-neutral-400'}">
+                {locale.t(layer.densityDenoise ? 'canvas.mask_density_range' : 'canvas.mask_density_flat', { value: effectiveDenoise })}
+              </p>
             {/if}
             <details class="rounded border border-neutral-800 bg-neutral-950/40 p-1.5">
               <summary class="cursor-pointer text-[10px] text-neutral-300">

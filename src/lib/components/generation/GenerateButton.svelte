@@ -19,9 +19,9 @@
   import { estimateCurrentNovelAiCost } from "../../utils/novelaiCurrentCost.js";
   import { promptPresets } from "../../stores/promptPresets.svelte.js";
   import { isBrowserMode } from "../../utils/ipc.js";
-  import type { GenerationParams } from "../../types/index.js";
+  import type { GenerationParams, RegionalPromptSelection } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
-  import { getRegionalChainRegions, hasSequentialInpaintRegionMask, prepareInpaintConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
+  import { getRegionalChainRegions, prepareConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -118,17 +118,17 @@
     );
   }
 
+  /** Sequential edit passes: the inpaint workspace's own mechanism, driven by
+   * mask layers. A prompt region is influence, not an edit, so it never starts
+   * a run of passes — for any mode. */
+  function usesSequentialEditMasks(): boolean {
+    return generation.supportsSequentialEditMasks && getRegionalChainRegions().length > 0;
+  }
+
   function isSequentialGenerateRun(): boolean {
     if (compare.active && compare.cellCount > 1) return true;
     if (orderedWildcardRunCount > 1) return true;
-    const regionalPromptingSupported = generation.supportsRegionalPrompting;
-    const useRegionalInpaintChain =
-      (generation.mode === "inpainting" && !generation.isNovelAi && getRegionalChainRegions().length > 0) ||
-      (regionalPromptingSupported && generation.effectiveRegionalStrategy === "inpaint_chain");
-    if (useRegionalInpaintChain) {
-      return getRegionalChainRegions().length > 0;
-    }
-    return false;
+    return usesSequentialEditMasks();
   }
 
   async function handleEditPausedImage() {
@@ -179,7 +179,7 @@
     }
 
     try {
-      let inpaintConditioningRegions: InpaintConditioningRegion[] = [];
+      let inpaintConditioningRegions: RegionalPromptSelection[] = [];
       // Continuing a paused run: the remaining steps sample from the paused
       // latent with the current prompt, CFG, sampler and LoRAs. Grid, ordered
       // wildcard and regional chains all start fresh images, so they do not
@@ -236,13 +236,10 @@
         return;
       }
 
-      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && (
-        layer.type === "region" ||
-        (layer.type === "mask" && (!!layer.positivePrompt?.trim() || !!layer.negativePrompt?.trim()))
-      ));
+      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && layer.type === "region");
       if (generation.mode === "inpainting" &&
           !generation.supportsRegionalConditioning &&
-          !generation.supportsRegionalInpaintChain &&
+          !generation.supportsSequentialEditMasks &&
           hasSpatialPromptLayers) {
         throw new Error(locale.t("canvas.regions_supported"));
       }
@@ -255,8 +252,14 @@
           () => canvasEditorRef.getRasterComposite(),
           () => canvasEditorRef.getMaskCanvas()
         );
-        if (generation.mode === "inpainting" && generation.supportsRegionalConditioning) {
-          inpaintConditioningRegions = await prepareInpaintConditioningRegions();
+        if (generation.supportsRegionalConditioning && canvas.isCanvasMode) {
+          // Painted regions condition this run the same way they condition an
+          // inpaint pass; in text-to-image they join the regions written in the
+          // prompt bar instead of replacing them.
+          const paintedRegions = await prepareConditioningRegions();
+          inpaintConditioningRegions = generation.mode === "inpainting"
+            ? paintedRegions
+            : [...paintedRegions, ...generation.regionalPrompts];
         }
       }
 
@@ -270,9 +273,9 @@
           errorMsg = locale.t('generation.error_no_image');
           return;
         }
-        // Anima's prompt regions are sequential edit masks. They are uploaded
-        // by the chain, not by the document's ordinary mask export.
-        if (!generation.maskImage && !hasSequentialInpaintRegionMask()) {
+        // A prompt region is influence only — it does not permit pixel edits —
+        // so an inpaint run still needs a mask layer of its own.
+        if (!generation.maskImage) {
           errorMsg = locale.t('generation.error_no_mask');
           return;
         }
@@ -322,9 +325,7 @@
       const regionalPromptingSupported = generation.supportsRegionalPrompting;
       if (initialCancellationEpoch !== cancellationEpoch || generation.mode !== initialMode ||
           (initialMode === 'inpainting' && canvas.inpaintSourceVersion !== initialSourceVersion)) return;
-      const useRegionalInpaintChain =
-        (generation.mode === "inpainting" && !generation.isNovelAi && getRegionalChainRegions().length > 0) ||
-        (regionalPromptingSupported && generation.effectiveRegionalStrategy === "inpaint_chain");
+      const useRegionalInpaintChain = usesSequentialEditMasks();
       const validRegions = useRegionalInpaintChain
         ? getRegionalChainRegions()
         : (generation.mode === "inpainting" ? [] : generation.regionalPrompts).filter(
@@ -355,8 +356,10 @@
         generation.outputFormat,
         "output_bit_depth:",
         generation.outputBitDepth,
-        "regional:",
-        generation.effectiveRegionalStrategy,
+        "regional_conditioning:",
+        generation.supportsRegionalConditioning,
+        "sequential_edit_masks:",
+        generation.supportsSequentialEditMasks,
       );
       generation.saveCurrentPromptToHistory();
 
@@ -425,7 +428,9 @@
         }
       } else {
         const params = generation.toParams({
-          regionalSelectionsOverride: generation.mode === "inpainting"
+          // Painted regions condition text-to-image as well; the list already
+          // carries the prompt bar's own regions alongside them.
+          regionalSelectionsOverride: inpaintConditioningRegions.length > 0
             ? inpaintConditioningRegions
             : undefined,
         });

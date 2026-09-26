@@ -7,6 +7,7 @@ import { captureLayer, maskToGrayscale } from "../utils/canvasLayerExport.js";
 import type { InpaintSettings } from "../utils/inpaintSettings.js";
 import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
 import { processMaskCoverage } from "../utils/maskProcessing.js";
+import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform" | "canvasResize";
@@ -23,6 +24,9 @@ export interface CanvasLayer {
   visible: boolean;
   opacity: number;
   locked: boolean;
+  /** Cosmetic tint key from `layerTints.ts`. Display only: generation never
+   * reads it, so recolouring a mask or a region cannot change a run. */
+  tint?: string;
   /** Whether generation-context guides are shown when this layer is selected. */
   showContext?: boolean;
   order: number;
@@ -32,6 +36,10 @@ export interface CanvasLayer {
   positivePrompt?: string;
   negativePrompt?: string;
   denoise?: number;
+  /** A mask whose density decides its own denoise: the painted core edits
+   * strongly and the fringes fade out, instead of the whole mask running one
+   * uniform denoise. */
+  densityDenoise?: boolean;
   maskGrow?: number;
   inpaintWidth?: number;
   inpaintHeight?: number;
@@ -146,7 +154,9 @@ class CanvasStore {
   boundingBox = $state<BoundingBox>({ x: 0, y: 0, width: 1024, height: 1024, locked: false });
 
   // Mask overlay
-  maskOverlayColor = $state("#ff3333");
+  /** Overlay strength for the canvas only: how strongly masks and regions are
+   * drawn over the picture. Display only — a layer's own opacity is what the
+   * run reads. */
   maskOverlayOpacity = $state(0.45);
   maskOverlayVisible = $state(true);
   showLayerContext = $state(true);
@@ -247,7 +257,16 @@ class CanvasStore {
   }
 
   // Tools
+  /** The eyedropper paints the brush colour, and only a raster layer is drawn
+   * in that colour: a mask or a region draws in its own tint, so picking a
+   * colour for one would look like nothing happened. One rule, asked by both
+   * the toolbar and the keyboard. */
+  get canPickColor(): boolean {
+    return this.activeLayer?.type === "raster";
+  }
+
   setTool(tool: ToolType) {
+    if (tool === "eyedropper" && !this.canPickColor) return;
     if (tool !== this.activeTool) {
       this.previousTool = this.activeTool;
       this.activeTool = tool;
@@ -868,6 +887,10 @@ class CanvasStore {
     const sourceNodes = sourceLayer.getChildren?.() ?? [];
     if (!sourceNodes.length) return false;
 
+    // The strokes arrive as this mask's own overlay colour, so what lands in
+    // the mask is drawn exactly like the rest of it.
+    const tint = resolveTint(maskLayerMeta);
+
     for (const node of sourceNodes) {
       const gco = node.globalCompositeOperation?.();
       if (gco === "destination-out") continue;
@@ -879,10 +902,10 @@ class CanvasStore {
       clone.opacity?.(1);
 
       if (clone.stroke && typeof clone.stroke === "function") {
-        clone.stroke(this.maskOverlayColor);
+        clone.stroke(tint);
       }
       if (clone.fill && typeof clone.fill === "function") {
-        clone.fill(this.maskOverlayColor);
+        clone.fill(tint);
       }
 
       maskLayer.add(clone);
@@ -947,6 +970,11 @@ class CanvasStore {
 
   updateLayerRegion(id: string, patch: { regionalPrompt?: string; regionalNegativePrompt?: string; regionalStrength?: number }) {
     this.layers = this.layers.map((layer) => layer.id === id && layer.type === "region" ? { ...layer, ...patch } : layer);
+  }
+
+  /** One rule for "can this layer go away": the last layer is the document. */
+  get canDeleteActiveLayer(): boolean {
+    return !!this.activeLayerId && this.layers.length > 1;
   }
 
   removeLayer(id: string) {
@@ -1040,9 +1068,31 @@ class CanvasStore {
 
   setLayerOpacity(id: string, opacity: number, recordHistory = true) {
     const layer = this.layers.find((item) => item.id === id);
-    if (!layer || layer.opacity === opacity) return;
+    // The slider stays inside 0..1; the store cannot assume its caller does.
+    const next = Math.max(0, Math.min(1, opacity));
+    if (!layer || layer.opacity === next) return;
     if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
-    this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity } : l));
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity: next } : l));
+  }
+
+  /** Whether this mask's density drives its denoise per pixel. Stored as
+   * undefined when off, so a layer that never used it stays as it was. */
+  setLayerDensityDenoise(id: string, enabled: boolean) {
+    const layer = this.layers.find((item) => item.id === id && item.type === "mask");
+    if (!layer || !!layer.densityDenoise === enabled) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map((l) =>
+      l.id === id ? { ...l, densityDenoise: enabled ? true : undefined } : l
+    );
+  }
+
+  /** Cosmetic: which palette colour this mask or region is drawn with. A raster
+   * layer is the picture itself, so it has no overlay tint to choose. */
+  setLayerTint(id: string, tint: string) {
+    const layer = this.layers.find((item) => item.id === id);
+    if (!layer || layer.type === "raster" || layer.tint === tint) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, tint } : l));
   }
 
   toggleLayerLock(id: string) {
@@ -1070,7 +1120,7 @@ class CanvasStore {
     const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === meta?.id);
     if (!meta || !node || meta.locked || !meta.visible || this.selectedWorkspaceSection !== 'layers') return;
     node.add(new Konva.Rect({ x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight,
-      fill: isMaskLayer(meta) ? this.maskOverlayColor : this.foregroundColor,
+      fill: isMaskLayer(meta) ? resolveTint(meta) : this.foregroundColor,
       opacity: this.brushSettings.opacity, listening: false }));
     node.batchDraw();
   }
@@ -1104,12 +1154,12 @@ class CanvasStore {
       inpaintHeight: enabled ? (layer.inpaintHeight ?? generation.height) : undefined,
       inpaintAspectLocked: enabled ? (layer.inpaintAspectLocked ?? true) : undefined,
       denoise: enabled && layer.type === "mask" ? generation.denoise : undefined,
-      positivePrompt: enabled && layer.type === "mask" ? (layer.positivePrompt ?? "") : undefined,
-      negativePrompt: enabled && layer.type === "mask" ? (layer.negativePrompt ?? "") : undefined,
     } : layer);
   }
 
-  updateLayerGeneration(id: string, patch: { positivePrompt?: string; negativePrompt?: string; denoise?: number; maskGrow?: number }) {
+  /** A mask defines the denoise and the mask settings. Prompts belong to regions
+   * and to the document, never to a mask. */
+  updateLayerGeneration(id: string, patch: { denoise?: number; maskGrow?: number }) {
     this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? { ...layer, ...patch } : layer);
   }
 

@@ -7,6 +7,7 @@ import type { MusicTranscript } from "./musicReview.js";
 import type { MusicLinkCapabilities, MusicLinkImport } from "./musicLink.js";
 import type { ReferenceSong, MusicReferenceContext } from "../types/music.js";
 import type { AudioStyleCapabilities, AudioStyleTarget, AudioStyleStatus } from "./musicAudioStyle.js";
+import type { UserPrefsData } from "./serverPrefs.js";
 
 export function getMusicAudioStyleCapabilities(): Promise<AudioStyleCapabilities> {
   return ipcInvoke("get_music_audio_style_capabilities");
@@ -504,6 +505,50 @@ export async function installPatchy(): Promise<string> {
 /** Close the editor MooshieUI started. False when there was none. */
 export async function stopPatchy(): Promise<boolean> {
   return ipcInvoke<boolean>("stop_patchy");
+}
+
+// ---------------------------------------------------------------------------
+// Projects (desktop only)
+//
+// A project is a named snapshot of the local state the frontend already
+// collects for preference sync, stored as one JSON file per project under the
+// app data directory. The record is opaque to the backend: it stores and
+// returns whatever `prefsSync.collectAll()` produced, and the frontend decides
+// what applying it means.
+// ---------------------------------------------------------------------------
+
+/** A stored project snapshot. Field names match the Rust record (camelCase). */
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  description: string;
+  /** RFC 3339. Set on first save and preserved by later saves. */
+  createdAt: string;
+  /** RFC 3339. Refreshed on every save. */
+  updatedAt: string;
+  thumbnail: string | null;
+  /** Opaque `UserPrefsData` snapshot produced by `prefsSync.collectAll()`. */
+  data: UserPrefsData;
+}
+
+/** Every stored project, newest first. */
+export async function listProjects(): Promise<ProjectRecord[]> {
+  return ipcInvoke<ProjectRecord[]>("list_projects");
+}
+
+/** Create or overwrite a project and return the stored record. */
+export async function saveProject(project: ProjectRecord): Promise<ProjectRecord> {
+  return ipcInvoke<ProjectRecord>("save_project", { project });
+}
+
+/** Load one project by id. */
+export async function loadProject(id: string): Promise<ProjectRecord> {
+  return ipcInvoke<ProjectRecord>("load_project", { id });
+}
+
+/** Delete one project by id. Idempotent: a stale id is not an error. */
+export async function deleteProject(id: string): Promise<void> {
+  return ipcInvoke<void>("delete_project", { id });
 }
 
 export async function findModelByHash(

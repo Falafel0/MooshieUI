@@ -41,6 +41,24 @@ test('inpainting starts with uploaded base, preserves order, and saves only fina
 test('txt2img retains its base pass',async()=>{const {calls,callbacks,regions}=setup('txt2img');await runRegionalInpaintChain(regions,callbacks);assert.equal(calls.length,3);assert.equal(calls[0].ctx.phase,'base');assert.equal(calls[1].ctx.index,1);});
 test('ordinary masks may omit local prompts',async()=>{const {calls,callbacks,regions}=setup();regions[0].text='';await runRegionalInpaintChain(regions,callbacks);assert.equal(calls.length,2);});
 test('ordinary empty masks are skipped and keep layer denoise',async()=>{const {calls,callbacks,regions}=setup();fixture.canvas.exportMaskLayer=id=>id==='a'?null:[1];regions[1].denoise=.42;await runRegionalInpaintChain(regions,callbacks);assert.equal(calls.length,1);assert.equal(calls[0].params.denoise,.42);});
+
+test('a mask whose density sets the denoise asks for a per-pixel denoise',async()=>{
+  const {calls,callbacks,regions}=setup();
+  const plain=await (async()=>{await runRegionalInpaintChain(regions,callbacks);return calls.map(c=>c.params.differential_diffusion);})();
+  assert.deepEqual(plain,[false,false],'a plain mask keeps one uniform denoise');
+  calls.length=0;
+  regions[1].densityDenoise=true;regions[1].denoise=.42;
+  await runRegionalInpaintChain(regions,callbacks);
+  assert.deepEqual(calls.map(c=>c.params.differential_diffusion),[false,true],'only the density mask scales by its own pixels');
+  assert.equal(calls[1].params.denoise,.42,'the density mask keeps its own denoise as the ceiling');
+});
+
+test('an Anima run keeps the per-pixel denoise every pass already had',async()=>{
+  const {calls,callbacks,regions}=setup();
+  fixture.generation.isAnima=true;
+  await runRegionalInpaintChain(regions,callbacks);
+  assert.deepEqual(calls.map(c=>c.params.differential_diffusion),[true,true]);
+});
 test('mask passes keep global negative prompt because local negative is spatial conditioning',async()=>{const {calls,callbacks,regions}=setup();regions[0].negativePrompt='blurry';await runRegionalInpaintChain(regions,callbacks);assert.equal(calls[0].params.negative_prompt,'global bad');assert.equal(calls[1].params.negative_prompt,'global bad');});
 test('Anima inpaint regions use sequential local prompts instead of unsupported conditioning',async()=>{const {calls,callbacks,regions}=setup();fixture.generation.isAnima=true;fixture.generation.supportsRegionalConditioning=false;regions[0].text='red hair';regions[0].negativePrompt='blue hair';await runRegionalInpaintChain(regions,callbacks);assert.match(calls[0].params.positive_prompt,/red hair/);assert.match(calls[0].params.negative_prompt,/blue hair/);assert.deepEqual(calls[0].params.positive_regions,[]);});
 test('each mask keeps its own sampling resolution while the document size stays fixed',async()=>{const {calls,callbacks,regions}=setup();regions[0].inpaintWidth=768;regions[0].inpaintHeight=512;regions[1].inpaintWidth=1024;regions[1].inpaintHeight=1024;await runRegionalInpaintChain(regions,callbacks);assert.deepEqual(calls.map(({params})=>[params.width,params.height,params.inpaint_target_width,params.inpaint_target_height]),[[64,64,768,512],[64,64,1024,1024]]);});

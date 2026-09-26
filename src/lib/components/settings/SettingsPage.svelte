@@ -20,6 +20,7 @@
   import ModelRequestsPanel from "./ModelRequestsPanel.svelte";
   import QualityTagsEditor from "./QualityTagsEditor.svelte";
   import LlmProviderPanel from "./LlmProviderPanel.svelte";
+  import ProjectsSection from "./ProjectsSection.svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, authHeaders, clearAuthToken } from "../../utils/ipc.js";
   import { requestOsNotificationPermission } from "../../utils/osNotify.js";
   import { useMobileLayout, isMobileUA, setForceDesktopOverride } from "../../utils/device.js";
@@ -1158,6 +1159,7 @@
     { key: "prompt_assistant", labelKey: "settings.sections.prompt_assistant", keywords: "llm prompt enhance compose model gguf ai assistant" },
     { key: "civitai", labelKey: "settings.sections.civitai", keywords: "civitai api key metadata model hub image fetch download authentication" },
     { key: "monbooru", labelKey: "monbooru.title", keywords: "monbooru booru self-hosted gallery server url token api key gallery artist browse import export library" },
+    { key: "projects", labelKey: "settings.sections.projects", keywords: "projects project workspace snapshot named save load switch local state presets history" },
     { key: "novelai", labelKey: "settings.sections.novelai", keywords: "novelai nai api key anlas opus subscription cloud remote generation persistent token allowance balance usage show" },
     { key: "queue", labelKey: "settings.sections.queue", keywords: "queue position pending running cancel clear jobs users order wait" },
     { key: "account", labelKey: "settings.account", keywords: "account password username display name login logout users lan accounts admin moderator role security migration" },
@@ -1185,6 +1187,9 @@
       case "civitai": return canManageServer;
       // NovelAI is per-account now: every user manages their own key.
       case "novelai": return true;
+      // Projects are snapshots on the machine running the app, and only the
+      // desktop build ships the commands that read and write them.
+      case "projects": return !isBrowserMode;
       case "account": return isBrowserMode && (!isAdmin || usesLegacyPassword);
       case "developer": return generation.devModeUnlocked;
       default: return true;
@@ -3131,6 +3136,23 @@
             </div>
           </div>
 
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="hide-recommended-params"
+              checked={generation.hideRecommendedParams}
+              onchange={(e) => {
+                generation.hideRecommendedParams = (e.target as HTMLInputElement).checked;
+                generation.saveSettings();
+              }}
+              class="w-4 h-4 mt-0.5 accent-indigo-500 rounded"
+            />
+            <div>
+              <label for="hide-recommended-params" class="text-sm text-neutral-200">{locale.t('settings.hide_recommendations.label')}</label>
+              <p class="text-[10px] text-neutral-500 mt-0.5">{locale.t('settings.hide_recommendations.desc')}</p>
+            </div>
+          </div>
+
           {#if generation.autoQualityTags}
           <div class="flex items-start gap-3">
             <input
@@ -4281,6 +4303,11 @@
             </div>
           </section>
           {/if}
+        {/if}
+
+        <!-- Projects: named snapshots of the app's local state (desktop only) -->
+        {#if activeCategory === "projects"}
+        <ProjectsSection />
         {/if}
 
         <!-- NovelAI (per-account key) -->
