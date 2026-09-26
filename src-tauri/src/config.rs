@@ -697,6 +697,19 @@ pub(crate) fn preserve_secrets(incoming: &mut AppConfig, current: &AppConfig) {
             .novelai_api_key
             .clone_from(&current.novelai_api_key);
     }
+    // Same reasoning again for the CivitAI key: `config_to_client_json` blanks
+    // it and reports `civitai_api_key_configured` instead, so the snapshot an
+    // autosave sends back is always empty and must not be read as "clear it".
+    // Clearing goes through the CivitAI key field itself.
+    if incoming
+        .civitai_api_key
+        .as_deref()
+        .is_none_or(|k| k.trim().is_empty())
+    {
+        incoming
+            .civitai_api_key
+            .clone_from(&current.civitai_api_key);
+    }
     // Same reasoning as the NovelAI key: the monbooru token is stripped from
     // every config the frontend receives and replaced with a boolean, so the
     // snapshot an autosave sends back can never contain it. Without this
@@ -762,6 +775,68 @@ mod tests {
         preserve_secrets(&mut incoming, &current);
 
         assert_eq!(incoming.monbooru_api_token.as_deref(), Some("stored-token"));
+    }
+
+    /// Regression guard for the CivitAI key: `config_to_client_json` blanks it
+    /// and reports `civitai_api_key_configured` instead, so every config the UI
+    /// holds has an empty key. Without the carry-forward, saving any unrelated
+    /// setting — or anything that round-trips a full config — erased it.
+    #[test]
+    fn blanked_civitai_key_is_carried_forward() {
+        let current = AppConfig {
+            civitai_api_key: Some("stored-civitai-key".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig::default();
+        assert!(incoming.civitai_api_key.is_none());
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("stored-civitai-key")
+        );
+    }
+
+    /// A key the user actually typed must win, otherwise the field could never
+    /// be set through a full-config save.
+    #[test]
+    fn a_new_civitai_key_replaces_the_stored_one() {
+        let current = AppConfig {
+            civitai_api_key: Some("stored-civitai-key".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig {
+            civitai_api_key: Some("typed-civitai-key".to_string()),
+            ..AppConfig::default()
+        };
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("typed-civitai-key")
+        );
+    }
+
+    /// Whitespace is not a key: it is the same stale echo as an empty string.
+    #[test]
+    fn a_whitespace_civitai_key_does_not_clear_a_stored_one() {
+        let current = AppConfig {
+            civitai_api_key: Some("stored-civitai-key".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig {
+            civitai_api_key: Some("   ".to_string()),
+            ..AppConfig::default()
+        };
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(
+            incoming.civitai_api_key.as_deref(),
+            Some("stored-civitai-key")
+        );
     }
 
     /// A non-empty incoming token is a real change, so it must win over the
