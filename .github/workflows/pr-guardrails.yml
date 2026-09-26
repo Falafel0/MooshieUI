@@ -59,7 +59,7 @@ jobs:
         run: python3 -m unittest discover -s scripts -p test_release_artifacts.py
 
       - name: Inpainting lifecycle and mask regression checks
-        run: node --test tests/generation-submit.test.mjs tests/inpaint-result-registry.test.mjs tests/inpainting-chain.test.mjs tests/mask-processing.test.mjs tests/inpaint-compare-pair.test.mjs tests/patchy-mask-import.test.mjs tests/patchy-ux-copy.test.mjs tests/patchy-handoff-effect.test.mjs tests/tauri-wrapper.test.mjs tests/projects-ui.test.mjs tests/regional-mode-separation.test.mjs tests/layer-visualization.test.mjs tests/canvas-transform.test.mjs tests/canvas-render-hotpaths.test.mjs tests/thumbnail-caching.test.mjs tests/project-guard-reach.test.mjs tests/project-document.test.mjs tests/project-system.test.mjs tests/monbooru-server-ui.test.mjs
+        run: node --test tests/patchy-return-script.test.mjs tests/live-preview-source.test.mjs tests/generation-submit.test.mjs tests/inpaint-result-registry.test.mjs tests/inpainting-chain.test.mjs tests/mask-processing.test.mjs tests/inpaint-compare-pair.test.mjs tests/patchy-mask-import.test.mjs tests/patchy-ux-copy.test.mjs tests/patchy-handoff-effect.test.mjs tests/tauri-wrapper.test.mjs tests/projects-ui.test.mjs tests/regional-mode-separation.test.mjs tests/layer-visualization.test.mjs tests/canvas-transform.test.mjs tests/canvas-render-hotpaths.test.mjs tests/thumbnail-caching.test.mjs tests/project-guard-reach.test.mjs tests/project-document.test.mjs tests/project-system.test.mjs
 
       - name: Compute changed files
         run: |

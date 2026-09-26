@@ -12,7 +12,6 @@
   import CompareViewer from "./lib/components/gallery/CompareViewer.svelte";
   import ModelHubPage from "./lib/components/modelhub/ModelHubPage.svelte";
   import { ArtistGalleryPage } from "./lib/artist-gallery/index.js";
-  import { MonbooruPage } from "./lib/monbooru/index.js";
   import { connection } from "./lib/stores/connection.svelte.js";
   import { startup } from "./lib/stores/startup.svelte.js";
   import { progress } from "./lib/stores/progress.svelte.js";
@@ -185,7 +184,7 @@
   const FETCH_TIMEOUT_MS = 45_000;
   const GENERATION_DONE_TOAST_VISIBLE_MS = 6_000;
   const GENERATION_DONE_TOAST_EXIT_MS = 220;
-  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "monbooru" | "settings";
+  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "settings";
   type GenerationDoneToast = {
     id: number;
     imageUrl: string;
@@ -3609,8 +3608,7 @@
     };
     window.addEventListener("mooshie:model-preview-action", modelPreviewActionHandler);
 
-    // Settings asked for by another view (the monbooru tab's "open settings"
-    // action is the one caller). The settings page is conditionally mounted, so
+    // Settings asked for by another view. The settings page is conditionally mounted, so
     // the requested section travels down as a prop instead of a second listener
     // on that page, which would miss an event fired as it mounts.
     settingsRequestHandler = (event: Event) => {
@@ -4053,29 +4051,6 @@
         ><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-7 8-7s8 3 8 7" /></svg
       >
     </button>
-    <button
-      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
-      'monbooru'
-        ? 'bg-indigo-600 text-white'
-        : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
-      onclick={() => (currentPage = "monbooru")}
-      title={locale.t("monbooru.title")}
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        class="w-4.5 h-4.5"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        ><rect x="3" y="4" width="18" height="14" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path
-          d="m4 17 5-5 3 3 3-2 5 4"
-        /></svg
-      >
-    </button>
-
     <div class="flex-1"></div>
 
     <div class="relative mx-auto">
@@ -4309,17 +4284,6 @@
         oninsertCharacter={handleCharacterInsert}
         ongeneratePreview={handleArtistGeneratePreview}
         previewStatus={artistPreviewStatus}
-      />
-    {:else if currentPage === "monbooru"}
-      <!-- monbooru library (artists + images) and MooshieUI's Prompt Arena.
-           Tag insertion is left to the page, which uses the app's shared
-           insert path; character macros land on the artists page, where the
-           character explorer is a tab. -->
-      <MonbooruPage
-        onsettings={() => (currentPage = "settings")}
-        ongenerate={() => (currentPage = "generate")}
-        onopenArtist={() => (currentPage = "artists")}
-        onopenCharacter={() => (currentPage = "artists")}
       />
     {:else if currentPage === "settings"}
       <SettingsPage {userRole} section={settingsSection} />

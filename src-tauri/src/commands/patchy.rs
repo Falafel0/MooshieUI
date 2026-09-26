@@ -27,7 +27,7 @@
 //! export as "not saved yet" while the user's work sits in the PSD beside it,
 //! which is the failure the read step exists to close: a layered save written
 //! at or after the hand-off is flattened through Patchy itself
-//! (`--headless --export <png> <layered>`, unattended) and returned as the
+//! (a headless script using `doc.exportAs` on the layered document) and returned as the
 //! result.
 
 use std::path::{Path, PathBuf};
@@ -210,7 +210,7 @@ fn managed_version(executable: &Path) -> Option<String> {
 // --- document storage -----------------------------------------------------
 
 /// Directory holding Patchy hand-off documents, creating it if needed.
-fn documents_dir() -> Result<PathBuf, AppError> {
+pub(super) fn documents_dir() -> Result<PathBuf, AppError> {
     let base = crate::config::app_data_dir()
         .ok_or_else(|| AppError::Other("Failed to determine app data directory".to_string()))?;
     let dir = base.join(DOCUMENTS_SUBDIR);
@@ -431,10 +431,9 @@ fn prune_documents(dir: &Path, now: SystemTime, ttl: Duration, keep_newest: usiz
 
 /// Flatten a layered save through Patchy itself, into `output`.
 ///
-/// `--headless --export <png> <layered>` is the editor's own unattended "open,
-/// save as, exit" mode: prompts are suppressed, no running instance is reused,
-/// and it exits once the PNG is written. Nothing the editor prints can reach the
-/// app (stdio is null) and the wait is bounded.
+/// The script calls Patchy's documented `doc.exportAs` API. A headless run
+/// never reuses an existing GUI instance and has a bounded wait. The script
+/// output gives a concrete error if Patchy cannot open or export the document.
 fn flatten_layered_document(
     executable: &Path,
     layered: &Path,
@@ -445,10 +444,25 @@ fn flatten_layered_document(
     if output.exists() {
         std::fs::remove_file(output)?;
     }
+    // Each hand-off has its own script path so simultaneous imports do not
+    // overwrite a script while another headless Patchy process is reading it.
+    let script = output.with_extension("export.js");
+    std::fs::write(
+        &script,
+        include_str!("../../resources/patchy/mooshieui-export.js"),
+    )?;
+    let log = output.with_extension("patchy-log");
+    if log.exists() {
+        std::fs::remove_file(&log)?;
+    }
     let mut child = Command::new(executable)
         .arg("--headless")
-        .arg("--export")
-        .arg(output)
+        .arg("--run-script")
+        .arg(&script)
+        .arg("--script-output")
+        .arg(&log)
+        .arg("--script-arg")
+        .arg(format!("out={}", output.display()))
         .arg(layered)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -483,9 +497,10 @@ fn flatten_layered_document(
 
     if !status.success() || !output.exists() {
         return Err(AppError::Other(format!(
-            "Patchy export failed (status {}) for {}",
+            "Patchy export failed (status {}) for {}: {}",
             status,
-            layered.display()
+            layered.display(),
+            std::fs::read_to_string(&log).unwrap_or_default().trim()
         )));
     }
     let bytes = std::fs::read(output)?;
@@ -666,6 +681,7 @@ pub async fn launch_patchy(
     let mut command = Command::new(&executable);
     // No document means "just open the editor", which is what auto-start does.
     if let Some(path) = document_path.as_deref() {
+        super::patchy_live::install_return_script(Path::new(path))?;
         command.arg(path);
     }
     let child = command

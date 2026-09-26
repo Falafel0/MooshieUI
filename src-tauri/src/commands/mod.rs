@@ -4,7 +4,6 @@ pub mod config;
 #[cfg(feature = "desktop")]
 pub mod interrogator;
 #[cfg(feature = "desktop")]
-pub mod monbooru;
 pub mod music;
 pub mod music_audio_style;
 pub mod music_cover;
@@ -15,6 +14,8 @@ pub mod music_review;
 pub mod novelai;
 #[cfg(feature = "desktop")]
 pub mod patchy;
+#[cfg(feature = "desktop")]
+pub mod patchy_live;
 #[cfg(feature = "desktop")]
 pub mod projects;
 #[cfg(feature = "desktop")]

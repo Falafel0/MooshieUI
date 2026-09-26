@@ -5,12 +5,15 @@
   import { isTauri, ipcListen } from "../utils/ipc.js";
   import {
     getConfig,
+    disconnectPatchyLive,
     getPatchyStatus,
     installPatchy,
     launchPatchy,
     loadGalleryImagePng,
+    patchyLiveAction,
     readImageMetadata,
     readPatchyDocument,
+    readPatchyLiveDocument,
     resolvePatchyPath,
     type PatchyDocumentRead,
     saveToGalleryBytes,
@@ -115,6 +118,14 @@
   // A read-back whose dimensions differ from the export is held here until the
   // user confirms: applying it resizes the document underneath their layers.
   let pendingImport = $state<{ target: ApplyTarget; bytes: number[] } | null>(null);
+  let liveEnabled = $state(false);
+  let liveReading = $state(false);
+  let liveError = $state("");
+  let livePreviewUrl = $state<string | null>(null);
+  let livePreviewFingerprint = "";
+  let liveToken = $state("");
+  let liveCanUndo = $state(false);
+  let liveCanRedo = $state(false);
 
   const sourcePreviewUrl = $derived(image?.thumbnailUrl || image?.url || null);
 
@@ -133,7 +144,7 @@
   );
 
   const importStepState = $derived<StepState>(
-    importError
+    importError || (liveEnabled && liveError)
       ? "failed"
       : importStatus === "reading" || importStatus === "applying"
         ? "running"
@@ -157,21 +168,36 @@
   const importStatusText = $derived(
     importError
       ? importError
+      : liveEnabled && liveError
+        ? liveError
       : importStatus === "applied"
         ? appliedText()
+        : liveEnabled
+          ? liveError || locale.t("patchy.live_hint")
         : importStatus === "ready"
           ? ""
           : importLayeredFailure
             ? locale.t("patchy.result_flatten_failed", { name: importLayeredFailure })
             : locale.t("patchy.result_missing"),
   );
-  // Kept standing while the loaded result is a different size, so the warning is
-  // visible before the user reaches for an apply button, not only after.
-  const importSizeMismatch = $derived(hasSizeMismatch(importInfo, exportInfo));
+  // Warn only after a canvas target is selected; a gallery copy does not
+  // change canvas dimensions.
+  // Gallery copies do not resize the canvas. A read-only refresh may show
+  // dimensions, but must not warn about a canvas action nobody has chosen.
+  const importSizeMismatch = $derived(
+    lastImportTarget !== "gallery" && lastImportTarget !== "read" &&
+    hasSizeMismatch(importInfo, exportInfo),
+  );
 
   function releaseImportPreview() {
     if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
     importPreviewUrl = null;
+  }
+
+  function releaseLivePreview() {
+    if (livePreviewUrl) URL.revokeObjectURL(livePreviewUrl);
+    livePreviewUrl = null;
+    livePreviewFingerprint = "";
   }
 
   function reportNoSavedResult(layeredSource: string | null) {
@@ -209,6 +235,13 @@
     appliedTarget = null;
     pendingImport = null;
     releaseImportPreview();
+    liveEnabled = false;
+    liveReading = false;
+    liveError = "";
+    liveToken = "";
+    liveCanUndo = false;
+    liveCanRedo = false;
+    releaseLivePreview();
   }
 
   function documentName(): string {
@@ -264,8 +297,7 @@
     if (target === "gallery" || target === null || target === "read") {
       return image?.filename ?? "—";
     }
-    // The canvas targets all edit the document currently open in MooshieUI.
-    return locale.t("canvas.use_document_settings");
+    return locale.t(TARGET_LABELS[target]);
   }
 
   /** PNG bytes for the document Patchy opens. */
@@ -365,6 +397,7 @@
     try {
       executablePath = await launchPatchy(documentPath, executablePath);
       launched = true;
+      liveEnabled = true;
     } catch (e) {
       error = locale.t("patchy.launch_failed");
       console.error("Patchy: failed to launch the editor:", e);
@@ -388,7 +421,7 @@
       // Nothing new came back. When a layered save *is* there, the edit exists
       // but could not be read: that is a different situation from "not saved",
       // and the panel says which one it is.
-      reportNoSavedResult(read.layered_source);
+      reportNoSavedResult(read.flattened ? null : read.layered_source);
       return null;
     }
     importLayeredFailure = null;
@@ -404,9 +437,93 @@
     return read.bytes;
   }
 
+  async function refreshLivePreview() {
+    if (!documentPath || !liveEnabled || liveReading || busy || pendingImport) return;
+    const handoffPath = documentPath;
+    liveReading = true;
+    try {
+      const read = await readPatchyLiveDocument(handoffPath, true, executablePath, liveToken);
+      if (!open || !liveEnabled || documentPath !== handoffPath) return;
+      liveToken = read.state_token;
+      liveCanUndo = read.can_undo;
+      liveCanRedo = read.can_redo;
+      const currentFingerprint = read.bytes.length ? fingerprint(read.bytes) : livePreviewFingerprint;
+      if (read.bytes.length && currentFingerprint !== livePreviewFingerprint) {
+        releaseLivePreview();
+        livePreviewUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(read.bytes)], { type: "image/png" }),
+        );
+        livePreviewFingerprint = currentFingerprint;
+      }
+      if (read.bytes.length && importStatus !== "applied" && importStatus !== "applying") {
+        importInfo = {
+          name: documentName(),
+          sizeBytes: read.bytes.length,
+          width: read.document_width,
+          height: read.document_height,
+        };
+        importStatus = "ready";
+      }
+      liveError = "";
+      if (read.requested_target && !busy) {
+        void importResult(read.requested_target);
+      }
+    } catch (e) {
+      if (open && liveEnabled && documentPath === handoffPath) {
+        liveError = e instanceof Error ? e.message : String(e);
+        liveToken = "";
+        liveCanUndo = false;
+        liveCanRedo = false;
+        releaseLivePreview();
+      }
+    } finally {
+      liveReading = false;
+    }
+  }
+
+  function toggleLive() {
+    liveEnabled = !liveEnabled;
+    liveError = "";
+    pendingImport = null;
+    importError = "";
+    importOrigin = "";
+    importInfo = null;
+    importStatus = "idle";
+    releaseImportPreview();
+    if (!liveEnabled) {
+      liveToken = "";
+      releaseLivePreview();
+    }
+  }
+
+  async function runLiveAction(action: "undo" | "redo" | "add_reference_layer") {
+    if (!documentPath || !liveToken || busy) return;
+    busy = true;
+    liveError = "";
+    importError = "";
+    try {
+      await patchyLiveAction(
+        documentPath,
+        action,
+        liveToken,
+        action === "add_reference_layer" ? exportBytes : null,
+        executablePath,
+      );
+    } catch (e) {
+      importError = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+      void refreshLivePreview();
+    }
+  }
+
   /** Re-check what Patchy has saved, without applying anything. */
   async function refreshImportResult() {
     if (!documentPath || busy) return;
+    if (liveEnabled) {
+      await refreshLivePreview();
+      return;
+    }
     busy = true;
     importError = "";
     lastImportTarget = "read";
@@ -433,14 +550,48 @@
    */
   async function importResult(target: ApplyTarget) {
     if (!documentPath || busy) return;
+    const handoffPath = documentPath;
     busy = true;
     importError = "";
     pendingImport = null;
     lastImportTarget = target;
     importStatus = "reading";
+    if (liveEnabled) {
+      try {
+        const read = await readPatchyLiveDocument(handoffPath, false, executablePath);
+        if (!open || !liveEnabled || documentPath !== handoffPath) {
+          busy = false;
+          return;
+        }
+        importLayeredFailure = null;
+        importLayered = false;
+        importOrigin = locale.t("patchy.live_source");
+        importInfo = describePayload(documentName(), read.bytes);
+        releaseImportPreview();
+        importPreviewUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(read.bytes)], { type: "image/png" }),
+        );
+        importStatus = "ready";
+        if (target !== "gallery" && hasSizeMismatch(importInfo, exportInfo)) {
+          pendingImport = { target, bytes: read.bytes };
+          busy = false;
+          return;
+        }
+        await applyImportResult(target, read.bytes);
+      } catch (e) {
+        importStatus = "idle";
+        importError = e instanceof Error ? e.message : String(e);
+        busy = false;
+      }
+      return;
+    }
     let read: PatchyDocumentRead;
     try {
-      read = await readPatchyDocument(documentPath, true);
+      read = await readPatchyDocument(handoffPath, true);
+      if (!open || documentPath !== handoffPath) {
+        busy = false;
+        return;
+      }
     } catch (e) {
       reportNoSavedResult(null);
       busy = false;
@@ -451,7 +602,7 @@
       // Still the file this dialog exported: Patchy has not saved over it. A
       // layered save beside it means the edit exists and could not be read —
       // the card says which of the two it is.
-      reportNoSavedResult(read.layered_source);
+      reportNoSavedResult(read.flattened ? null : read.layered_source);
       busy = false;
       return;
     }
@@ -465,7 +616,7 @@
       new Blob([new Uint8Array(bytes)], { type: "image/png" }),
     );
     importStatus = "ready";
-    if (hasSizeMismatch(importInfo, exportInfo)) {
+    if (target !== "gallery" && hasSizeMismatch(importInfo, exportInfo)) {
       pendingImport = { target, bytes };
       busy = false;
       return;
@@ -520,6 +671,7 @@
   async function confirmPendingImport() {
     if (!pendingImport || busy) return;
     const { target, bytes } = pendingImport;
+    busy = true;
     await applyImportResult(target, bytes);
   }
 
@@ -596,6 +748,19 @@
       void prepare();
     });
   });
+
+  // A separate effect owns the live polling session. The hand-off preparation
+  // above stays dependent only on open/image, so preview updates never rewrite
+  // the document Patchy is editing.
+  $effect(() => {
+    if (!open || !liveEnabled) return;
+    untrack(() => { void refreshLivePreview(); });
+    const timer = setInterval(() => { void refreshLivePreview(); }, 3000);
+    return () => {
+      clearInterval(timer);
+      void disconnectPatchyLive().catch((e) => console.warn("Patchy: live disconnect failed", e));
+    };
+  });
 </script>
 
 {#if open}
@@ -616,7 +781,7 @@
         >×</button>
       </div>
 
-      <p class="mt-1 text-xs text-neutral-400">{locale.t("patchy.save_hint")}</p>
+      <p class="mt-1 text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>
 
       {#if phase === "preparing"}
         <p class="mt-4 text-xs text-neutral-300" role="status">{locale.t("common.loading")}</p>
@@ -714,7 +879,7 @@
             sizeBytes={importInfo?.sizeBytes ?? null}
             width={importInfo?.width ?? null}
             height={importInfo?.height ?? null}
-            previewUrl={importPreviewUrl}
+            previewUrl={pendingImport ? importPreviewUrl : liveEnabled ? livePreviewUrl ?? importPreviewUrl : importPreviewUrl}
             statusWord={importStatusWord}
             statusText={importStatusText}
             statusRole={importStepState === "failed" ? "alert" : undefined}
@@ -728,6 +893,13 @@
               </p>
             {/if}
             <div class="mt-0.5">
+              <button
+                type="button"
+                disabled={busy}
+                aria-pressed={liveEnabled}
+                class="mr-2 h-7 rounded border px-2 text-[11px] disabled:opacity-40 {liveEnabled ? 'border-emerald-500 text-emerald-200' : 'border-neutral-700 text-neutral-200'}"
+                onclick={toggleLive}
+              >{locale.t(liveEnabled ? "patchy.live_disconnect" : "patchy.live_connect")}</button>
               <button
                 type="button"
                 disabled={busy}
@@ -750,6 +922,22 @@
                 {locale.t("patchy.refresh_result")}
               </button>
             </div>
+            {#if liveEnabled}
+              <p class="mt-1 text-[11px] text-neutral-400" role="status">
+                {liveReading ? locale.t("patchy.live_waiting") : liveError || locale.t("patchy.live_hint")}
+              </p>
+              <div class="mt-1.5 flex flex-wrap gap-1.5">
+                <button type="button" disabled={busy || !liveToken || !liveCanUndo}
+                  class="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("undo")}>{locale.t("patchy.live_undo")}</button>
+                <button type="button" disabled={busy || !liveToken || !liveCanRedo}
+                  class="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("redo")}>{locale.t("patchy.live_redo")}</button>
+                <button type="button" disabled={busy || !liveToken || !exportBytes}
+                  class="rounded border border-indigo-700 px-2 py-1 text-[11px] text-indigo-200 disabled:opacity-40"
+                  onclick={() => runLiveAction("add_reference_layer")}>{locale.t("patchy.live_reference")}</button>
+              </div>
+            {/if}
 
             <!-- A differently sized result reshapes the document underneath the
                  user's layers, so that consequence is stated before any apply. -->
@@ -855,7 +1043,7 @@
               <div>
                 <p class="truncate text-[10px] text-neutral-500">
                   {locale.t("patchy.transfer_target")}:
-                  <span class="text-neutral-300">{locale.t("canvas.use_document_settings")}</span>
+                  <span class="text-neutral-300">{locale.t("canvas.workspace_title")}</span>
                 </p>
                 {#if onimport}
                   <div class="mt-1 flex flex-wrap gap-2">

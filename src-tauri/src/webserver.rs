@@ -156,7 +156,7 @@ fn resolve_username(state: &WebState, headers: &HeaderMap, remote: &SocketAddr) 
 /// named accounts `include_secrets = true` (moderators included), which used to
 /// include the host's real NovelAI token. NovelAI is the one credential an
 /// account can hold a copy of its own, hence the flag parameter; the CivitAI
-/// key, external-LLM credentials and monbooru token exist only on the host,
+/// key and external-LLM credentials exist only on the host,
 /// so their configured flags survive and the values do not.
 ///
 /// As with NovelAI this applies to every browser client, the owner's included:
@@ -174,7 +174,6 @@ fn scrub_host_secrets_for_user(value: &mut serde_json::Value, has_nai_key: bool)
     for (key, flag) in [
         ("civitai_api_key", "civitai_api_key_configured"),
         ("llm_external_api_key", "llm_external_api_key_configured"),
-        ("monbooru_api_token", "monbooru_api_token_configured"),
     ] {
         // `config_to_client_json(false)` has already blanked these values for
         // regular users and supplied the true configured flags. Moderators get
@@ -7993,8 +7992,6 @@ mod nai_key_tests {
             "llm_external_api_key": "host-llm-key",
             "llm_external_api_key_configured": false,
             "llm_oauth_refresh_token": "host-refresh-token",
-            "monbooru_api_token": "host-monbooru-token",
-            "monbooru_api_token_configured": false,
             "an_untouched_field": "kept",
         });
 
@@ -8008,11 +8005,6 @@ mod nai_key_tests {
             serde_json::json!(true)
         );
         assert_eq!(value["llm_oauth_refresh_token"], serde_json::json!(""));
-        assert_eq!(value["monbooru_api_token"], serde_json::Value::Null);
-        assert_eq!(
-            value["monbooru_api_token_configured"],
-            serde_json::json!(true)
-        );
         assert_eq!(value["an_untouched_field"], serde_json::json!("kept"));
     }
 
@@ -8039,7 +8031,6 @@ mod nai_key_tests {
         let config = AppConfig {
             civitai_api_key: Some("host-civitai-key".to_string()),
             llm_external_api_key: "host-llm-key".to_string(),
-            monbooru_api_token: Some("host-monbooru-token".to_string()),
             ..AppConfig::default()
         };
         let mut value = crate::config::config_to_client_json(&config, false).unwrap();
@@ -8050,11 +8041,6 @@ mod nai_key_tests {
         assert_eq!(value["llm_external_api_key"], serde_json::Value::Null);
         assert_eq!(
             value["llm_external_api_key_configured"],
-            serde_json::json!(true)
-        );
-        assert_eq!(value["monbooru_api_token"], serde_json::Value::Null);
-        assert_eq!(
-            value["monbooru_api_token_configured"],
             serde_json::json!(true)
         );
     }

@@ -82,7 +82,6 @@ import type {
 } from "../types/index.js";
 import { models } from "./models.svelte.js";
 import { styles } from "./styles.svelte.js";
-import { macros } from "./macros.svelte.js";
 import { promptPresets } from "./promptPresets.svelte.js";
 
 const STORE_KEY = "generation-settings";
@@ -992,7 +991,7 @@ class GenerationStore {
    *  lazy install has put the node pack and the adapter on disk. */
   videoAcceleration = $state<VideoAcceleration>("standard");
   videoTurboPreset = $state<VideoTurboPreset>("larryvrh");
-  videoLightxLora = $state<string | null>(null);
+  videoPresetLora = $state<string | null>(null);
   videoVdnPrecision = $state<VideoVdnPrecision>("bf16");
   videoSaveDraft = $state(false);
   videoDraftNodesReady = $state(false);
@@ -3563,16 +3562,6 @@ class GenerationStore {
       positivePrompt = this.mergeIntoPrompt(positivePrompt, styleFragment, "after");
     }
 
-    // Inject tags contributed by any currently-active typed macros (style,
-    // artist, character, scene, costume, concept). Same mechanic as Artist
-    // Styles and the same reason: the tags reach the payload without passing
-    // through the prompt textbox, so the Prompt Arena shows them as chips
-    // instead. `skipActiveStyles` covers both, so a preview that asks for no
-    // injected styles does not get macro tags behind its back either.
-    const macroFragment = options.skipActiveStyles ? "" : macros.buildPromptFragment(this.isNovelAi);
-    if (macroFragment) {
-      positivePrompt = this.mergeIntoPrompt(positivePrompt, macroFragment, "after");
-    }
     if (options.extraPositive) {
       positivePrompt = this.mergeIntoPrompt(positivePrompt, options.extraPositive, "after");
     }
@@ -3901,7 +3890,7 @@ class GenerationStore {
       video_save_draft: this.videoSaveDraft,
       video_turbo_enabled: this.videoTurboEnabled,
       video_turbo_steps: this.effectiveVideoTurboPreset.steps ?? this.videoTurboSteps,
-      video_turbo_lora: this.videoTurboEnabled ? (this.effectiveVideoTurboPreset.id === "larryvrh" ? this.videoTurboLora : (this.videoLightxLora ?? this.effectiveVideoTurboPreset.file.filename)) : null,
+      video_turbo_lora: this.videoTurboEnabled ? (this.effectiveVideoTurboPreset.id === "larryvrh" ? this.videoTurboLora : (this.videoPresetLora ?? this.effectiveVideoTurboPreset.file.filename)) : null,
       video_teacache_enabled: this.videoTeacacheEnabled,
       video_model_tier: this.videoModelTier,
       video_sampler: this.videoSampler || null,
