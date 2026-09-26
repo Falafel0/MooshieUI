@@ -57,6 +57,22 @@ test('an install reports progress on the channel the backend emits', () => {
   assert.match(component, /Math\.min\(\s*100,\s*Math\.round/);
 });
 
+test('a server this app started becomes the address the app talks to', () => {
+  // Starting a server is only half the job: without the address, the monbooru
+  // tab stays "not connected" while a server answers on the loopback.
+  const rust = read('src-tauri/src/commands/monbooru.rs');
+  const start = rust.slice(rust.indexOf('pub(crate) async fn start_managed_server'));
+  const body = start.slice(0, start.indexOf('pub async fn monbooru_server_stop'));
+  assert.match(body, /config\.monbooru_base_url\.trim\(\)\.is_empty\(\)/);
+  assert.match(body, /config\.monbooru_base_url = crate::monbooru_server::local_url\(\)/);
+  assert.match(body, /crate::config::save_config\(&snapshot\)/);
+
+  // And the panel shows the field what the backend just wrote.
+  const component = section();
+  assert.match(component, /if \(config && !config\.monbooru_base_url && server\.url\)/);
+  assert.match(component, /config\.monbooru_base_url = server\.url/);
+});
+
 test('the server MooshieUI did not start is never stopped', () => {
   const lib = read('src-tauri/src/lib.rs');
   assert.match(lib, /config\.monbooru_keep_alive/);
@@ -78,6 +94,33 @@ test('the settings the panel writes are the settings the backend reads', () => {
   }
   assert.match(rust_config, /monbooru_auto_install: true/, 'the Patchy-matching default is on');
   assert.match(rust_config, /monbooru_flavor: "lite"/);
+});
+
+test('the field names the frontend reads are the field names the backend serializes', () => {
+  // The struct is renamed to camelCase in Rust, so the interface has to speak
+  // camelCase too — reading a snake_case name silently yields undefined, and
+  // `canInstall ?? false` then renders "not supported on this platform" on a
+  // platform that is supported.
+  const rust = read('src-tauri/src/commands/monbooru.rs');
+  // The serde attribute sits on the line above the struct, so the slice starts
+  // before the declaration.
+  const struct = rust.slice(rust.indexOf('pub struct MonbooruInstallStatus') - 160);
+  assert.match(struct.slice(0, 240), /rename_all = "camelCase"/);
+  assert.match(struct.slice(0, 1000), /pub can_install: bool/);
+
+  const wrapper = read('src/lib/utils/api.ts').slice(
+    read('src/lib/utils/api.ts').indexOf('export interface MonbooruInstallStatus'),
+  );
+  const declared = wrapper.slice(0, wrapper.indexOf('}'));
+  for (const field of ['installed', 'version', 'executable', 'canInstall', 'flavor']) {
+    assert.equal(declared.includes(`${field}:`), true, `${field} is missing from the wrapper`);
+  }
+  assert.equal(declared.includes('can_install:'), false, 'snake_case would never arrive');
+
+  // The Patchy read-back is not renamed, so its wrapper is snake_case on
+  // purpose. Pinning it here is what keeps the two from drifting apart.
+  assert.match(read('src-tauri/src/commands/patchy.rs'), /pub layered_source: Option<String>/);
+  assert.match(read('src/lib/utils/api.ts'), /layered_source: string \| null;/);
 });
 
 test('every locale carries the monbooru server strings', () => {

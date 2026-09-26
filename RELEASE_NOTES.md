@@ -1,3 +1,35 @@
+## What's New in v2.3.7-fork.8
+
+### Canvas: one tool for moving and resizing
+- Moving and resizing are one tool now. Handles appear on whatever is selected, the box is drawn around what the layer actually contains — a mask's painted strokes, a region's box, a raster's pixels — instead of an approximation that drifted from the shape on screen, and the dashed outline follows the box while it is dragged.
+- Resizing goes through one geometry shared by every layer kind, with the document as the hard edge: a box dragged past the edge is clipped to it rather than moved, and its proportions are kept while it is clamped.
+
+### Denoise, density and opacity
+- The layer panel now says what its controls do and in which order they apply: density is how strongly the painted area rests on the picture, the density-driven switch decides whether that strength also scales the edit (the painted core at full denoise, the fringes fading out, up to the mask's own denoise), and the overlay slider is how strongly the overlays are drawn on screen — display only, and labelled as such.
+
+### The generation result
+- The result card explains itself: which run produced the image (mode, size, time, run time, and the raster layers baked into it), what each action does, and whether applying it will reshape the document underneath. The status bar keeps a dot while a result is held for preview, and the session strip is named for what it is.
+
+### Projects, as documents
+- A project is the workspace now. New, Open, Save, Save as and Close sit on a bar above the canvas, showing the open project's name and whether it has unsaved changes.
+- What belongs to the document travels with it: canvas size and colours, every layer with its pixels — masks, regions and raster layers — and the settings that were in force when it was saved.
+- Unsaved changes are worked out by comparing the document as it is with the document as it was saved, never by a flag a caller sets. Painted strokes and applied results count; a layer's display colour, an overlay's strength and the view do not.
+- A save that would lose pixels is refused with a reason, instead of writing a project that would reopen empty.
+- Opening another project, starting a new one or closing the current one goes through one guard — Save, Don't save, Cancel — from the bar and from the settings list alike.
+- The project list in settings renames and deletes, and opens through that same guard. Projects saved before documents existed still load their settings and say plainly that the canvas is empty.
+
+### monbooru
+- MooshieUI can install and run the monbooru server for you: the archive comes from monbooru's own releases and is checked against the SHA256SUMS it publishes, and the settings carry the install state, the download progress, start and stop, and the address the server answers on.
+- Automatic installation (on by default, like Patchy's) runs the first time the monbooru tab is opened without a server — and never over a server address you set yourself. Autostart brings the managed server up with the app, keep-alive lets it outlive the app, and the build choice (lite, or bundled with ffmpeg and ONNX Runtime, for video thumbnails and local CPU auto-tagging) decides what the next install picks.
+- Only a server MooshieUI started is ever stopped, and only while its recorded identity still matches. A server you run yourself is left alone.
+
+### Patchy
+- The import side says which file it read: when the editor routes Save to a layered file beside the hand-off, the flattened result is imported and named, instead of implying it was the original file.
+- A retry rewrites the same hand-off document instead of starting a second one, and it may only rewrite a document inside the hand-off directory.
+
+### This fork, documented as its own project
+- The README is written for this branch: what MooshieUI Fork is, how it differs, how to build, test and release it, and where its own documentation lives.
+
 ## What's New in v2.3.7-fork.7
 
 ### Regions, masks and layers

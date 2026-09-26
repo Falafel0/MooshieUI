@@ -41,7 +41,7 @@
   let note = $state("");
   let unlisten: (() => void) | null = null;
 
-  const canInstall = $derived(status?.can_install ?? false);
+  const canInstall = $derived(status?.canInstall ?? false);
   const installed = $derived(status?.installed ?? false);
 
   /** An error out of the IPC layer, in words the user can read. */
@@ -101,6 +101,11 @@
       // An install that is not running is not usable yet, so the server comes up
       // right after it lands — that is what the button was pressed for.
       server = await monbooruServerStart();
+      // The backend writes the local URL into the config when the user has none,
+      // and saves it there; this only shows the field what it now holds.
+      if (config && !config.monbooru_base_url && server.url) {
+        config.monbooru_base_url = server.url;
+      }
       await monbooru.testConnection();
     } catch (e) {
       error = locale.t("monbooru.server.install_failed", { error: reason(e) });
@@ -118,9 +123,10 @@
     error = "";
     try {
       server = await monbooruServerStart();
+      if (config && !config.monbooru_base_url && server.url) {
+        config.monbooru_base_url = server.url;
+      }
       await monbooru.testConnection();
-    } catch (e) {
-      error = locale.t("monbooru.server.action_failed", { error: reason(e) });
     } finally {
       busy = false;
     }

@@ -1870,7 +1870,7 @@ export interface MonbooruInstallStatus {
   /** Executable of the managed install, when present. */
   executable: string | null;
   /** False on platforms monbooru publishes no build for. */
-  can_install: boolean;
+  canInstall: boolean;
   /** `"lite"` or `"bundled"` — the archive an install would pick. */
   flavor: string;
 }

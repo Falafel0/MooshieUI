@@ -384,6 +384,23 @@ pub(crate) async fn start_managed_server(
         .map_err(AppError::Other)?;
         status = crate::monbooru_server::status(&record);
     }
+    // A server this app started is only useful if the rest of the app knows
+    // where it is: the local URL is adopted when the user has not set one, and
+    // a URL they typed is never touched.
+    let snapshot = {
+        let mut config = state.config.write().await;
+        if config.monbooru_base_url.trim().is_empty() {
+            config.monbooru_base_url = crate::monbooru_server::local_url();
+            Some(config.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(snapshot) = snapshot {
+        if let Err(error) = crate::config::save_config(&snapshot) {
+            log::warn!("Could not save the monbooru server URL: {error}");
+        }
+    }
     Ok(crate::monbooru_server::enrich(&state.http_client, status).await)
 }
 
