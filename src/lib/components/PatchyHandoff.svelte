@@ -17,6 +17,7 @@
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
   import type { OutputImage } from "../types/index.js";
+  import PatchyTransferPanel from "./patchy/PatchyTransferPanel.svelte";
 
   const PATCHY_RELEASES_URL = "https://github.com/SethRobinson/Patchy/releases";
 
@@ -30,7 +31,12 @@
       bytes: number[],
       target: "base" | "raster" | "mask" | "region",
       suggestedName: string,
-    ) => Promise<void> | void;
+      /** The document this dialog handed out. Mask and region targets read the
+       * user's selection out of the difference between the two files. */
+      sourceBytes?: number[],
+      /** `false` means the handler refused and has already told the user why, so
+       * the panel must not report the import as applied. */
+    ) => Promise<boolean | void> | boolean | void;
   }
 
   let { open, image, onclose, onsaved, onimport }: Props = $props();
@@ -39,6 +45,30 @@
   // because it is missing; ready: the user can launch it and import the result
   // back; missing: no Patchy executable; error: preparation failed.
   type Phase = "preparing" | "installing" | "ready" | "missing" | "error";
+
+  /** Where a read-back result can land. "gallery" saves a new gallery image. */
+  type ApplyTarget = "gallery" | "base" | "raster" | "mask" | "region";
+
+  /** How far one leg of the round-trip has got. */
+  type StepState = "waiting" | "running" | "done" | "failed";
+
+  /** What actually travels: the file on disk plus what can be read from it. */
+  interface PayloadInfo {
+    name: string;
+    sizeBytes: number;
+    /** Null when the bytes are not a PNG whose header can be read. */
+    width: number | null;
+    height: number | null;
+  }
+
+  /** Apply button labels per target, reused by the size-change confirmation. */
+  const TARGET_LABELS: Record<ApplyTarget, string> = {
+    gallery: "patchy.save_gallery",
+    base: "patchy.import_base",
+    raster: "patchy.import_raster",
+    mask: "patchy.import_mask",
+    region: "patchy.import_region",
+  };
 
   let phase = $state<Phase>("preparing");
   let documentPath = $state<string | null>(null);
@@ -54,6 +84,84 @@
   // that can only fail.
   let canInstall = $state(true);
 
+  // --- transfer visibility --------------------------------------------------
+  // Everything below is derived from the hand-off itself: the bytes handed out,
+  // the bytes read back, and the phases the Patchy commands already report.
+  let exportInfo = $state<PayloadInfo | null>(null);
+  // Fingerprint of the document handed to Patchy. The hand-off file exists from
+  // the moment it is written, so a read-back must be compared against what went
+  // out — otherwise the panel would present our own export as the edited result.
+  let exportFingerprint = $state<string | null>(null);
+  // The document itself, kept so a selection can be recovered from what the
+  // editor changed. Without it a mask import can only guess from luminance.
+  let exportBytes = $state<number[] | null>(null);
+  let importInfo = $state<PayloadInfo | null>(null);
+  // Object URL for the edited file coming back; revoked whenever it is replaced.
+  let importPreviewUrl = $state<string | null>(null);
+  let importError = $state("");
+  let importStatus = $state<"idle" | "reading" | "ready" | "applying" | "applied">("idle");
+  let lastImportTarget = $state<ApplyTarget | "read" | null>(null);
+  let appliedTarget = $state<ApplyTarget | null>(null);
+  // A read-back whose dimensions differ from the export is held here until the
+  // user confirms: applying it resizes the document underneath their layers.
+  let pendingImport = $state<{ target: ApplyTarget; bytes: number[] } | null>(null);
+
+  const sourcePreviewUrl = $derived(image?.thumbnailUrl || image?.url || null);
+
+  const exportStepState = $derived<StepState>(
+    error ? "failed" : documentPath ? "done" : "running",
+  );
+  const exportStatusWord = $derived(
+    exportStepState === "failed"
+      ? locale.t("patchy.transfer_failed")
+      : exportStepState === "done"
+        ? locale.t("common.saved")
+        : locale.t("common.saving"),
+  );
+  const exportStatusText = $derived(
+    error ? error : documentPath ? locale.t("patchy.document_ready", { path: documentPath }) : "",
+  );
+
+  const importStepState = $derived<StepState>(
+    importError
+      ? "failed"
+      : importStatus === "reading" || importStatus === "applying"
+        ? "running"
+        : importStatus === "applied"
+          ? "done"
+          : "waiting",
+  );
+  const importStatusWord = $derived(
+    importStepState === "failed"
+      ? locale.t("patchy.transfer_failed")
+      : importStatus === "reading"
+        ? locale.t("common.loading")
+        : importStatus === "applying"
+          ? locale.t("common.saving")
+          : importStatus === "ready"
+            ? locale.t("patchy.result_ready")
+            : importStatus === "applied"
+              ? locale.t("common.saved")
+              : locale.t("patchy.transfer_pending"),
+  );
+  const importStatusText = $derived(
+    importError
+      ? importError
+      : importStatus === "applied"
+        ? appliedText()
+        : importStatus === "ready"
+          ? ""
+          : locale.t("patchy.result_missing"),
+  );
+  // Kept standing while the loaded result is a different size, so the warning is
+  // visible before the user reaches for an apply button, not only after.
+  const importSizeMismatch = $derived(hasSizeMismatch(importInfo, exportInfo));
+
+  function releaseImportPreview() {
+    if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
+    importPreviewUrl = null;
+  }
+
   function resetState() {
     phase = "preparing";
     documentPath = null;
@@ -64,11 +172,105 @@
     error = "";
     installPercent = 0;
     installError = "";
+    exportInfo = null;
+    exportFingerprint = null;
+    exportBytes = null;
+    importInfo = null;
+    importError = "";
+    importStatus = "idle";
+    lastImportTarget = null;
+    appliedTarget = null;
+    pendingImport = null;
+    releaseImportPreview();
   }
 
   function documentName(): string {
     const base = (image?.filename ?? "image.png").replace(/\.(jxl|webp|jpe?g|psd|psb)$/i, ".png");
     return base.includes(".") ? base : `${base}.png`;
+  }
+
+  /** PNG width/height from the IHDR chunk, or null for anything else. */
+  function pngDimensions(bytes: number[]): { width: number; height: number } | null {
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24) return null;
+    for (let i = 0; i < signature.length; i += 1) {
+      if (bytes[i] !== signature[i]) return null;
+    }
+    const readU32 = (offset: number) =>
+      ((bytes[offset] << 24) |
+        (bytes[offset + 1] << 16) |
+        (bytes[offset + 2] << 8) |
+        bytes[offset + 3]) >>>
+      0;
+    const width = readU32(16);
+    const height = readU32(20);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  /** Describe a file in flight: name, size, and pixel size when readable. */
+  function describePayload(name: string, bytes: number[]): PayloadInfo {
+    const dims = pngDimensions(bytes);
+    return {
+      name,
+      sizeBytes: bytes.length,
+      width: dims?.width ?? null,
+      height: dims?.height ?? null,
+    };
+  }
+
+  /**
+   * Cheap fingerprint used for one question only: "has Patchy saved over our
+   * hand-off file yet?". Comparing lengths alone would misreport a re-encode of
+   * the same size as "not saved", so the bytes are hashed (FNV-1a, 32 bits).
+   */
+  function fingerprint(bytes: number[]): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i += 1) {
+      hash ^= bytes[i];
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return `${(hash >>> 0).toString(16)}:${bytes.length}`;
+  }
+
+  /** True only when both files' pixel sizes are known and they disagree. */
+  function hasSizeMismatch(info: PayloadInfo | null, original: PayloadInfo | null): boolean {
+    if (!info || !original) return false;
+    if (
+      info.width == null ||
+      info.height == null ||
+      original.width == null ||
+      original.height == null
+    ) {
+      return false;
+    }
+    return info.width !== original.width || info.height !== original.height;
+  }
+
+  /** Past-tense line for the leg that just finished. */
+  function appliedText(): string {
+    switch (appliedTarget) {
+      case "base":
+        return locale.t("patchy.imported_base");
+      case "raster":
+        return locale.t("patchy.imported_raster");
+      case "mask":
+        return locale.t("patchy.imported_mask");
+      case "region":
+        return locale.t("patchy.imported_region");
+      case "gallery":
+        return locale.t("patchy.saved");
+      default:
+        return locale.t("common.done");
+    }
+  }
+
+  /** Name what an import would change, in the user's terms. */
+  function targetName(target: ApplyTarget | "read" | null): string {
+    if (target === "gallery" || target === null || target === "read") {
+      return image?.filename ?? "—";
+    }
+    // The canvas targets all edit the document currently open in MooshieUI.
+    return locale.t("canvas.use_document_settings");
   }
 
   /** PNG bytes for the document Patchy opens. */
@@ -79,6 +281,20 @@
       ? await image.sessionBlob.arrayBuffer()
       : new Uint8Array(await loadGalleryImagePng(image.gallery_filename!)).buffer;
     return Array.from(new Uint8Array(buffer));
+  }
+
+  /**
+   * Write the hand-off document and remember exactly what went out, so the
+   * export side of the panel can show it and the import side can tell our own
+   * bytes apart from a result Patchy actually saved.
+   */
+  async function exportDocument() {
+    const bytes = await sourceBytes();
+    documentPath = await writePatchyDocument(bytes, documentName());
+    exportInfo = describePayload(documentName(), bytes);
+    exportFingerprint = fingerprint(bytes);
+    exportBytes = bytes;
+    phase = "ready";
   }
 
   async function prepare() {
@@ -104,8 +320,7 @@
         phase = "missing";
         return;
       }
-      documentPath = await writePatchyDocument(await sourceBytes(), documentName());
-      phase = "ready";
+      await exportDocument();
       // Auto-start: the editor opens as soon as the document exists, so opening
       // it is not a separate step the user has to know about.
       await launch();
@@ -166,19 +381,94 @@
     }
   }
 
-  async function importResult(target: "gallery" | "base" | "raster" | "mask" | "region") {
+  /**
+   * Read the hand-off document and update the import side of the panel.
+   * Returns the bytes when Patchy saved a new version, null when the file still
+   * holds the bytes this dialog exported.
+   */
+  async function readImportBytes(): Promise<number[] | null> {
+    if (!documentPath) return null;
+    const bytes = await readPatchyDocument(documentPath);
+    if (fingerprint(bytes) === exportFingerprint) return null;
+    importInfo = describePayload(documentName(), bytes);
+    if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
+    // A real object URL for the bytes that were really read back — the only
+    // preview that can exist for a file that is not in the gallery yet.
+    importPreviewUrl = URL.createObjectURL(
+      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+    );
+    return bytes;
+  }
+
+  /** Re-check what Patchy has saved, without applying anything. */
+  async function refreshImportResult() {
     if (!documentPath || busy) return;
     busy = true;
-    error = "";
+    importError = "";
+    lastImportTarget = "read";
+    importStatus = "reading";
+    try {
+      const bytes = await readImportBytes();
+      // A fresh look invalidates a confirmation prompt held for older bytes.
+      pendingImport = null;
+      importStatus = bytes ? "ready" : "idle";
+    } catch (e) {
+      importStatus = "idle";
+      importError = locale.t("patchy.result_missing");
+      console.error("Patchy: no saved document to read back:", e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /**
+   * Bring the edited document back. Reading first is what makes the leg visible
+   * and safe: the panel names the file that is about to land, and when it is a
+   * different pixel size than the export the apply is held for confirmation —
+   * replacing the canvas with a differently sized image reshapes the document
+   * underneath the user's layers.
+   */
+  async function importResult(target: ApplyTarget) {
+    if (!documentPath || busy) return;
+    busy = true;
+    importError = "";
+    pendingImport = null;
+    lastImportTarget = target;
+    importStatus = "reading";
     let bytes: number[];
     try {
       bytes = await readPatchyDocument(documentPath);
     } catch (e) {
+      importStatus = "idle";
       busy = false;
-      error = locale.t("patchy.result_missing");
+      importError = locale.t("patchy.result_missing");
       console.error("Patchy: no saved document to read back:", e);
       return;
     }
+    if (fingerprint(bytes) === exportFingerprint) {
+      // Still the file this dialog exported: Patchy has not saved yet. That is
+      // not a failure — the card keeps showing the "save in Patchy first" hint.
+      importStatus = "idle";
+      busy = false;
+      return;
+    }
+    importInfo = describePayload(documentName(), bytes);
+    if (importPreviewUrl) URL.revokeObjectURL(importPreviewUrl);
+    importPreviewUrl = URL.createObjectURL(
+      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+    );
+    importStatus = "ready";
+    if (hasSizeMismatch(importInfo, exportInfo)) {
+      pendingImport = { target, bytes };
+      busy = false;
+      return;
+    }
+    await applyImportResult(target, bytes);
+  }
+
+  /** Apply bytes that were already read back; hand-off semantics unchanged. */
+  async function applyImportResult(target: ApplyTarget, bytes: number[]) {
+    importStatus = "applying";
     try {
       if (target === "gallery") {
         // Post-edit PNG bytes carry no metadata, so forward the source's.
@@ -195,16 +485,49 @@
           generation.metadataMode,
         );
         onsaved?.(saved);
-        return;
+      } else {
+        if (!onimport) throw new Error("Patchy import handler is unavailable");
+        const applied = await onimport(bytes, target, `patchy_${documentName()}`, exportBytes ?? undefined);
+        if (applied === false) {
+          // The handler refused and explained why. Saying "applied" here would
+          // contradict the message the user just got.
+          pendingImport = null;
+          importStatus = "ready";
+          return;
+        }
       }
-      if (!onimport) throw new Error("Patchy import handler is unavailable");
-      await onimport(bytes, target, `patchy_${documentName()}`);
+      pendingImport = null;
+      appliedTarget = target;
+      importStatus = "applied";
     } catch (e) {
-      error = target === "gallery" ? locale.t("patchy.save_failed") : locale.t("patchy.import_failed");
+      importStatus = "ready";
+      importError =
+        target === "gallery" ? locale.t("patchy.save_failed") : locale.t("patchy.import_failed");
       console.error("Patchy: failed to bring the edited document back:", e);
     } finally {
       busy = false;
     }
+  }
+
+  /** Confirm a held import after the size-change warning. */
+  async function confirmPendingImport() {
+    if (!pendingImport || busy) return;
+    const { target, bytes } = pendingImport;
+    await applyImportResult(target, bytes);
+  }
+
+  /** Retry whatever failed on the import side, as the retry button promises. */
+  async function retryImport() {
+    if (busy) return;
+    if (pendingImport) {
+      await confirmPendingImport();
+      return;
+    }
+    if (lastImportTarget && lastImportTarget !== "read") {
+      await importResult(lastImportTarget);
+      return;
+    }
+    await refreshImportResult();
   }
 
   async function locateExecutable() {
@@ -236,8 +559,7 @@
         phase = "missing";
         return;
       }
-      documentPath = await writePatchyDocument(await sourceBytes(), documentName());
-      phase = "ready";
+      await exportDocument();
       await launch();
     } catch (e) {
       phase = "error";
@@ -284,7 +606,7 @@
       <p class="mt-1 text-xs text-neutral-400">{locale.t("patchy.save_hint")}</p>
 
       {#if phase === "preparing"}
-        <p class="mt-4 text-xs text-neutral-300">{locale.t("common.loading")}</p>
+        <p class="mt-4 text-xs text-neutral-300" role="status">{locale.t("common.loading")}</p>
       {:else if phase === "installing"}
         <div class="mt-4 rounded-lg border border-indigo-700/70 bg-indigo-950/40 px-3 py-2 text-xs">
           <p class="font-medium text-indigo-200">{locale.t("patchy.install_title")}</p>
@@ -332,8 +654,14 @@
           </div>
         </div>
       {:else if phase === "error"}
-        <div class="mt-4 rounded-lg border border-red-800/70 bg-red-950/40 px-3 py-2 text-xs">
-          <p class="text-red-200">{error || locale.t("patchy.load_failed")}</p>
+        <!-- Export failed: name the leg, the error, and retry that leg here. -->
+        <div
+          class="mt-4 rounded-lg border border-red-800/70 bg-red-950/40 px-3 py-2 text-xs"
+          role="alert"
+        >
+          <p class="font-medium text-red-200">
+            {locale.t("patchy.export_direction")} · {error || locale.t("patchy.load_failed")}
+          </p>
           <button
             type="button"
             class="mt-2 rounded border border-neutral-600 px-2.5 py-1.5 text-neutral-100 hover:bg-neutral-800"
@@ -341,61 +669,211 @@
           >{locale.t("patchy.reopen")}</button>
         </div>
       {:else}
-        <div class="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={launching}
-            class="h-8 rounded-md border border-indigo-500 bg-indigo-600/25 px-3 text-xs font-medium text-indigo-100 hover:bg-indigo-600/40 disabled:opacity-40"
-            onclick={launch}
-          >{launched ? locale.t("patchy.reopen") : locale.t("patchy.launch")}</button>
+        <!-- The two legs of the round-trip, each showing its own file and state. -->
+        <div class="mt-4 grid items-start gap-2 sm:grid-cols-2">
+          <PatchyTransferPanel
+            step="export"
+            state={exportStepState}
+            busy={busy || launching}
+            name={exportInfo?.name ?? null}
+            sizeBytes={exportInfo?.sizeBytes ?? null}
+            width={exportInfo?.width ?? null}
+            height={exportInfo?.height ?? null}
+            previewUrl={sourcePreviewUrl}
+            statusWord={exportStatusWord}
+            statusText={exportStatusText}
+          >
+            <div class="mt-0.5">
+              <button
+                type="button"
+                disabled={launching}
+                class="h-8 rounded-md border border-indigo-500 bg-indigo-600/25 px-3 text-xs font-medium text-indigo-100 hover:bg-indigo-600/40 disabled:opacity-40"
+                onclick={launch}
+              >{launched ? locale.t("patchy.reopen") : locale.t("patchy.launch")}</button>
+            </div>
+          </PatchyTransferPanel>
 
-          <span class="h-5 w-px bg-neutral-700"></span>
+          <PatchyTransferPanel
+            step="import"
+            state={importStepState}
+            busy={busy}
+            name={importInfo?.name ?? null}
+            sizeBytes={importInfo?.sizeBytes ?? null}
+            width={importInfo?.width ?? null}
+            height={importInfo?.height ?? null}
+            previewUrl={importPreviewUrl}
+            statusWord={importStatusWord}
+            statusText={importStatusText}
+            statusRole={importStepState === "failed" ? "alert" : undefined}
+          >
+            <div class="mt-0.5">
+              <button
+                type="button"
+                disabled={busy}
+                class="flex h-7 items-center gap-1.5 rounded border border-neutral-700 px-2 text-[11px] text-neutral-200 hover:border-indigo-500 hover:bg-neutral-800 disabled:opacity-40"
+                onclick={refreshImportResult}
+              >
+                <svg
+                  class="h-3 w-3"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+                {locale.t("patchy.refresh_result")}
+              </button>
+            </div>
 
-          <button
-            type="button"
-            disabled={busy}
-            class="h-8 rounded-md border border-emerald-700 bg-emerald-600/10 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-600/20 disabled:opacity-40"
-            onclick={() => importResult("gallery")}
-          >{locale.t("patchy.save_gallery")}</button>
+            <!-- A differently sized result reshapes the document underneath the
+                 user's layers, so that consequence is stated before any apply. -->
+            {#if !importError && (pendingImport || importSizeMismatch)}
+              <div
+                class="rounded border border-amber-700/70 bg-amber-950/40 px-2 py-1.5 text-[11px]"
+                role="alert"
+              >
+                <p class="flex flex-wrap items-center gap-1 font-medium text-amber-200">
+                  <svg
+                    class="h-3 w-3 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>
+                    {locale.t("canvas.document_size")}:
+                    {exportInfo && exportInfo.width != null && exportInfo.height != null
+                      ? locale.t("compare.summary.dimensions", {
+                          width: exportInfo.width,
+                          height: exportInfo.height,
+                        })
+                      : "—"}
+                    →
+                    {importInfo && importInfo.width != null && importInfo.height != null
+                      ? locale.t("compare.summary.dimensions", {
+                          width: importInfo.width,
+                          height: importInfo.height,
+                        })
+                      : "—"}
+                  </span>
+                </p>
+                <!-- Naming the consequence matters more than the numbers: this
+                     block only appears when the file coming back is a different
+                     size, and applying it resizes the document under whatever
+                     layers the user already painted. -->
+                <p class="mt-0.5 text-neutral-400">{locale.t("patchy.size_changed_warning")}</p>
+                {#if pendingImport}
+                  <p class="mt-0.5 text-neutral-300">
+                    <span class="text-neutral-500">{locale.t("patchy.transfer_target")}:</span>
+                    {targetName(pendingImport.target)}
+                  </p>
+                  <div class="mt-1.5 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-7 rounded border border-amber-600 px-2.5 text-amber-100 hover:bg-amber-900/40 disabled:opacity-40"
+                      onclick={confirmPendingImport}
+                    >{locale.t(TARGET_LABELS[pendingImport.target])}</button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-7 rounded border border-neutral-600 px-2.5 text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
+                      onclick={() => (pendingImport = null)}
+                    >{locale.t("common.cancel")}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
 
-          {#if onimport}
-            <span class="h-5 w-px bg-neutral-700"></span>
-            <button
-              type="button"
-              disabled={busy}
-              class="h-8 rounded-md border border-emerald-700 bg-emerald-600/10 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-600/20 disabled:opacity-40"
-              onclick={() => importResult("base")}
-            >{locale.t("patchy.import_base")}</button>
-            <button
-              type="button"
-              disabled={busy}
-              class="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-indigo-500 hover:bg-neutral-800 disabled:opacity-40"
-              onclick={() => importResult("raster")}
-            >{locale.t("patchy.import_raster")}</button>
-            <button
-              type="button"
-              disabled={busy}
-              class="h-8 rounded-md border border-rose-800 px-3 text-xs text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
-              onclick={() => importResult("mask")}
-            >{locale.t("patchy.import_mask")}</button>
-            <button
-              type="button"
-              disabled={busy}
-              class="h-8 rounded-md border border-violet-800 px-3 text-xs text-violet-200 hover:bg-violet-900/30 disabled:opacity-40"
-              onclick={() => importResult("region")}
-            >{locale.t("patchy.import_region")}</button>
-          {/if}
+            {#if importError}
+              <div class="flex items-center gap-2">
+                <!-- Naming the leg on the retry matches the export alert above:
+                     a retry that does not say which direction it repeats is the
+                     ambiguity this hand-off is meant to remove. -->
+                <span class="text-[10px] text-neutral-500"
+                  >{locale.t("patchy.import_direction")}</span
+                >
+                <button
+                  type="button"
+                  disabled={busy}
+                  class="h-7 rounded border border-neutral-600 px-2.5 text-[11px] text-neutral-100 hover:bg-neutral-800 disabled:opacity-40"
+                  onclick={retryImport}
+                >{locale.t("common.retry")}</button>
+              </div>
+            {/if}
+
+            <!-- Apply controls, grouped by the target they change on the
+                 MooshieUI side, so the consequence is legible up front. -->
+            <div class="space-y-1.5 border-t border-neutral-800 pt-2">
+              <div>
+                <p class="truncate text-[10px] text-neutral-500">
+                  {locale.t("patchy.transfer_target")}:
+                  <span class="text-neutral-300">{image?.filename ?? "—"}</span>
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  class="mt-1 h-8 rounded-md border border-emerald-700 bg-emerald-600/10 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-600/20 disabled:opacity-40"
+                  onclick={() => importResult("gallery")}
+                >{locale.t("patchy.save_gallery")}</button>
+              </div>
+              <div>
+                <p class="truncate text-[10px] text-neutral-500">
+                  {locale.t("patchy.transfer_target")}:
+                  <span class="text-neutral-300">{locale.t("canvas.use_document_settings")}</span>
+                </p>
+                {#if onimport}
+                  <div class="mt-1 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-8 rounded-md border border-emerald-700 bg-emerald-600/10 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-600/20 disabled:opacity-40"
+                      onclick={() => importResult("base")}
+                    >{locale.t("patchy.import_base")}</button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-indigo-500 hover:bg-neutral-800 disabled:opacity-40"
+                      onclick={() => importResult("raster")}
+                    >{locale.t("patchy.import_raster")}</button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-8 rounded-md border border-rose-800 px-3 text-xs text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
+                      onclick={() => importResult("mask")}
+                    >{locale.t("patchy.import_mask")}</button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      class="h-8 rounded-md border border-violet-800 px-3 text-xs text-violet-200 hover:bg-violet-900/30 disabled:opacity-40"
+                      onclick={() => importResult("region")}
+                    >{locale.t("patchy.import_region")}</button>
+                  </div>
+                  <!-- The mask and region targets read the selection from what
+                       the editor changed, so say what that means before the user
+                       spends time painting in the wrong convention. -->
+                  <p class="mt-1.5 text-[10px] text-neutral-500">
+                    {locale.t("patchy.mask_paint_hint")}
+                  </p>
+                {/if}
+              </div>
+            </div>
+          </PatchyTransferPanel>
         </div>
-
-        {#if error}
-          <p class="mt-2 text-xs text-red-400">{error}</p>
-        {:else if busy}
-          <p class="mt-2 text-xs text-indigo-300">{locale.t("common.saving")}</p>
-        {:else if documentPath}
-          <p class="mt-2 truncate text-[11px] text-neutral-500" title={documentPath}>
-            {locale.t("patchy.document_ready", { path: documentPath })}
-          </p>
-        {/if}
       {/if}
     </div>
   </div>

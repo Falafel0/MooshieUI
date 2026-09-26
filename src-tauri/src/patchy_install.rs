@@ -650,6 +650,56 @@ notahashline
         assert_eq!(sums.len(), 3);
     }
 
+    /// The `SHA256SUMS.txt` body the `v0.99` release publishes, verbatim. It is
+    /// what the installer downloads and parses before unpacking anything, so its
+    /// shape and the names in it are a real interface, not an assumption.
+    const RELEASE_V099_SUMS: &str = "\
+2a8ed963cb5a4af6dc1079b476874a9880b6881d5b4c4a68d240ce841e3bcf94  PatchyWindowsInstaller.exe
+bcb5b184444f46b47276f4b56bb538737dce3906b1ccd6b9da06314d80cc293b  PatchyWindowsNoInstaller.zip
+d06ca7a0f96998ba04828068102cdb80eeb201b8520eb4958007f4641056335a  PatchyMacOS.dmg
+507d79a2192df570b94e342ce30f5b18486501c45bebbb14f18e1f0bc27f42a5  PatchyLinux.flatpak
+";
+
+    #[test]
+    fn the_published_release_sums_parse_with_every_asset_covered() {
+        let sums = parse_sha256sums(RELEASE_V099_SUMS);
+        assert_eq!(sums.len(), 4, "every published line is a checksum");
+        assert_eq!(
+            sums.get("PatchyWindowsNoInstaller.zip").map(String::as_str),
+            Some("bcb5b184444f46b47276f4b56bb538737dce3906b1ccd6b9da06314d80cc293b"),
+            "the checksum the portable Windows build is verified against"
+        );
+        // A missing entry makes the installer refuse that platform outright.
+        for name in [
+            "PatchyWindowsInstaller.exe",
+            "PatchyWindowsNoInstaller.zip",
+            "PatchyMacOS.dmg",
+            "PatchyLinux.flatpak",
+        ] {
+            assert!(
+                sums.contains_key(name),
+                "{name} is published without a checksum"
+            );
+        }
+    }
+
+    #[test]
+    fn every_platform_downloads_an_asset_the_published_sums_cover() {
+        // The whole install path hangs on these two agreeing: what `select_asset`
+        // picks from the real asset list has to be a name `parse_sha256sums`
+        // finds a checksum for, or the download is refused after it was made.
+        let assets = fixture();
+        let sums = parse_sha256sums(RELEASE_V099_SUMS);
+        for platform in [Platform::Windows, Platform::Macos] {
+            let picked = select_asset(&assets, platform).expect("a portable asset per platform");
+            assert!(
+                sums.contains_key(&picked.name),
+                "{} is downloaded but not listed in the published sums",
+                picked.name
+            );
+        }
+    }
+
     #[test]
     fn installed_executable_prefers_newest_version() {
         let scratch = std::env::temp_dir().join(format!("patchy-test-{}", uuid::Uuid::new_v4()));

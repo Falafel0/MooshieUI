@@ -12,6 +12,7 @@
   import CompareViewer from "./lib/components/gallery/CompareViewer.svelte";
   import ModelHubPage from "./lib/components/modelhub/ModelHubPage.svelte";
   import { ArtistGalleryPage } from "./lib/artist-gallery/index.js";
+  import { MonbooruPage } from "./lib/monbooru/index.js";
   import { connection } from "./lib/stores/connection.svelte.js";
   import { startup } from "./lib/stores/startup.svelte.js";
   import { progress } from "./lib/stores/progress.svelte.js";
@@ -62,7 +63,7 @@
   import InterrogateModal from "./lib/components/generation/InterrogateModal.svelte";
   import ExternalComfyModal from "./lib/components/ExternalComfyModal.svelte";
   import PatchyHandoff from "./lib/components/PatchyHandoff.svelte";
-  import { opaqueMaskLuminanceToAlpha } from "./lib/utils/canvasLayerExport.js";
+  import { canComparePaintedCoverage, opaqueMaskLuminanceToAlpha, paintedCoverageToAlpha } from "./lib/utils/canvasLayerExport.js";
   import GlobalErrorModal from "./lib/components/errors/GlobalErrorModal.svelte";
   import NaiEnhanceModal from "./lib/components/generation/NaiEnhanceModal.svelte";
   import DirectorToolsModal from "./lib/components/generation/DirectorToolsModal.svelte";
@@ -182,7 +183,7 @@
   const FETCH_TIMEOUT_MS = 45_000;
   const GENERATION_DONE_TOAST_VISIBLE_MS = 6_000;
   const GENERATION_DONE_TOAST_EXIT_MS = 220;
-  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "settings";
+  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "monbooru" | "settings";
   type GenerationDoneToast = {
     id: number;
     imageUrl: string;
@@ -227,6 +228,7 @@
   let reconcileIntervalId: ReturnType<typeof setInterval> | null = null;
   let sseReconnectHandler: (() => void) | null = null;
   let modelPreviewActionHandler: ((event: Event) => void) | null = null;
+  let settingsRequestHandler: ((event: Event) => void) | null = null;
   let generationDoneToastTimer: ReturnType<typeof setTimeout> | null = null;
   let generationDoneToastClearTimer: ReturnType<typeof setTimeout> | null = null;
   let generationDoneToastSeq = 0;
@@ -719,6 +721,8 @@
   let authRequired = $state(false);
   let authChecked = $state(false);
   let userRole = $state<"admin" | "moderator" | "user" | "anonymous">("admin");
+  /** Settings section requested by a mooshie:open-settings event, or null. */
+  let settingsSection = $state<string | null>(null);
   let canUseModelhub = $state(true);
   let loginUser = $state("");
   let loginPass = $state("");
@@ -935,10 +939,54 @@
     patchyOpen = true;
   }
 
+  /**
+   * The coverage a user painted, read from the difference between the document
+   * that was handed to the editor and the one it saved.
+   *
+   * Both buffers are decoded at the document's own size, so a pixel in one lines
+   * up with the same pixel in the other. The edited pixels are rewritten with
+   * the coverage in place, ready to become the mask layer.
+   */
+  async function paintedCoverageOf(
+    originalBytes: number[],
+    edited: ImageData,
+    dimensions: { width: number; height: number },
+  ): Promise<boolean | "resized"> {
+    const url = URL.createObjectURL(
+      new Blob([new Uint8Array(originalBytes)], { type: "image/png" }),
+    );
+    try {
+      const original = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error("Failed to decode the handed-out document"));
+        element.src = url;
+      });
+      // A resized edit has no pixel-to-pixel correspondence, and comparing it
+      // anyway would read the whole area outside the original as painted.
+      if (!canComparePaintedCoverage(
+        { width: original.naturalWidth, height: original.naturalHeight },
+        dimensions,
+      )) {
+        return "resized";
+      }
+      const before = document.createElement("canvas");
+      before.width = dimensions.width;
+      before.height = dimensions.height;
+      const context = before.getContext("2d")!;
+      context.drawImage(original, 0, 0);
+      const originalPixels = context.getImageData(0, 0, dimensions.width, dimensions.height);
+      return paintedCoverageToAlpha(originalPixels.data, edited.data);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function importPatchyToCanvas(
     bytes: number[],
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
+    sourceBytes?: number[],
   ) {
     const sourceVersion = canvas.inpaintSourceVersion;
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
@@ -959,7 +1007,27 @@
         const context = mask.getContext("2d")!;
         context.drawImage(source, 0, 0);
         const pixels = context.getImageData(0, 0, mask.width, mask.height);
-        if (opaqueMaskLuminanceToAlpha(pixels.data)) {
+        // The document handed to the editor is the image itself, so its
+        // brightness belongs to the picture and not to the user's selection:
+        // reading luminance would turn a bright photo into a full-canvas mask.
+        // Recover the selection from what the editor changed instead, and only
+        // read luminance when there is no copy of the handed-out document.
+        const painted = sourceBytes
+          ? await paintedCoverageOf(sourceBytes, pixels, dimensions)
+          : opaqueMaskLuminanceToAlpha(pixels.data);
+        if (painted === "resized") {
+          // A mask has to match the image it masks, and the two files no longer
+          // line up: report it instead of masking everything by accident.
+          gallery.showToast(locale.t("patchy.mask_size_mismatch"), "error");
+          return false;
+        }
+        if (sourceBytes && !painted) {
+          // The file changed but nothing above the noise floor did: say so
+          // rather than applying a mask the user never painted.
+          gallery.showToast(locale.t("patchy.mask_nothing_painted"), "error");
+          return false;
+        }
+        if (painted) {
           context.putImageData(pixels, 0, 0);
           const normalized = await new Promise<Blob>((resolve, reject) =>
             mask.toBlob((result) => result ? resolve(result) : reject(new Error("Failed to encode the Patchy mask")), "image/png"));
@@ -3540,6 +3608,17 @@
     };
     window.addEventListener("mooshie:model-preview-action", modelPreviewActionHandler);
 
+    // Settings asked for by another view (the monbooru tab's "open settings"
+    // action is the one caller). The settings page is conditionally mounted, so
+    // the requested section travels down as a prop instead of a second listener
+    // on that page, which would miss an event fired as it mounts.
+    settingsRequestHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{ section?: string }>).detail;
+      settingsSection = detail?.section ?? null;
+      currentPage = "settings";
+    };
+    window.addEventListener("mooshie:open-settings", settingsRequestHandler);
+
     // Patchy auto-start: open the editor together with the app when the user
     // asked for it. Skipped when nothing is installed, and never fatal — the
     // hand-off dialog still offers to install or locate the editor on demand.
@@ -3685,6 +3764,8 @@
     if (modelPreviewActionHandler) {
       window.removeEventListener("mooshie:model-preview-action", modelPreviewActionHandler);
     }
+    if (settingsRequestHandler)
+      window.removeEventListener("mooshie:open-settings", settingsRequestHandler);
     cancelInterrogateHoverTimer();
     if (unlistenInterrogateDragDrop) unlistenInterrogateDragDrop();
     clearGenerationDoneToastTimers();
@@ -3969,6 +4050,28 @@
         ><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-7 8-7s8 3 8 7" /></svg
       >
     </button>
+    <button
+      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
+      'monbooru'
+        ? 'bg-indigo-600 text-white'
+        : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
+      onclick={() => (currentPage = "monbooru")}
+      title={locale.t("monbooru.title")}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="w-4.5 h-4.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        ><rect x="3" y="4" width="18" height="14" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path
+          d="m4 17 5-5 3 3 3-2 5 4"
+        /></svg
+      >
+    </button>
 
     <div class="flex-1"></div>
 
@@ -4204,8 +4307,19 @@
         ongeneratePreview={handleArtistGeneratePreview}
         previewStatus={artistPreviewStatus}
       />
+    {:else if currentPage === "monbooru"}
+      <!-- monbooru library (artists + images) and MooshieUI's Prompt Arena.
+           Tag insertion is left to the page, which uses the app's shared
+           insert path; character macros land on the artists page, where the
+           character explorer is a tab. -->
+      <MonbooruPage
+        onsettings={() => (currentPage = "settings")}
+        ongenerate={() => (currentPage = "generate")}
+        onopenArtist={() => (currentPage = "artists")}
+        onopenCharacter={() => (currentPage = "artists")}
+      />
     {:else if currentPage === "settings"}
-      <SettingsPage {userRole} />
+      <SettingsPage {userRole} section={settingsSection} />
     {/if}
     </div>
   </main>

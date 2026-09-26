@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { AppConfig, InterrogatorModelStatus, LlmProviderState, QueueInfo } from "../../types/index.js";
   import { getConfig, updateConfig, stopComfyui, startComfyui, fetchReleaseNotes, importImageDirectory, exportLogs, exportLogsContent, getGalleryPath, setGalleryPath, setStorageLimit, installAttentionBackend, checkAttentionBackend, clearAllQueues, getQueue, getGpuStats, updateComfyui, listInterrogatorModels, deleteInterrogatorModel, addCustomInterrogatorModel, removeCustomInterrogatorModel, getPatchyStatus, installPatchy } from "../../utils/api.js";
+  import { monbooru } from "../../monbooru/store.svelte.js";
+  import { setMonbooruApiToken } from "../../utils/api.js";
   import type { ReleaseNote, ImportResult, AttentionBackendStatus, BackendSupport, ComfyUiVersionInfo, PatchyStatus } from "../../utils/api.js";
   import { connection } from "../../stores/connection.svelte.js";
   import { autocomplete } from "../../stores/autocomplete.svelte.js";
@@ -18,6 +20,7 @@
   import ModelRequestsPanel from "./ModelRequestsPanel.svelte";
   import QualityTagsEditor from "./QualityTagsEditor.svelte";
   import LlmProviderPanel from "./LlmProviderPanel.svelte";
+  import ProjectsSection from "./ProjectsSection.svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, authHeaders, clearAuthToken } from "../../utils/ipc.js";
   import { requestOsNotificationPermission } from "../../utils/osNotify.js";
   import { useMobileLayout, isMobileUA, setForceDesktopOverride } from "../../utils/device.js";
@@ -39,9 +42,11 @@
   interface Props {
     userRole?: string;
     mobileFriendly?: boolean;
+    /** Section to open, set when another part of the app asks for one. */
+    section?: string | null;
   }
 
-  let { userRole = "admin", mobileFriendly = false }: Props = $props();
+  let { userRole = "admin", mobileFriendly = false, section = null }: Props = $props();
 
   // Layout override: only meaningful on a mobile-capable device in browser mode,
   // where the mobile shell exists. The control lets the user flip between the
@@ -1122,6 +1127,21 @@
     settingsScrollEl?.scrollTo({ top: 0 });
   }
 
+  /**
+   * Open the section another part of the app asked for (`mooshie:open-settings`).
+   *
+   * This page is conditionally mounted, so a listener here would miss an event
+   * fired in the same tick that switches to Settings. App.svelte owns the page
+   * switch and passes the section down as a prop instead. Applied once per
+   * distinct request, so navigating to another section afterwards sticks.
+   */
+  let appliedSection = $state<string | null>(null);
+  $effect(() => {
+    if (!section || section === appliedSection) return;
+    appliedSection = section;
+    selectCategory(section);
+  });
+
   const sections = [
     { key: "appMode", labelKey: "settings.sections.app_mode", keywords: "browser app mode desktop native window web switch ui" },
     { key: "connection", labelKey: "settings.sections.connection", keywords: "server mode url port remote autolaunch" },
@@ -1138,6 +1158,8 @@
     { key: "interrogator", labelKey: "settings.sections.interrogator", keywords: "interrogate tags tagger threshold confidence onnx model wd eva02 vit swinv2 convnext download delete disk space" },
     { key: "prompt_assistant", labelKey: "settings.sections.prompt_assistant", keywords: "llm prompt enhance compose model gguf ai assistant" },
     { key: "civitai", labelKey: "settings.sections.civitai", keywords: "civitai api key metadata model hub image fetch download authentication" },
+    { key: "monbooru", labelKey: "monbooru.title", keywords: "monbooru booru self-hosted gallery server url token api key gallery artist browse import export library" },
+    { key: "projects", labelKey: "settings.sections.projects", keywords: "projects project workspace snapshot named save load switch local state presets history" },
     { key: "novelai", labelKey: "settings.sections.novelai", keywords: "novelai nai api key anlas opus subscription cloud remote generation persistent token allowance balance usage show" },
     { key: "queue", labelKey: "settings.sections.queue", keywords: "queue position pending running cancel clear jobs users order wait" },
     { key: "account", labelKey: "settings.account", keywords: "account password username display name login logout users lan accounts admin moderator role security migration" },
@@ -1165,6 +1187,9 @@
       case "civitai": return canManageServer;
       // NovelAI is per-account now: every user manages their own key.
       case "novelai": return true;
+      // Projects are snapshots on the machine running the app, and only the
+      // desktop build ships the commands that read and write them.
+      case "projects": return !isBrowserMode;
       case "account": return isBrowserMode && (!isAdmin || usesLegacyPassword);
       case "developer": return generation.devModeUnlocked;
       default: return true;
@@ -1494,6 +1519,41 @@
       config.attention_backend !== originalAttentionBackend ||
       config.extra_args.join(" ") !== originalExtraArgs ||
       (config.extra_model_paths ?? "") !== originalModelPaths;
+  }
+
+  /**
+   * The monbooru token is never handed to the frontend — `get_config` replaces
+   * it with a boolean — so it cannot ride inside a config autosave. It is typed
+   * into a draft and committed through its own command, which is also the only
+   * way to clear it: committing an empty draft removes the stored token.
+   */
+  let monbooruTokenDraft = $state("");
+
+  async function saveMonbooruToken() {
+    if (!config) return;
+    try {
+      const configured = await setMonbooruApiToken(monbooruTokenDraft);
+      config.monbooru_api_token_configured = configured;
+      // The draft is dropped either way: after a save the webview must not keep
+      // a copy of the token, and after a clear the field has to look empty.
+      monbooruTokenDraft = "";
+      await monbooru.testConnection();
+    } catch (e) {
+      error = locale.t("settings.error.save", { error: String(e) });
+    }
+  }
+
+  /**
+   * Test the monbooru connection from the settings page.
+   *
+   * Saves first, because the Rust command reads the persisted config and an
+   * unsaved URL would be tested against the previous one. `testConnection()`
+   * re-reads the URL into the store as well, so this row and the monbooru tab
+   * never disagree about which server is being talked to.
+   */
+  async function testMonbooru() {
+    await autoSave();
+    await monbooru.testConnection();
   }
 
   /** Auto-save for sliders, dropdowns, checkboxes — fires immediately on change. */
@@ -3076,6 +3136,23 @@
             </div>
           </div>
 
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="hide-recommended-params"
+              checked={generation.hideRecommendedParams}
+              onchange={(e) => {
+                generation.hideRecommendedParams = (e.target as HTMLInputElement).checked;
+                generation.saveSettings();
+              }}
+              class="w-4 h-4 mt-0.5 accent-indigo-500 rounded"
+            />
+            <div>
+              <label for="hide-recommended-params" class="text-sm text-neutral-200">{locale.t('settings.hide_recommendations.label')}</label>
+              <p class="text-[10px] text-neutral-500 mt-0.5">{locale.t('settings.hide_recommendations.desc')}</p>
+            </div>
+          </div>
+
           {#if generation.autoQualityTags}
           <div class="flex items-start gap-3">
             <input
@@ -4150,6 +4227,87 @@
             </div>
           </div>
         </section>
+        {/if}
+
+        <!-- monbooru: a self-hosted booru library, browsed from its own tab -->
+        {#if activeCategory === "monbooru"}
+          {#if config}
+          <section class="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden mb-4">
+            <div class="w-full flex items-center justify-between p-5 text-sm font-medium text-neutral-200">
+              {locale.t('monbooru.title')}
+            </div>
+
+            <div class="px-5 pb-5 space-y-3">
+              <p class="text-[10px] text-neutral-500">{locale.t('monbooru.state.disconnected_hint')}</p>
+
+              <div>
+                <label class="text-xs text-neutral-400 block mb-1" for="monbooru-url">{locale.t('monbooru.settings.url_label')}</label>
+                <input
+                  id="monbooru-url"
+                  type="text"
+                  value={config.monbooru_base_url}
+                  oninput={(e) => {
+                    if (config) config.monbooru_base_url = (e.target as HTMLInputElement).value;
+                  }}
+                  onchange={() => { autoSave(); }}
+                  placeholder={locale.t('monbooru.settings.url_placeholder')}
+                  class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                />
+              </div>
+
+              <div>
+                <label class="text-xs text-neutral-400 block mb-1" for="monbooru-token">{locale.t('monbooru.settings.token_label')}</label>
+                <input
+                  id="monbooru-token"
+                  type="password"
+                  value={monbooruTokenDraft}
+                  oninput={(e) => {
+                    monbooruTokenDraft = (e.target as HTMLInputElement).value;
+                  }}
+                  onchange={() => { saveMonbooruToken(); }}
+                  placeholder={locale.t('monbooru.settings.token_placeholder')}
+                  class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                />
+                <p class="text-[10px] text-neutral-500 mt-1">{locale.t('monbooru.settings.token_hint')}</p>
+                {#if config.monbooru_api_token_configured}
+                  <p class="text-[10px] text-emerald-400 mt-1">{locale.t('monbooru.settings.token_set')}</p>
+                {/if}
+              </div>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  class="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={monbooru.connection === "testing"}
+                  aria-busy={monbooru.connection === "testing"}
+                  onclick={testMonbooru}
+                >
+                  {monbooru.connection === "testing"
+                    ? locale.t('monbooru.testing_connection')
+                    : locale.t('monbooru.test_connection')}
+                </button>
+                <span class="text-xs text-neutral-400" role="status">
+                  {monbooru.connection === "connected"
+                    ? `${locale.t('monbooru.status.connected')}${monbooru.version ? ` · ${monbooru.version}` : ""}`
+                    : monbooru.connection === "testing"
+                      ? locale.t('monbooru.status.testing')
+                      : monbooru.connection === "disconnected"
+                        ? locale.t('monbooru.status.disconnected')
+                        : locale.t('monbooru.base_url_unset')}
+                </span>
+              </div>
+
+              {#if monbooru.connection === "disconnected" && monbooru.connectionError}
+                <p class="text-[10px] text-red-400 break-words">{monbooru.connectionError}</p>
+              {/if}
+            </div>
+          </section>
+          {/if}
+        {/if}
+
+        <!-- Projects: named snapshots of the app's local state (desktop only) -->
+        {#if activeCategory === "projects"}
+        <ProjectsSection />
         {/if}
 
         <!-- NovelAI (per-account key) -->

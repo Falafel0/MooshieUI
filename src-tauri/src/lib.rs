@@ -15,10 +15,13 @@ pub mod log_buffer;
 pub mod media_tools;
 pub mod metadata;
 pub mod model_requests;
+#[cfg(any(feature = "desktop", feature = "server"))]
+pub mod monbooru;
 pub mod notifications;
 pub mod novelai;
 #[cfg(feature = "desktop")]
 pub mod patchy_install;
+pub mod projects;
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub mod prompt_assistant;
 #[cfg(feature = "desktop")]
@@ -566,6 +569,19 @@ pub fn run() {
             commands::patchy::patchy_status,
             commands::patchy::stop_patchy,
             commands::patchy::install_patchy,
+            commands::monbooru::monbooru_status,
+            commands::monbooru::set_monbooru_api_token,
+            commands::monbooru::monbooru_search,
+            commands::monbooru::monbooru_galleries,
+            commands::monbooru::monbooru_image,
+            commands::monbooru::monbooru_image_tags,
+            commands::monbooru::monbooru_tags,
+            commands::monbooru::monbooru_categories,
+            commands::monbooru::monbooru_thumbnail,
+            commands::projects::list_projects,
+            commands::projects::save_project,
+            commands::projects::load_project,
+            commands::projects::delete_project,
             commands::config::get_config,
             commands::config::update_config,
             commands::config::get_gallery_path,

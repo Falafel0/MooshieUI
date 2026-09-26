@@ -6,10 +6,13 @@
   import { gallery } from "../../stores/gallery.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import type { OutputImage } from "../../types/index.js";
+  import { resolveTint } from "../../utils/layerTints.js";
   import CanvasToolbar from "./CanvasToolbar.svelte";
   import CanvasStage from "./CanvasStage.svelte";
   import CanvasStatusBar from "./CanvasStatusBar.svelte";
   import CanvasStagingStrip from "./staging/CanvasStagingStrip.svelte";
+  import InpaintCompareDialog from "./InpaintCompareDialog.svelte";
+  import { getInpaintComparePair } from "../../utils/inpaintComparePair.js";
   import { Eye, EyeOff, X } from "@lucide/svelte";
 
   interface Props {
@@ -20,6 +23,21 @@
   let { showInpaintPreviewOverlay = true, oneditpatchy }: Props = $props();
 
   let stageRef: CanvasStage | undefined = $state();
+
+  // Result-vs-original comparison, shown next to the result actions. The pair
+  // is resolved through the canvas store's registry link (see
+  // getInpaintComparePair), so the button only exists when a genuine
+  // original/result pair is known — never a comparison against anything else.
+  const comparePair = $derived(getInpaintComparePair());
+  let compareOpen = $state(false);
+  // The pair changes whenever the result is dismissed, applied or replaced by
+  // a newer run. Close then: the dialog must never keep showing a pair the user
+  // did not open, and reopening for the new result is one click away.
+  $effect(() => {
+    void comparePair;
+    compareOpen = false;
+  });
+
   const activeContextLayer = $derived(isMaskLayer(canvas.activeLayer) ? canvas.activeLayer : null);
   const activeContextSettings = $derived(activeContextLayer?.inpaintSettings ?? generation.inpaintSettings);
   const activeContextGrow = $derived(activeContextLayer?.maskGrow ?? generation.growMaskBy);
@@ -74,10 +92,10 @@
     {#if (canvas.selectedWorkspaceSection === 'layers' && activeContextLayer) || canvas.selectedWorkspaceSection === 'control'}
       <div class="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-md border border-neutral-700/70 bg-neutral-950/82 p-1 text-[10px] text-neutral-300 shadow-lg backdrop-blur-md">
         {#if activeContextLayer}
-          <span class="h-2 w-2 shrink-0 rounded-full {activeContextLayer.type === 'region' ? 'bg-violet-400' : 'bg-rose-400'}"></span>
+          <span class="h-2 w-2 shrink-0 rounded-full" style="background: {resolveTint(activeContextLayer)}"></span>
           <strong class="max-w-32 truncate px-0.5 font-medium text-neutral-100">{activeContextLayer.name}</strong>
           {#if activeContextLayer.type === 'region'}
-            <span class="rounded bg-violet-500/15 px-1.5 py-0.5 text-violet-200">{locale.t('generation.regional.strategy_conditioning')}</span>
+            <span class="rounded px-1.5 py-0.5" style="background: color-mix(in srgb, {resolveTint(activeContextLayer)} 18%, transparent); color: {resolveTint(activeContextLayer)}">{locale.t('canvas.type_region')}</span>
             <span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">{(activeContextLayer.regionalStrength ?? 1).toFixed(2)}×</span>
           {:else}
             <span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">{activeContextLayer.inpaintWidth ?? generation.width}×{activeContextLayer.inpaintHeight ?? generation.height}</span>
@@ -147,6 +165,19 @@
       <div class="absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 pointer-events-none">
         <div class="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-950/90 p-1.5 pl-3 shadow-2xl backdrop-blur-sm">
           <span class="text-xs text-neutral-300">{locale.t('canvas.inpaint_result_ready')}</span>
+          {#if comparePair}
+            <!-- Only rendered while a genuine original/result pair exists: the
+                 button never leads to a comparison against anything else. -->
+            <button
+              type="button"
+              aria-expanded={compareOpen}
+              class="h-7 rounded-md border border-indigo-500/60 bg-indigo-500/10 px-2.5 text-xs font-medium text-indigo-200 hover:border-indigo-400 hover:bg-indigo-500/20 focus-visible:outline-2 focus-visible:outline-indigo-400"
+              title={locale.t('gallery.compare.title')}
+              onclick={() => (compareOpen = true)}
+            >
+              {locale.t('gallery.compare.short')}
+            </button>
+          {/if}
           <button
             onclick={() => canvas.applyInpaintResult()}
             class="h-7 rounded-md border border-emerald-500 bg-emerald-600/25 px-3 text-xs font-medium text-emerald-100 hover:border-emerald-400 hover:bg-emerald-600/40"
@@ -166,4 +197,12 @@
   </div>
   <CanvasStagingStrip />
   <CanvasStatusBar />
+
+  {#if compareOpen && comparePair}
+    <InpaintCompareDialog
+      originalUrl={comparePair.originalUrl}
+      resultUrl={comparePair.resultUrl}
+      onclose={() => (compareOpen = false)}
+    />
+  {/if}
 </div>

@@ -9,6 +9,7 @@
   import MobileSettingsPage from "./MobileSettingsPage.svelte";
   import GalleryPage from "../gallery/GalleryPage.svelte";
   import { ArtistGalleryPage } from "../../artist-gallery/index.js";
+  import { MonbooruPage } from "../../monbooru/index.js";
   import ModelHubPage from "../modelhub/ModelHubPage.svelte";
   import DownloadBanner from "../downloads/DownloadBanner.svelte";
   import { connection } from "../../stores/connection.svelte.js";
@@ -100,6 +101,10 @@
           initialTab="characters"
           oninsertCharacter={handleCharacterInsert}
         />
+      </div>
+    {:else if currentTab === "monbooru"}
+      <div class="h-full overflow-hidden">
+        <MonbooruPage onsettings={() => go("settings")} />
       </div>
     {:else if currentTab === "settings"}
       <MobileSettingsPage {userRole} />

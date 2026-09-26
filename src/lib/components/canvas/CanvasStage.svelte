@@ -3,10 +3,13 @@
   import Konva from "konva";
   import { captureLayer } from "../../utils/canvasLayerExport.js";
   import { processMaskCoverage } from "../../utils/maskProcessing.js";
+  import { resolveTint, resolveTintKey } from "../../utils/layerTints.js";
+  import { isTypingTarget } from "../../utils/keyboardTarget.js";
   import { generation } from "../../stores/generation.svelte.js";
-  import { canvas, isMaskLayer, type SpatialLayerSnapshot, type ToolType } from "../../stores/canvas.svelte.js";
+  import { canvas, isMaskLayer, type CanvasLayer, type SpatialLayerSnapshot, type ToolType } from "../../stores/canvas.svelte.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
+  import { locale } from "../../stores/locale.svelte.js";
   import ColorTooltip from "../ui/ColorTooltip.svelte";
 
   let { showLivePreview = true }: { showLivePreview?: boolean } = $props();
@@ -335,7 +338,15 @@
       const kLayer = layer && layer.visible && !layer.locked ? konvaLayers.get(layer.id) : null;
       const nodes = kLayer ? kLayer.getChildren().map((node) => node) : [];
       selectionTransformer.setAttrs({
-        rotateEnabled: layer?.type === 'raster', keepRatio: false,
+        // Every layer kind rotates: a mask and a region are turned as a group of
+        // strokes (Konva rotates a multi-node selection about its centre), and
+        // the export bakes whatever is on the canvas. Konva already gives the
+        // familiar modifiers on its own: Shift keeps the proportions, Alt scales
+        // from the centre, and only the upright angles snap.
+        rotateEnabled: true,
+        keepRatio: false,
+        rotationSnaps: [0, 90, 180, 270, 360],
+        rotationSnapTolerance: 4,
         enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
       });
       selectionTransformer.nodes(nodes);
@@ -440,7 +451,7 @@
     if (!source) { contextLayer.batchDraw(); return; }
     const settings = layer.inpaintSettings ?? generation.inpaintSettings;
     const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
-    const color = layer.type === 'region' ? '#a78bfa' : '#fb7185';
+    const color = resolveTint(layer);
     const { bounds } = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, color);
     if (!contextLayer || revision !== contextRevision) return;
     if (bounds) {
@@ -570,7 +581,7 @@
       ctx.drawImage(img, 0, 0);
       const data = ctx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height);
       const pixels = data.data;
-      const color = parseHexColor(canvas.maskOverlayColor);
+      const color = parseHexColor(resolveTint({ type: "mask" }));
       const baseAlpha = Math.max(0, Math.min(1, canvas.maskOverlayOpacity));
 
       for (let i = 0; i < pixels.length; i += 4) {
@@ -701,7 +712,7 @@
         const existing = stage.getLayers().find((node) => node.id() === layer.id) ?? canvas.takeLayerNode(layer.id);
         const kLayer = existing ?? new Konva.Layer({
           id: layer.id,
-          opacity: isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity,
+          opacity: displayOpacity(layer),
           visible: effectiveVisible,
         });
 
@@ -719,7 +730,7 @@
           const region = layer.initialRegion;
           const w = canvas.canvasWidth;
           const h = canvas.canvasHeight;
-          const attrs = { fill: canvas.maskOverlayColor, opacity: 1, listening: false };
+          const attrs = { fill: resolveTint(layer), opacity: 1, listening: false };
           if (region.shape === "circle") {
             kLayer.add(new Konva.Ellipse({ ...attrs, x: (region.x + region.width / 2) * w, y: (region.y + region.height / 2) * h, radiusX: region.width * w / 2, radiusY: region.height * h / 2 }));
           } else if (region.shape === "lasso" && region.points?.length) {
@@ -732,11 +743,11 @@
         konvaLayers.set(layer.id, kLayer);
       } else {
         const kLayer = konvaLayers.get(layer.id)!;
-        kLayer.opacity(isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity);
+        kLayer.opacity(displayOpacity(layer));
         kLayer.visible(effectiveVisible);
       }
       konvaLayers.get(layer.id)!.clip({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight });
-      konvaLayers.get(layer.id)!.opacity(isMaskLayer(layer) ? layer.opacity * canvas.maskOverlayOpacity : layer.opacity);
+      konvaLayers.get(layer.id)!.opacity(displayOpacity(layer));
       konvaLayers.get(layer.id)!.visible(effectiveVisible);
       if (layer.image) {
         const kLayer = konvaLayers.get(layer.id)!;
@@ -749,27 +760,25 @@
           const image = new Image();
           image.onload = () => {
             if (konvaLayers.get(layer.id) !== kLayer) return;
-            if (isMaskLayer(layer)) {
-              const pixels = document.createElement('canvas');
-              pixels.width = image.naturalWidth; pixels.height = image.naturalHeight;
-              const ctx = pixels.getContext('2d')!;
-              ctx.drawImage(image, 0, 0);
-              const data = ctx.getImageData(0, 0, pixels.width, pixels.height);
-              const color = parseHexColor(canvas.maskOverlayColor);
-              for (let i = 0; i < data.data.length; i += 4) {
-                data.data[i + 3] = Math.round(data.data[i] * (data.data[i+3] / 255));
-                data.data[i] = color.r; data.data[i+1] = color.g; data.data[i+2] = color.b;
-              }
-              ctx.putImageData(data, 0, 0);
-              target.image(pixels);
-            } else target.image(image);
+            target.setAttr('sourceImage', image);
+            paintLayerAsset(target, image, layer);
             kLayer.batchDraw();
             scheduleThumbRefresh(layer.id);
           };
           image.src = asset.src;
+        } else if (node.getAttr('tintKey') !== resolveTintKey(layer)) {
+          // Recolour from the source the node already holds: a tint change must
+          // show up on the canvas, not on the next reload.
+          const source = node.getAttr('sourceImage') as HTMLImageElement | undefined;
+          if (source) {
+            paintLayerAsset(node, source, layer);
+            kLayer.batchDraw();
+            scheduleThumbRefresh(layer.id);
+          }
         }
         node.setAttrs({ image: node.image(), x: asset.x + (asset.flipX ? asset.width : 0), y: asset.y + (asset.flipY ? asset.height : 0), width: asset.width, height: asset.height, rotation: asset.rotation, scaleX: asset.flipX ? -1 : 1, scaleY: asset.flipY ? -1 : 1 });
       }
+      repaintOverlayNodes(konvaLayers.get(layer.id)!, layer);
     }
 
     // Remove any Konva layers that no longer exist in store
@@ -823,6 +832,102 @@
     if (!canvas.activeLayerId) return null;
     return konvaLayers.get(canvas.activeLayerId) ?? null;
   }
+
+  /** Masks and regions are overlays drawn on top of the picture, so the canvas
+   * shows them through the overlay strength as well as their own opacity. A
+   * raster layer is the picture itself and is drawn exactly as it is. Display
+   * only: a run reads the layer's own opacity, never this. */
+  /** How strongly a layer's own drawing is shown over the picture: a mask and a
+   * region are overlays, so they pass through the display strength; a raster
+   * layer is the picture itself. Display only — a run reads the layer's own
+   * density, never this. */
+  const overlayDisplayScale = (layer: { type: string }) =>
+    layer.type === "raster" ? 1 : canvas.maskOverlayOpacity;
+
+  /** What the canvas shows for a layer: its own density through the display
+   * strength. The generation paths read layer.opacity alone. */
+  const displayOpacity = (layer: { type: string; opacity: number }) =>
+    layer.opacity * overlayDisplayScale(layer);
+
+  /** The colour a stroke lands in. A mask or a region draws in its own tint, so
+   * two of them can be told apart; a raster layer draws in the brush colour. */
+  function drawingColor(layer: CanvasLayer | undefined): string {
+    return layer && layer.type !== "raster" ? resolveTint(layer) : canvas.foregroundColor;
+  }
+
+  /** Draw a layer's image asset: recoloured into its tint for a mask or a
+   * region, or as itself for a raster layer. The tint it was painted with is
+   * remembered on the node, so a later colour change can repaint from the same
+   * source instead of waiting for the next load. */
+  function paintLayerAsset(node: Konva.Image, image: HTMLImageElement, layer: CanvasLayer) {
+    if (layer.type === "raster") {
+      node.image(image);
+      node.setAttr("tintKey", undefined);
+      return;
+    }
+    const pixels = document.createElement("canvas");
+    pixels.width = image.naturalWidth;
+    pixels.height = image.naturalHeight;
+    const ctx = pixels.getContext("2d")!;
+    ctx.drawImage(image, 0, 0);
+    const data = ctx.getImageData(0, 0, pixels.width, pixels.height);
+    const color = parseHexColor(resolveTint(layer));
+    for (let i = 0; i < data.data.length; i += 4) {
+      data.data[i + 3] = Math.round(data.data[i] * (data.data[i + 3] / 255));
+      data.data[i] = color.r;
+      data.data[i + 1] = color.g;
+      data.data[i + 2] = color.b;
+    }
+    ctx.putImageData(data, 0, 0);
+    node.image(pixels);
+    node.setAttr("tintKey", resolveTintKey(layer));
+  }
+
+  /** Strokes and region shapes belong to their layer's tint as well. When the
+   * tint changes, the nodes drawn in the old colour follow it. */
+  function repaintOverlayNodes(kLayer: Konva.Layer, layer: CanvasLayer) {
+    if (layer.type === "raster") return;
+    const next = resolveTint(layer);
+    const previous = kLayer.getAttr("overlayTint") as string | undefined;
+    kLayer.setAttr("overlayTint", next);
+    if (!previous || previous === next) return;
+    for (const child of kLayer.getChildren()) {
+      const node = child as Konva.Shape;
+      if (typeof node.stroke === "function" && node.stroke() === previous) node.stroke(next);
+      if (typeof node.fill === "function" && node.fill() === previous) node.fill(next);
+    }
+  }
+
+  // Right-click menu over the picture.
+  let contextMenu = $state<{ x: number; y: number } | null>(null);
+
+  function openContextMenu(event: MouseEvent) {
+    if (isTypingTarget(event.target)) return;
+    const rect = containerEl?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    contextMenu = {
+      x: Math.max(4, Math.min(event.clientX - rect.left, rect.width - 176)),
+      y: Math.max(4, Math.min(event.clientY - rect.top, rect.height - 40)),
+    };
+  }
+
+  function runMenuAction(action: () => void) {
+    contextMenu = null;
+    action();
+  }
+
+  $effect(() => {
+    if (!contextMenu) return;
+    const dismiss = () => (contextMenu = null);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") dismiss(); };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
 
   function isInpaintMaskMode(): boolean {
     return generation.mode === "inpainting" && isMaskLayer(canvas.activeLayer);
@@ -993,15 +1098,8 @@
       isDrawing = true;
       activeStrokeTool = tool;
 
-      const inpaintMaskMode = isInpaintMaskMode();
 
-      const color = tool === "eraser"
-        ? "#000000"
-        : inpaintMaskMode
-          ? canvas.maskOverlayColor
-          : isMaskLayer(layer)
-          ? canvas.maskOverlayColor
-          : canvas.foregroundColor;
+      const color = tool === "eraser" ? "#000000" : drawingColor(layer);
 
       const drawOpacity = tool === "eraser" ? 1 : canvas.brushSettings.opacity;
 
@@ -1035,18 +1133,16 @@
       const inpaintMaskMode = isInpaintMaskMode();
 
       // Create preview rect on UI layer
-      const color = inpaintMaskMode
-        ? canvas.maskOverlayColor
-        : isMaskLayer(layer)
-          ? canvas.maskOverlayColor
-          : canvas.foregroundColor;
+      const color = drawingColor(layer);
       rectPreview = new Konva.Rect({
         x: pos.x,
         y: pos.y,
         width: 0,
         height: 0,
         fill: color,
-        opacity: inpaintMaskMode ? 0.35 : 0.4,
+        // Preview what the commit will look like: the brush sets the fill's
+        // density, and an overlay is drawn through the display strength.
+        opacity: canvas.brushSettings.opacity * overlayDisplayScale(layer),
         listening: false,
       });
       uiLayer?.add(rectPreview);
@@ -1067,12 +1163,7 @@
       isLasso = true;
       lassoPoints = [pos.x, pos.y];
 
-      const inpaintMaskMode = isInpaintMaskMode();
-      const color = inpaintMaskMode
-        ? canvas.maskOverlayColor
-        : isMaskLayer(layer)
-          ? canvas.maskOverlayColor
-          : canvas.foregroundColor;
+      const color = drawingColor(layer);
 
       // Preview lives on the unscaled UI layer, so points are in screen space.
       const { zoom, panX, panY } = canvas.viewport;
@@ -1248,19 +1339,21 @@
         const target = getDrawingTargetLayer();
         if (target) {
           const { layer, kLayer } = target;
-          const x = Math.min(rectStartPos.x, pos.x);
-          const y = Math.min(rectStartPos.y, pos.y);
-          const w = Math.abs(pos.x - rectStartPos.x);
-          const h = Math.abs(pos.y - rectStartPos.y);
+          let w = Math.abs(pos.x - rectStartPos.x);
+          let h = Math.abs(pos.y - rectStartPos.y);
+          // Shift keeps the fill square, the way every other editor does. The
+          // drag keeps growing away from where it started.
+          if (e.evt.shiftKey) {
+            const side = Math.max(w, h);
+            w = side;
+            h = side;
+          }
+          const x = pos.x < rectStartPos.x ? rectStartPos.x - w : rectStartPos.x;
+          const y = pos.y < rectStartPos.y ? rectStartPos.y - h : rectStartPos.y;
 
           if (w > 1 && h > 1) {
-            const inpaintMaskMode = isInpaintMaskMode();
 
-            const color = inpaintMaskMode
-              ? canvas.maskOverlayColor
-              : isMaskLayer(layer)
-                ? canvas.maskOverlayColor
-                : canvas.foregroundColor;
+            const color = drawingColor(layer);
             const rect = canvas.activeTool === "ellipseFill" ? new Konva.Ellipse({
               x: x+w/2, y: y+h/2, radiusX: w/2, radiusY: h/2, fill: color,
               opacity: canvas.brushSettings.opacity, listening: false,
@@ -1292,12 +1385,7 @@
       const target = getDrawingTargetLayer();
       if (target && lassoPoints.length >= 6) {
         const { layer, kLayer } = target;
-        const inpaintMaskMode = isInpaintMaskMode();
-        const color = inpaintMaskMode
-          ? canvas.maskOverlayColor
-          : isMaskLayer(layer)
-            ? canvas.maskOverlayColor
-            : canvas.foregroundColor;
+        const color = drawingColor(layer);
         const shape = new Konva.Line({
           points: [...lassoPoints],
           closed: true,
@@ -1397,6 +1485,14 @@
     const pointerPos = stage!.getPointerPosition();
     if (!pointerPos) return;
 
+    // Shift scrolls the canvas sideways instead of zooming it — the modifier
+    // people expect from a wheel over a picture.
+    if (e.evt.shiftKey) {
+      canvas.viewport = { ...canvas.viewport, panX: canvas.viewport.panX - e.evt.deltaY };
+      scheduleViewportApply();
+      return;
+    }
+
     const delta = e.evt.deltaY;
     const scaleBy = 1.08;
     const oldZoom = canvas.viewport.zoom;
@@ -1435,6 +1531,9 @@
 
   // Space bar pan support
   function handleKeyDown(e: KeyboardEvent) {
+    // Typing belongs to the field: a space in a prompt must not start panning.
+    if (isTypingTarget(e.target)) return;
+
     // Escape cancels an in-progress lasso even if the pointer left the stage.
     if (e.code === "Escape" && isLasso) {
       isLasso = false;
@@ -1456,7 +1555,9 @@
     }
 
     // Hold Alt for a quick eyedropper; release restores the previous tool.
-    if (e.altKey && !isAltEyedropper && !e.repeat && canvas.activeTool !== "eyedropper") {
+    // A mask or a region draws in its own tint, so there is nothing to pick
+    // for one — the same rule the toolbar and the hotkey ask.
+    if (e.altKey && canvas.canPickColor && !isAltEyedropper && !e.repeat && canvas.activeTool !== "eyedropper") {
       isAltEyedropper = true;
       canvas.setTool("eyedropper");
       e.preventDefault();
@@ -1582,7 +1683,7 @@
   $effect(() => {
     void canvas.persistedMaskPreviewUrl;
     void canvas.maskOverlayVisible;
-    void canvas.maskOverlayColor;
+    void canvas.maskOverlayOpacity;
     void canvas.maskOverlayOpacity;
     void canvas.canvasWidth;
     void canvas.canvasHeight;
@@ -1673,10 +1774,47 @@
 
 <svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
 
+<!-- The picture itself is the control; this element only hosts it and its menu. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="w-full h-full relative overflow-hidden bg-neutral-950 {getCursorClass()}"
   bind:this={containerEl}
+  role="presentation"
+  oncontextmenu={openContextMenu}
 >
+  {#if contextMenu}
+    <!-- Right-click on the picture: the actions a canvas is actually asked for,
+         all with the layer list's own wording. -->
+    <div
+      role="menu"
+      tabindex="-1"
+      class="absolute z-30 min-w-40 rounded-md border border-neutral-700/80 bg-neutral-950/95 p-1 text-[11px] text-neutral-200 shadow-xl backdrop-blur-md"
+      style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+      onpointerdown={(event) => event.stopPropagation()}
+    >
+      <button type="button" role="menuitem" class="flex h-6 w-full items-center justify-between gap-6 rounded px-2 text-left hover:bg-neutral-800 disabled:opacity-40" disabled={!canvasHistory.canUndo} onclick={() => runMenuAction(() => canvasHistory.undo())}>
+        <span>{locale.t('canvas.undo')}</span><span class="text-neutral-500">Ctrl+Z</span>
+      </button>
+      <button type="button" role="menuitem" class="flex h-6 w-full items-center justify-between gap-6 rounded px-2 text-left hover:bg-neutral-800 disabled:opacity-40" disabled={!canvasHistory.canRedo} onclick={() => runMenuAction(() => canvasHistory.redo())}>
+        <span>{locale.t('canvas.redo')}</span><span class="text-neutral-500">Ctrl+Y</span>
+      </button>
+      <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" onclick={() => runMenuAction(() => canvas.zoomToFit(canvas.viewportWidth, canvas.viewportHeight))}>
+        {locale.t('canvas.fit_view')}
+      </button>
+      {#if canvas.activeLayer}
+        <div class="my-1 h-px bg-neutral-800"></div>
+        <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" onclick={() => runMenuAction(() => canvas.duplicateLayer(canvas.activeLayerId!))}>
+          {locale.t('canvas.duplicate')}
+        </button>
+        <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" onclick={() => runMenuAction(() => canvas.clearLayer(canvas.activeLayerId!))}>
+          {locale.t('canvas.clear_layer')}
+        </button>
+        <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left text-red-300 hover:bg-red-500/10 disabled:opacity-40" disabled={!canvas.canDeleteActiveLayer} onclick={() => runMenuAction(() => canvas.removeLayer(canvas.activeLayerId!))}>
+          {locale.t('canvas.delete_layer')}
+        </button>
+      {/if}
+    </div>
+  {/if}
   {#if tooltipVisible}
     <div class="fixed" style="left: {tooltipPos.x}px; top: {tooltipPos.y}px; z-index: 100; pointer-events: none;">
       <ColorTooltip color={tooltipColor} />

@@ -253,6 +253,15 @@ pub struct AppConfig {
     /// persist the clip. Mirrors the image-side `manualSaveMode` toggle.
     #[serde(default)]
     pub manual_save_mode: bool,
+    /// Base URL of the user's monbooru server, e.g. `http://127.0.0.1:8455`.
+    /// Empty means monbooru is not configured and the tab stays inert.
+    #[serde(default)]
+    pub monbooru_base_url: String,
+    /// monbooru API bearer token (created under Settings -> Authentication).
+    /// Secret: never logged, never returned to the frontend, and reported to
+    /// clients only as a `monbooru_api_token_configured` boolean.
+    #[serde(default)]
+    pub monbooru_api_token: Option<String>,
 }
 
 /// Default report proxy endpoint. In-app error reports post here unless the
@@ -345,6 +354,8 @@ impl Default for AppConfig {
             report_endpoint: default_report_endpoint(),
             gallery_never_expire: false,
             manual_save_mode: false,
+            monbooru_base_url: String::new(),
+            monbooru_api_token: None,
         }
     }
 }
@@ -402,6 +413,18 @@ pub fn config_to_client_json(
             obj.insert(
                 "llm_oauth_refresh_token".to_string(),
                 serde_json::Value::String(String::new()),
+            );
+            // The monbooru token reads and (in later phases) writes the user's
+            // entire library, so it is treated like the other provider
+            // credentials: the client learns only whether one is set.
+            let monbooru_configured = obj
+                .get("monbooru_api_token")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty());
+            obj.insert("monbooru_api_token".to_string(), serde_json::Value::Null);
+            obj.insert(
+                "monbooru_api_token_configured".to_string(),
+                serde_json::json!(monbooru_configured),
             );
         }
     }
@@ -555,6 +578,7 @@ pub(crate) fn normalize_config_fields(config: &mut AppConfig) {
         &mut config.theme_profile_id,
         &mut config.tls_cert_path,
         &mut config.tls_key_path,
+        &mut config.monbooru_api_token,
     ] {
         match field {
             Some(p) if p.trim().is_empty() => *field = None,
@@ -562,6 +586,9 @@ pub(crate) fn normalize_config_fields(config: &mut AppConfig) {
             None => {}
         }
     }
+    // The monbooru client rejects a base URL with surrounding whitespace, so a
+    // paste with a stray space is normalised here rather than failing at use.
+    config.monbooru_base_url = config.monbooru_base_url.trim().to_string();
     for worker in &mut config.gpu_workers {
         if let Some(label) = &mut worker.label {
             let trimmed = label.trim().to_string();
@@ -648,6 +675,21 @@ pub(crate) fn preserve_secrets(incoming: &mut AppConfig, current: &AppConfig) {
             .novelai_api_key
             .clone_from(&current.novelai_api_key);
     }
+    // Same reasoning as the NovelAI key: the monbooru token is stripped from
+    // every config the frontend receives and replaced with a boolean, so the
+    // snapshot an autosave sends back can never contain it. Without this
+    // carry-forward, changing any unrelated setting would silently erase the
+    // token and the monbooru tab would go back to "not configured". Clearing
+    // goes through `set_monbooru_api_token("")`.
+    if incoming
+        .monbooru_api_token
+        .as_deref()
+        .is_none_or(|t| t.trim().is_empty())
+    {
+        incoming
+            .monbooru_api_token
+            .clone_from(&current.monbooru_api_token);
+    }
 }
 
 /// Save config to disk.
@@ -672,4 +714,67 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
         return Err(e.to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A full-config save sends back a snapshot that can never contain the
+    /// secrets the frontend is not given, so a blanked field has to be read as
+    /// a stale echo rather than an intent to clear.
+    ///
+    /// Regression guard for the monbooru token specifically: it is stripped
+    /// from every config the UI receives, so without the carry-forward in
+    /// `preserve_secrets` changing any unrelated setting would silently erase
+    /// it and the monbooru tab would fall back to "not configured".
+    #[test]
+    fn blanked_monbooru_token_is_carried_forward() {
+        let current = AppConfig {
+            monbooru_api_token: Some("stored-token".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig::default();
+        assert!(incoming.monbooru_api_token.is_none());
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("stored-token"));
+    }
+
+    /// A non-empty incoming token is a real change, so it must win over the
+    /// stored one — otherwise `set_monbooru_api_token` could never replace it.
+    #[test]
+    fn a_new_monbooru_token_replaces_the_stored_one() {
+        let current = AppConfig {
+            monbooru_api_token: Some("stored-token".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig {
+            monbooru_api_token: Some("typed-token".to_string()),
+            ..AppConfig::default()
+        };
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("typed-token"));
+    }
+
+    /// Whitespace is not a token: a field holding only spaces is the same
+    /// stale echo as an empty one, and must not overwrite a real stored token.
+    #[test]
+    fn a_whitespace_monbooru_token_does_not_clear_a_stored_one() {
+        let current = AppConfig {
+            monbooru_api_token: Some("stored-token".to_string()),
+            ..AppConfig::default()
+        };
+        let mut incoming = AppConfig {
+            monbooru_api_token: Some("   ".to_string()),
+            ..AppConfig::default()
+        };
+
+        preserve_secrets(&mut incoming, &current);
+
+        assert_eq!(incoming.monbooru_api_token.as_deref(), Some("stored-token"));
+    }
 }

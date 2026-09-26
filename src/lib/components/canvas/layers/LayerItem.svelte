@@ -3,6 +3,7 @@
   import { Eye, EyeOff, Lock, LockOpen, Check, X } from "@lucide/svelte";
   import { canvas, type CanvasLayer } from "../../../stores/canvas.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import { resolveTint } from "../../../utils/layerTints.js";
 
   let { layer, processIndex = 0 }: { layer: CanvasLayer; processIndex?: number } = $props();
   let isRenaming = $state(false);
@@ -82,8 +83,8 @@
         class="h-9 flex flex-1 min-w-0 items-center gap-2 rounded text-left focus-visible:outline-2 focus-visible:outline-indigo-400 {layer.visible ? '' : 'opacity-50'}"
       >
         <span
-          class="relative shrink-0 w-7 h-7 rounded overflow-hidden border {layer.type === 'region' ? 'border-violet-500/50' : layer.type === 'mask' ? 'border-rose-500/50' : 'border-sky-500/40'}"
-          style="background-color:#262626;background-image:linear-gradient(45deg,#333 25%,transparent 25%),linear-gradient(-45deg,#333 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#333 75%),linear-gradient(-45deg,transparent 75%,#333 75%);background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;"
+          class="relative shrink-0 w-7 h-7 rounded overflow-hidden border"
+          style="border-color: {resolveTint(layer)}; background-color:#262626; background-image:linear-gradient(45deg,#333 25%,transparent 25%),linear-gradient(-45deg,#333 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#333 75%),linear-gradient(-45deg,transparent 75%,#333 75%); background-size:8px 8px; background-position:0 0,0 4px,4px -4px,-4px 0;"
         >
           {#if thumb}<img src={thumb} alt="" class="absolute inset-0 w-full h-full object-contain" />{/if}
         </span>

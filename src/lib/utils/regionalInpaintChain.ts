@@ -129,7 +129,7 @@ export async function runRegionalInpaintChain(
       inpaint_target_width: region.inpaintWidth ?? baseParams.width,
       inpaint_target_height: region.inpaintHeight ?? baseParams.height,
       grow_mask_by: region.maskGrow ?? baseParams.grow_mask_by,
-      differential_diffusion: differentialDiffusion,
+      differential_diffusion: differentialDiffusion || !!region.densityDenoise,
       facefix_enabled: isFinalOutput && facefixOnFinal,
       upscale_enabled: isFinalOutput && upscaleOnFinal,
       detail_segments: isFinalOutput ? segmentsOnFinal : [],

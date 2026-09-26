@@ -383,4 +383,71 @@ mod regional_tests {
         assert!(!found.iter().any(|c| c == "ConditioningSetAreaPercentage"));
         assert!(!found.iter().any(|c| c == "ConditioningSetMask"));
     }
+
+    /// Regions add up instead of replacing one another: each folds into the
+    /// running conditioning, so a shared area carries both texts — and no region
+    /// turns into a pass of its own.
+    #[test]
+    fn overlapping_regions_fold_into_one_conditioning() {
+        let region = |text: &str, x: f64| PositiveRegion {
+            text: text.into(),
+            negative_text: None,
+            mask_image: None,
+            x,
+            y: 0.0,
+            width: 0.6,
+            height: 1.0,
+            strength: 1.0,
+        };
+        let mut params = params_for("anima");
+        params.positive_regions = vec![region("blue sky", 0.0), region("red roof", 0.4)];
+        let graph = build(&params, 7).workflow;
+        let count = |class_type: &str| {
+            graph
+                .values()
+                .filter(|node| node["class_type"] == class_type)
+                .count()
+        };
+        assert_eq!(count("MooshieRegionalMask"), 2, "one mask node per region");
+        assert_eq!(
+            count("ConditioningSetMask"),
+            2,
+            "one conditioning node per region"
+        );
+        assert_eq!(count("ConditioningCombine"), 2, "one fold per region");
+
+        let samplers = |params: &GenerationParams| {
+            build(params, 7)
+                .workflow
+                .values()
+                .filter(|node| {
+                    node["class_type"]
+                        .as_str()
+                        .is_some_and(|kind| kind.contains("Sampler"))
+                })
+                .count()
+        };
+        assert_eq!(
+            samplers(&params),
+            samplers(&params_for("anima")),
+            "a second region must not add a sampler pass"
+        );
+
+        let mut combines: Vec<_> = graph
+            .iter()
+            .filter(|(_, node)| node["class_type"] == "ConditioningCombine")
+            .collect();
+        combines.sort_by_key(|(id, _)| id.parse::<u32>().unwrap());
+        let folded_onto_a_region = combines.iter().any(|(_, node)| {
+            let previous = node["inputs"]["conditioning_1"].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .to_string();
+            combines.iter().any(|(id, _)| id.as_str() == previous)
+        });
+        assert!(
+            folded_onto_a_region,
+            "the second region must fold onto the first, not replace it"
+        );
+    }
 }

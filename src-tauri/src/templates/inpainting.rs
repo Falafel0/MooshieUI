@@ -396,4 +396,237 @@ mod workspace_tests {
             std::fs::write(path, serde_json::to_vec_pretty(&graph).unwrap()).unwrap();
         }
     }
+
+    /// Prompt regions reach the inpaint graph on every family the workspace
+    /// supports; only the sampler wiring is architecture-aware. This path used to
+    /// be SDXL-only, with Anima regions pushed into sequential passes instead, so
+    /// what matters here is that a region conditions the edit and does not become
+    /// a pass of its own.
+    #[test]
+    fn anima_workspace_regions_condition_the_edit_without_their_own_pass() {
+        let params = GenerationParams {
+            mode: "inpainting".into(),
+            checkpoint: "anima.safetensors".into(),
+            model_architecture: "anima".into(),
+            positive_prompt: "a small red flower, painting".into(),
+            negative_prompt: "blurry".into(),
+            width: 256,
+            height: 256,
+            batch_size: 1,
+            steps: 2,
+            cfg: 1.4,
+            sampler_name: "euler".into(),
+            scheduler: "normal".into(),
+            denoise: 0.75,
+            input_image: Some("workspace-base.png".into()),
+            mask_image: Some("workspace-mask.png".into()),
+            inpaint_settings: Some(
+                json!({"area":"masked", "padding":16,"mask_blur":4,"soft":true}),
+            ),
+            positive_regions: vec![PositiveRegion {
+                text: "red hair".into(),
+                negative_text: Some("blue hair".into()),
+                mask_image: Some("prompt-region.png".into()),
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+                strength: 0.8,
+            }],
+            ..Default::default()
+        };
+        let result = build(&params, 123);
+        let classes: Vec<_> = result
+            .workflow
+            .values()
+            .filter_map(|n| n["class_type"].as_str())
+            .collect();
+        assert_eq!(
+            classes.iter().filter(|class| **class == "KSampler").count(),
+            1,
+            "a region must not add a sampler pass to the workspace run"
+        );
+        assert_eq!(
+            classes
+                .iter()
+                .filter(|class| **class == "ConditioningSetMask")
+                .count(),
+            2,
+            "the region conditions the positive and the negative side"
+        );
+        assert_eq!(
+            classes
+                .iter()
+                .filter(|class| **class == "MooshieInpaintConditionMask")
+                .count(),
+            1,
+            "the region mask is aligned through the same crop as the edit mask"
+        );
+        assert_eq!(
+            result.workflow[&result.image_output.0]["class_type"],
+            "MooshieInpaintComposite"
+        );
+        for node in result.workflow.values() {
+            for value in node["inputs"].as_object().unwrap().values() {
+                if let Some(connection) = value.as_array() {
+                    if let Some(id) = connection.first().and_then(|v| v.as_str()) {
+                        assert!(result.workflow.contains_key(id), "missing node {id}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Overlapping regions accumulate in one pass. Each region folds its own
+    /// mask-conditioned prompt into the running conditioning, so the overlap
+    /// carries both texts; and no region may become a pass of its own.
+    #[test]
+    fn overlapping_regions_accumulate_in_a_single_pass() {
+        let region = |text: &str, x: f64| PositiveRegion {
+            text: text.into(),
+            negative_text: Some(format!("{text} negative")),
+            mask_image: Some(format!("{text}.png")),
+            x,
+            y: 0.0,
+            width: 0.6,
+            height: 1.0,
+            strength: 0.9,
+        };
+        let params = GenerationParams {
+            mode: "inpainting".into(),
+            checkpoint: "model.safetensors".into(),
+            model_architecture: "sdxl".into(),
+            positive_prompt: "a small red flower".into(),
+            negative_prompt: "blurry".into(),
+            width: 256,
+            height: 256,
+            batch_size: 1,
+            steps: 2,
+            cfg: 4.0,
+            sampler_name: "euler".into(),
+            scheduler: "normal".into(),
+            denoise: 0.75,
+            input_image: Some("workspace-base.png".into()),
+            mask_image: Some("workspace-mask.png".into()),
+            inpaint_settings: Some(json!({"area":"masked","padding":16,"mask_blur":4,"soft":true})),
+            positive_regions: vec![region("red hair", 0.0), region("blue scarf", 0.4)],
+            ..Default::default()
+        };
+        let result = build(&params, 123);
+        let workflow = &result.workflow;
+        let count = |class_type: &str| {
+            workflow
+                .values()
+                .filter(|node| node["class_type"] == class_type)
+                .count()
+        };
+
+        assert_eq!(
+            count("MooshieInpaintConditionMask"),
+            2,
+            "one aligned region mask each"
+        );
+        assert_eq!(
+            count("ConditioningSetMask"),
+            4,
+            "positive and negative per region"
+        );
+        assert_eq!(count("KSampler"), 1, "a region never adds a pass");
+
+        // Positive and negative sides each fold one region at a time. A region
+        // whose conditioning nobody consumes would be influence that never
+        // arrives, which is the failure this guards against.
+        let combines: Vec<_> = workflow
+            .iter()
+            .filter(|(_, node)| node["class_type"] == "ConditioningCombine")
+            .collect();
+        assert_eq!(combines.len(), 4, "one fold per region, on both sides");
+        for (id, _) in workflow
+            .iter()
+            .filter(|(_, node)| node["class_type"] == "ConditioningSetMask")
+        {
+            let folded = combines
+                .iter()
+                .any(|(_, node)| node["inputs"]["conditioning_2"] == json!([id.clone(), 0]));
+            assert!(
+                folded,
+                "region conditioning {id} is never folded into the prompt"
+            );
+        }
+        // A fold continues the running conditioning instead of restarting it.
+        for (_, node) in &combines {
+            let previous = node["inputs"]["conditioning_1"].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let previous_kind = workflow[&previous]["class_type"].as_str().unwrap();
+            assert!(
+                previous_kind == "ConditioningCombine"
+                    || previous_kind.contains("CLIPTextEncode")
+                    || previous_kind.contains("Conditioning"),
+                "unexpected chain link {previous_kind}"
+            );
+        }
+
+        for node in workflow.values() {
+            for value in node["inputs"].as_object().unwrap().values() {
+                if let Some(connection) = value.as_array() {
+                    if let Some(id) = connection.first().and_then(|v| v.as_str()) {
+                        assert!(workflow.contains_key(id), "missing node {id}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_mask_that_drives_its_own_denoise_gets_a_per_pixel_denoise() {
+        // Density-driven denoise asks for Differential Diffusion explicitly, so
+        // it must land in the graph even where the automatic rule deliberately
+        // skips it: CFG++ on an Anima model, where the sampler itself would be
+        // damaged by it.
+        let mut params = GenerationParams {
+            mode: "inpainting".into(),
+            checkpoint: "Juice.safetensors".into(),
+            model_architecture: "anima".into(),
+            positive_prompt: "a small red flower, painting".into(),
+            negative_prompt: "blurry".into(),
+            width: 256,
+            height: 256,
+            steps: 2,
+            cfg: 1.4,
+            sampler_name: "euler_ancestral_cfg_pp".into(),
+            scheduler: "normal".into(),
+            denoise: 0.42,
+            input_image: Some("workspace-base.png".into()),
+            mask_image: Some("workspace-mask.png".into()),
+            ..Default::default()
+        };
+        let classes_of = |params: &GenerationParams| {
+            build(params, 123)
+                .workflow
+                .values()
+                .filter_map(|n| n["class_type"].as_str())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+
+        let automatic = classes_of(&params);
+        assert!(
+            !automatic.contains(&"DifferentialDiffusion".to_string()),
+            "cfg++ keeps the automatic per-pixel denoise out"
+        );
+
+        params.differential_diffusion = true;
+        let requested = classes_of(&params);
+        assert!(
+            requested.contains(&"DifferentialDiffusion".to_string()),
+            "an explicit per-pixel denoise is not a suggestion"
+        );
+        assert_eq!(
+            requested.iter().filter(|c| *c == "KSampler").count(),
+            1,
+            "and it stays one pass: the density changes strength, not passes"
+        );
+    }
 }

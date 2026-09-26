@@ -282,7 +282,7 @@
 </script>
 
 <div class="space-y-3">
-  {#if hasAnimaRecommendation}
+  {#if hasAnimaRecommendation && !generation.hideRecommendedParams}
     <div class="rounded-lg border border-indigo-700/50 bg-indigo-900/15 overflow-hidden">
       <button
         class="w-full flex items-center justify-between px-2.5 py-2 text-left"
@@ -346,7 +346,7 @@
     </div>
   {/if}
 
-  {#if hasJuiceRecommendation}
+  {#if hasJuiceRecommendation && !generation.hideRecommendedParams}
     <div class="rounded-lg border border-neutral-700 bg-neutral-900/60 overflow-hidden">
       <button
         class="w-full flex items-center justify-between px-2.5 py-2 text-left"
@@ -369,7 +369,7 @@
     </div>
   {/if}
 
-  {#if hasNanosaurRecommendation}
+  {#if hasNanosaurRecommendation && !generation.hideRecommendedParams}
     <div class="rounded-lg border border-emerald-700/50 bg-emerald-900/15 overflow-hidden">
       <button
         class="w-full flex items-center justify-between px-2.5 py-2 text-left"
@@ -447,7 +447,7 @@
     </div>
   {/if}
 
-  {#if generation.isNovelAi}
+  {#if generation.isNovelAi && !generation.hideRecommendedParams}
     <div class="rounded-lg border border-teal-700/50 bg-teal-900/15 overflow-hidden">
       <button
         class="w-full flex items-center justify-between px-2.5 py-2 text-left"
@@ -563,7 +563,8 @@
     </div>
   </div>
   <!-- Recommendations row -->
-  <div class="flex items-center justify-between gap-2 -mt-1">
+  {#if !generation.hideRecommendedParams}
+    <div class="flex items-center justify-between gap-2 -mt-1">
     <span class="text-[10px] {stepsOutOfRange ? 'text-amber-400' : 'text-neutral-500'} truncate">
       Steps: {recommendedStepRange().min}-{recommendedStepRange().max}
     </span>
@@ -578,7 +579,8 @@
         {locale.t('generation.sampler.fix')}
       </button>
     {/if}
-  </div>
+    </div>
+  {/if}
 
   {#if generation.cfg <= 1.0}
     <div class="flex items-start gap-2 rounded-lg border border-amber-600/60 bg-amber-950/30 px-3 py-2 mt-1">

@@ -779,31 +779,11 @@
           <span class="text-neutral-500"> · {generation.width}×{generation.height}</span>
         </p>
         <p class="mt-1 text-[11px] text-neutral-500">{locale.t("generation.regional.cohesion_tip")}</p>
-        {#if generation.canChooseRegionalStrategy}
-          <div class="mt-2 flex flex-wrap items-center gap-2">
-            <span class="text-[11px] text-neutral-400">{locale.t("generation.regional.strategy_label")}</span>
-            <button
-              type="button"
-              onclick={() => { generation.regionalPromptStrategy = "conditioning"; }}
-              class="rounded-lg border px-2 py-0.5 text-[11px] transition-colors {generation.regionalPromptStrategy === 'conditioning' ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200' : 'border-neutral-600 bg-neutral-900 text-neutral-300 hover:border-neutral-500'}"
-            >
-              {locale.t("generation.regional.strategy_conditioning")}
-            </button>
-            <button
-              type="button"
-              onclick={() => { generation.regionalPromptStrategy = "inpaint_chain"; }}
-              class="rounded-lg border px-2 py-0.5 text-[11px] transition-colors {generation.regionalPromptStrategy === 'inpaint_chain' ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200' : 'border-neutral-600 bg-neutral-900 text-neutral-300 hover:border-neutral-500'}"
-            >
-              {locale.t("generation.regional.strategy_inpaint")}
-            </button>
-          </div>
-        {:else if generation.isAnima}
-          <p class="mt-1 text-[11px] text-cyan-300/90">{locale.t("generation.regional.anima_inpaint_note")}</p>
-        {/if}
-        {#if generation.effectiveRegionalStrategy === "conditioning"}
+        {#if generation.supportsRegionalConditioning}
           <p class="text-[11px] text-amber-400/80">{locale.t("generation.regional.shape_backend_note")}</p>
-        {:else}
-          <p class="text-[11px] text-cyan-300/90">{locale.t("generation.regional.inpaint_shape_note")}</p>
+        {/if}
+        {#if generation.supportsSequentialEditMasks}
+          <p class="text-[11px] text-cyan-300/90">{locale.t("generation.regional.inpaint_mechanism_note")}</p>
         {/if}
       </div>
       <button

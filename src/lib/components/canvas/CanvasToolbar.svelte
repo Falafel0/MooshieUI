@@ -1,5 +1,6 @@
 <script lang="ts">
   import { canvas, type ToolType } from "../../stores/canvas.svelte.js";
+  import { isTypingTarget } from "../../utils/keyboardTarget.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import BrushSettings from "./controls/BrushSettings.svelte";
@@ -75,8 +76,8 @@
   function handleKeyDown(e: KeyboardEvent) {
     if (!canvas.isPointerOverStage) return;
 
-    // Don't trigger if typing in an input
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    // Don't trigger if typing in a field — including a rich-text editor.
+    if (isTypingTarget(e.target)) return;
 
     // Undo/Redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -110,7 +111,7 @@
       case "u": canvas.setTool("rectFill"); break;
       case "o": canvas.setTool("ellipseFill"); break;
       case "q": canvas.setTool("lasso"); break;
-      case "i": canvas.setTool("eyedropper"); break;
+      case "i": if (canvas.canPickColor) canvas.setTool("eyedropper"); break;
       case "v": canvas.setTool("move"); break;
       case "t": canvas.setTool("transform"); break;
       case "c": canvas.setTool("canvasResize"); break;
@@ -128,7 +129,7 @@
 <div class="flex shrink-0 flex-wrap items-center gap-1 max-h-28 overflow-auto px-2 py-1 bg-neutral-900 border-b border-neutral-800 [scrollbar-width:thin]">
   <!-- Tool buttons -->
   <div class="flex shrink-0 items-center gap-0.5">
-    {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.activeLayer?.type === 'raster') as tool}
+    {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.canPickColor) as tool}
       <button
         disabled={!editable && tool.id !== "view" && tool.id !== "canvasResize"}
         aria-label={locale.t(tool.labelKey)}
