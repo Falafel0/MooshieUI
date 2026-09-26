@@ -54,15 +54,22 @@ impl LiveSession {
         let mut command = Command::new(&connector);
         #[cfg(windows)]
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW: the stdio proxy has no UI.
-        let mut child = command.arg("--attach")
+        let mut child = command
+            .arg("--attach")
             .kill_on_drop(true)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|error| failure(format!("Could not start Patchy connector: {error}")))?;
-        let input = child.stdin.take().ok_or_else(|| failure("Patchy connector has no stdin"))?;
-        let output = child.stdout.take().ok_or_else(|| failure("Patchy connector has no stdout"))?;
+        let input = child
+            .stdin
+            .take()
+            .ok_or_else(|| failure("Patchy connector has no stdin"))?;
+        let output = child
+            .stdout
+            .take()
+            .ok_or_else(|| failure("Patchy connector has no stdout"))?;
         let mut session = Self {
             executable,
             _child: child,
@@ -94,7 +101,12 @@ impl LiveSession {
             self.input.write_all(b"\n").await?;
             self.input.flush().await?;
             let mut line = String::new();
-            if (&mut self.output).take(16 * 1024 * 1024 + 1).read_line(&mut line).await? == 0 {
+            if (&mut self.output)
+                .take(16 * 1024 * 1024 + 1)
+                .read_line(&mut line)
+                .await?
+                == 0
+            {
                 return Err(failure("Patchy live connector disconnected"));
             }
             if line.len() > 16 * 1024 * 1024 || !line.ends_with('\n') {
@@ -103,7 +115,9 @@ impl LiveSession {
             let response: Value = serde_json::from_str(&line)
                 .map_err(|error| failure(format!("Invalid Patchy response: {error}")))?;
             if response["id"].as_u64() != Some(id) {
-                return Err(failure("Patchy live connector returned a mismatched request ID"));
+                return Err(failure(
+                    "Patchy live connector returned a mismatched request ID",
+                ));
             }
             if let Some(error) = response.get("error") {
                 return Err(failure(format!("Patchy live request failed: {error}")));
@@ -135,7 +149,9 @@ fn handoff_path(path: &str) -> Result<PathBuf, AppError> {
         .map_err(|_| failure("Patchy hand-off document is missing"))?;
     let dir = documents_dir()?.canonicalize()?;
     if handoff.parent() != Some(dir.as_path()) || !handoff.is_file() {
-        return Err(failure("The requested file is not a Patchy hand-off document"));
+        return Err(failure(
+            "The requested file is not a Patchy hand-off document",
+        ));
     }
     Ok(handoff)
 }
@@ -143,10 +159,16 @@ fn handoff_path(path: &str) -> Result<PathBuf, AppError> {
 fn matches_handoff(document_path: &str, handoff: &Path) -> bool {
     let candidate = Path::new(document_path);
     let same_path = |expected: &Path| {
-        let actual = candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf());
-        let expected = expected.canonicalize().unwrap_or_else(|_| expected.to_path_buf());
+        let actual = candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.to_path_buf());
+        let expected = expected
+            .canonicalize()
+            .unwrap_or_else(|_| expected.to_path_buf());
         if cfg!(windows) {
-            actual.to_string_lossy().eq_ignore_ascii_case(&expected.to_string_lossy())
+            actual
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected.to_string_lossy())
         } else {
             actual == expected
         }
@@ -179,22 +201,36 @@ pub(super) fn install_return_script(path: &Path) -> Result<(), AppError> {
     let handoff = handoff_path(&path.to_string_lossy())?;
     let dir = dirs::data_dir()
         .ok_or_else(|| failure("Could not find Patchy's user scripts directory"))?
-        .join("RTsoft").join("Patchy").join("scripts").join("MooshieUI");
+        .join("RTsoft")
+        .join("Patchy")
+        .join("scripts")
+        .join("MooshieUI");
     std::fs::create_dir_all(&dir)?;
     let script = dir.join("Return to MooshieUI.js");
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(&script) {
-        Ok(mut file) => file.write_all(include_bytes!("../../resources/patchy/mooshieui-return.js"))?,
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&script)
+    {
+        Ok(mut file) => {
+            file.write_all(include_bytes!("../../resources/patchy/mooshieui-return.js"))?
+        }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
-    std::fs::write(handoff.with_extension("mooshie-link.json"), b"{\"version\":1}")?;
+    std::fs::write(
+        handoff.with_extension("mooshie-link.json"),
+        b"{\"version\":1}",
+    )?;
     Ok(())
 }
 
 fn take_return_request(handoff: &Path) -> Option<String> {
     let path = handoff.with_extension("mooshie-request.json");
     let meta = std::fs::metadata(&path).ok()?;
-    if meta.len() > 1024 { return None; }
+    if meta.len() > 1024 {
+        return None;
+    }
     let fresh = meta.modified().ok()?.elapsed().ok()? < Duration::from_secs(60);
     let request: Value = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
     let _ = std::fs::remove_file(path);
@@ -217,13 +253,22 @@ pub async fn read_patchy_live_document(
     let executable = resolve_patchy_executable(explicit.as_deref())
         .ok_or_else(|| failure("Patchy executable not found"))?;
     let mut guard = LIVE.lock().await;
-    if guard.as_ref().is_some_and(|session| session.executable != executable) {
+    if guard
+        .as_ref()
+        .is_some_and(|session| session.executable != executable)
+    {
         *guard = None;
     }
     if guard.is_none() {
         *guard = Some(LiveSession::start(executable).await?);
     }
-    let result = read_from_session(guard.as_mut().unwrap(), &handoff, preview_only, known_state.as_deref()).await;
+    let result = read_from_session(
+        guard.as_mut().unwrap(),
+        &handoff,
+        preview_only,
+        known_state.as_deref(),
+    )
+    .await;
     if result.is_err() {
         // Dropping the proxy does not close or save the user's Patchy window.
         *guard = None;
@@ -248,7 +293,9 @@ async fn read_from_session(
                     .is_some_and(|path| matches_handoff(path, handoff))
             })
         })
-        .ok_or_else(|| failure("Open this hand-off document in Patchy before reading live edits"))?;
+        .ok_or_else(|| {
+            failure("Open this hand-off document in Patchy before reading live edits")
+        })?;
     let id = document["id"]
         .as_str()
         .ok_or_else(|| failure("Patchy document has no ID"))?;
@@ -258,7 +305,9 @@ async fn read_from_session(
         return Err(failure("Patchy document has invalid dimensions"));
     }
     if !preview_only && u64::from(width) * u64::from(height) > MAX_LIVE_PIXELS {
-        return Err(failure("Live import exceeds 16 million pixels; save in Patchy and import the saved file"));
+        return Err(failure(
+            "Live import exceeds 16 million pixels; save in Patchy and import the saved file",
+        ));
     }
     let token = state["stateToken"]
         .as_str()
@@ -282,7 +331,13 @@ async fn read_from_session(
         });
     }
     if preview_only {
-        let (bytes, _) = preview_tile(session, id, json!({"maxWidth": 1024, "maxHeight": 1024}), token).await?;
+        let (bytes, _) = preview_tile(
+            session,
+            id,
+            json!({"maxWidth": 1024, "maxHeight": 1024}),
+            token,
+        )
+        .await?;
         let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
             .map_err(|error| failure(format!("Invalid Patchy preview: {error}")))?;
         return Ok(PatchyLiveRead {
@@ -323,7 +378,10 @@ async fn read_from_session(
     }
     let mut bytes = Vec::new();
     image::DynamicImage::ImageRgba8(canvas)
-        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
         .map_err(|error| failure(format!("Could not encode Patchy live image: {error}")))?;
     Ok(PatchyLiveRead {
         bytes,
@@ -351,7 +409,9 @@ async fn preview_tile(
         .await?;
     let metadata = &reply["structuredContent"];
     if metadata["stateToken"].as_str() != Some(expected_state) {
-        return Err(failure("Patchy document changed during live import; retry after editing"));
+        return Err(failure(
+            "Patchy document changed during live import; retry after editing",
+        ));
     }
     let data = reply["content"]
         .as_array()
@@ -383,11 +443,15 @@ pub async fn patchy_live_action(
 ) -> Result<bool, AppError> {
     let handoff = handoff_path(&path)?;
     let mut guard = LIVE.lock().await;
-    let session = guard.as_mut().ok_or_else(|| failure("Connect to open Patchy first"))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| failure("Connect to open Patchy first"))?;
     let executable = resolve_patchy_executable(explicit.as_deref())
         .ok_or_else(|| failure("Patchy executable not found"))?;
     if session.executable != executable {
-        return Err(failure("The Patchy installation changed; reconnect before editing"));
+        return Err(failure(
+            "The Patchy installation changed; reconnect before editing",
+        ));
     }
     let state = session.tool("get_state", json!({})).await?;
     let state = &state["structuredContent"];
@@ -395,29 +459,44 @@ pub async fn patchy_live_action(
         .as_array()
         .and_then(|docs| {
             docs.iter().find(|doc| {
-                doc["path"].as_str().is_some_and(|path| matches_handoff(path, &handoff))
+                doc["path"]
+                    .as_str()
+                    .is_some_and(|path| matches_handoff(path, &handoff))
             })
         })
         .ok_or_else(|| failure("The hand-off document is no longer open in Patchy"))?;
     if state["stateToken"].as_str() != Some(expected_state.as_str()) {
-        return Err(failure("Patchy changed since the preview; inspect it and try again"));
+        return Err(failure(
+            "Patchy changed since the preview; inspect it and try again",
+        ));
     }
-    let document_id = doc["id"].as_str().ok_or_else(|| failure("Patchy document has no ID"))?;
+    let document_id = doc["id"]
+        .as_str()
+        .ok_or_else(|| failure("Patchy document has no ID"))?;
     match action.as_str() {
         "undo" | "redo" => {
-            let reply = session.tool(action.as_str(), json!({
-                "documentId": document_id, "expectedState": expected_state
-            })).await?;
-            Ok(reply["structuredContent"]["changed"].as_bool().unwrap_or(false))
+            let reply = session
+                .tool(
+                    action.as_str(),
+                    json!({
+                        "documentId": document_id, "expectedState": expected_state
+                    }),
+                )
+                .await?;
+            Ok(reply["structuredContent"]["changed"]
+                .as_bool()
+                .unwrap_or(false))
         }
         "add_reference_layer" => {
             let bytes = source_bytes.ok_or_else(|| failure("Source image is missing"))?;
-            if bytes.len() > 64 * 1024 * 1024 ||
-                image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).is_err() {
+            if bytes.len() > 64 * 1024 * 1024
+                || image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).is_err()
+            {
                 return Err(failure("The reference must be a PNG smaller than 64 MiB"));
             }
             let reference = handoff.with_file_name(format!(
-                "mooshie-reference-{}.png", uuid::Uuid::new_v4().simple()
+                "mooshie-reference-{}.png",
+                uuid::Uuid::new_v4().simple()
             ));
             std::fs::write(&reference, bytes)?;
             let result = session.tool("execute_script", json!({

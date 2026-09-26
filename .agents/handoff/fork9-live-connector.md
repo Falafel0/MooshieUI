@@ -40,12 +40,12 @@ saved-output, live-frame, remount, JXL and empty-mode cases.
   discovery, request sidecars and full-resolution capture before a release.
 - No tag or release build was started.
 
-Two attempts to push were rejected by automatic approval review, most recently
-after the user's release instruction. The stated reason was that release work
-did not explicitly authorize uploading source and history to
-`github.com/Falafel0/MooshieUI`. Do not bypass the rejection with the GitHub
-contents API or another transport. Obtain an explicit destination-specific
-publication authorization, then update PR #23 and run its Windows Rust gate.
+Publication is explicitly authorized by the user for Falafel0/MooshieUI,
+including PR #23, merge after checks, upstream integration and fork.9 release.
+Git HTTPS has no local credentials; the connected GitHub API published the
+identical source tree as commit 7641fa8, with upstream 9c77c1e as a merge parent.
+PR #23 is updated. Frontend, i18n, regressions and GlassWorm passed in CI;
+Windows formatting needs correction before compilation can run.
 
 The repository release skill requires native build/test gates before tagging.
 PR #23 was the only open PR observed, with no review threads/comments.
