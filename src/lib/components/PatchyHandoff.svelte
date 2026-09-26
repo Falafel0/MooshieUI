@@ -31,7 +31,12 @@
       bytes: number[],
       target: "base" | "raster" | "mask" | "region",
       suggestedName: string,
-    ) => Promise<void> | void;
+      /** The document this dialog handed out. Mask and region targets read the
+       * user's selection out of the difference between the two files. */
+      sourceBytes?: number[],
+      /** `false` means the handler refused and has already told the user why, so
+       * the panel must not report the import as applied. */
+    ) => Promise<boolean | void> | boolean | void;
   }
 
   let { open, image, onclose, onsaved, onimport }: Props = $props();
@@ -87,6 +92,9 @@
   // the moment it is written, so a read-back must be compared against what went
   // out — otherwise the panel would present our own export as the edited result.
   let exportFingerprint = $state<string | null>(null);
+  // The document itself, kept so a selection can be recovered from what the
+  // editor changed. Without it a mask import can only guess from luminance.
+  let exportBytes = $state<number[] | null>(null);
   let importInfo = $state<PayloadInfo | null>(null);
   // Object URL for the edited file coming back; revoked whenever it is replaced.
   let importPreviewUrl = $state<string | null>(null);
@@ -166,6 +174,7 @@
     installError = "";
     exportInfo = null;
     exportFingerprint = null;
+    exportBytes = null;
     importInfo = null;
     importError = "";
     importStatus = "idle";
@@ -284,6 +293,7 @@
     documentPath = await writePatchyDocument(bytes, documentName());
     exportInfo = describePayload(documentName(), bytes);
     exportFingerprint = fingerprint(bytes);
+    exportBytes = bytes;
     phase = "ready";
   }
 
@@ -477,7 +487,14 @@
         onsaved?.(saved);
       } else {
         if (!onimport) throw new Error("Patchy import handler is unavailable");
-        await onimport(bytes, target, `patchy_${documentName()}`);
+        const applied = await onimport(bytes, target, `patchy_${documentName()}`, exportBytes ?? undefined);
+        if (applied === false) {
+          // The handler refused and explained why. Saying "applied" here would
+          // contradict the message the user just got.
+          pendingImport = null;
+          importStatus = "ready";
+          return;
+        }
       }
       pendingImport = null;
       appliedTarget = target;
@@ -846,6 +863,12 @@
                       onclick={() => importResult("region")}
                     >{locale.t("patchy.import_region")}</button>
                   </div>
+                  <!-- The mask and region targets read the selection from what
+                       the editor changed, so say what that means before the user
+                       spends time painting in the wrong convention. -->
+                  <p class="mt-1.5 text-[10px] text-neutral-500">
+                    {locale.t("patchy.mask_paint_hint")}
+                  </p>
                 {/if}
               </div>
             </div>

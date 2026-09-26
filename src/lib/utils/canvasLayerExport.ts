@@ -43,6 +43,70 @@ export function opaqueMaskLuminanceToAlpha(pixels: Uint8ClampedArray): boolean {
   return true;
 }
 
+/** A pixel difference at least this large is something the user painted rather
+ * than re-encode drift: an editor that saves an untouched document returns its
+ * pixels bit-identical, which was measured against real output, not assumed. */
+export const PAINTED_COVERAGE_DELTA = 8;
+
+/** The coverage a user painted in an external editor, read from what changed.
+ *
+ * The document handed to the editor is the image itself, so the saved result
+ * carries the image's luminance and not the user's selection:
+ * `opaqueMaskLuminanceToAlpha()` would turn a photograph into a mask of its own
+ * brightness — one painted blob coming back as a full-canvas selection, with the
+ * bright half of the picture silently included. Comparing the saved document
+ * against the one that was handed out recovers the selection itself: the pixels
+ * the editor changed are the pixels the user painted.
+ *
+ * White paint over an already-white pixel is indistinguishable from no paint at
+ * all; the editor shows the user no change there either, so the two agree.
+ *
+ * Returns false when nothing was painted, so an empty selection is reported
+ * instead of applied. RGB is rewritten with the coverage as well, so the mask
+ * layer reads like a mask (`grayscaleMaskBounds()` reads the red channel). */
+export function paintedCoverageToAlpha(
+  original: Uint8ClampedArray,
+  edited: Uint8ClampedArray,
+): boolean {
+  if (original.length !== edited.length) return false;
+  let painted = false;
+  for (let i = 0; i < edited.length; i += 4) {
+    const delta = Math.max(
+      Math.abs(edited[i] - original[i]),
+      Math.abs(edited[i + 1] - original[i + 1]),
+      Math.abs(edited[i + 2] - original[i + 2]),
+      Math.abs(edited[i + 3] - original[i + 3]),
+    );
+    const wasWhite = original[i] >= 250 && original[i + 1] >= 250 && original[i + 2] >= 250;
+    const isWhite = edited[i] >= 250 && edited[i + 1] >= 250 && edited[i + 2] >= 250;
+    const covered = delta >= PAINTED_COVERAGE_DELTA || (isWhite && !wasWhite);
+    if (covered) painted = true;
+    const value = covered ? 255 : 0;
+    edited[i] = edited[i + 1] = edited[i + 2] = value;
+    edited[i + 3] = value;
+  }
+  return painted;
+}
+
+/** Whether a returned document can be compared to the one that was handed out.
+ *
+ * A resized edit has no pixel-to-pixel correspondence with the original, so a
+ * difference taken across the two would report every pixel outside the original
+ * as painted and apply a mask over the whole canvas. Callers must refuse the
+ * read instead — which is also the honest answer for a mask, since a mask has to
+ * match the image it masks. */
+export function canComparePaintedCoverage(
+  original: { width: number; height: number },
+  edited: { width: number; height: number },
+): boolean {
+  return (
+    original.width > 0 &&
+    original.height > 0 &&
+    original.width === edited.width &&
+    original.height === edited.height
+  );
+}
+
 export interface MaskPixelBounds {
   x: number;
   y: number;

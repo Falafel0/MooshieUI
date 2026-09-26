@@ -63,7 +63,7 @@
   import InterrogateModal from "./lib/components/generation/InterrogateModal.svelte";
   import ExternalComfyModal from "./lib/components/ExternalComfyModal.svelte";
   import PatchyHandoff from "./lib/components/PatchyHandoff.svelte";
-  import { opaqueMaskLuminanceToAlpha } from "./lib/utils/canvasLayerExport.js";
+  import { canComparePaintedCoverage, opaqueMaskLuminanceToAlpha, paintedCoverageToAlpha } from "./lib/utils/canvasLayerExport.js";
   import GlobalErrorModal from "./lib/components/errors/GlobalErrorModal.svelte";
   import NaiEnhanceModal from "./lib/components/generation/NaiEnhanceModal.svelte";
   import DirectorToolsModal from "./lib/components/generation/DirectorToolsModal.svelte";
@@ -939,10 +939,54 @@
     patchyOpen = true;
   }
 
+  /**
+   * The coverage a user painted, read from the difference between the document
+   * that was handed to the editor and the one it saved.
+   *
+   * Both buffers are decoded at the document's own size, so a pixel in one lines
+   * up with the same pixel in the other. The edited pixels are rewritten with
+   * the coverage in place, ready to become the mask layer.
+   */
+  async function paintedCoverageOf(
+    originalBytes: number[],
+    edited: ImageData,
+    dimensions: { width: number; height: number },
+  ): Promise<boolean | "resized"> {
+    const url = URL.createObjectURL(
+      new Blob([new Uint8Array(originalBytes)], { type: "image/png" }),
+    );
+    try {
+      const original = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error("Failed to decode the handed-out document"));
+        element.src = url;
+      });
+      // A resized edit has no pixel-to-pixel correspondence, and comparing it
+      // anyway would read the whole area outside the original as painted.
+      if (!canComparePaintedCoverage(
+        { width: original.naturalWidth, height: original.naturalHeight },
+        dimensions,
+      )) {
+        return "resized";
+      }
+      const before = document.createElement("canvas");
+      before.width = dimensions.width;
+      before.height = dimensions.height;
+      const context = before.getContext("2d")!;
+      context.drawImage(original, 0, 0);
+      const originalPixels = context.getImageData(0, 0, dimensions.width, dimensions.height);
+      return paintedCoverageToAlpha(originalPixels.data, edited.data);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function importPatchyToCanvas(
     bytes: number[],
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
+    sourceBytes?: number[],
   ) {
     const sourceVersion = canvas.inpaintSourceVersion;
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
@@ -963,7 +1007,27 @@
         const context = mask.getContext("2d")!;
         context.drawImage(source, 0, 0);
         const pixels = context.getImageData(0, 0, mask.width, mask.height);
-        if (opaqueMaskLuminanceToAlpha(pixels.data)) {
+        // The document handed to the editor is the image itself, so its
+        // brightness belongs to the picture and not to the user's selection:
+        // reading luminance would turn a bright photo into a full-canvas mask.
+        // Recover the selection from what the editor changed instead, and only
+        // read luminance when there is no copy of the handed-out document.
+        const painted = sourceBytes
+          ? await paintedCoverageOf(sourceBytes, pixels, dimensions)
+          : opaqueMaskLuminanceToAlpha(pixels.data);
+        if (painted === "resized") {
+          // A mask has to match the image it masks, and the two files no longer
+          // line up: report it instead of masking everything by accident.
+          gallery.showToast(locale.t("patchy.mask_size_mismatch"), "error");
+          return false;
+        }
+        if (sourceBytes && !painted) {
+          // The file changed but nothing above the noise floor did: say so
+          // rather than applying a mask the user never painted.
+          gallery.showToast(locale.t("patchy.mask_nothing_painted"), "error");
+          return false;
+        }
+        if (painted) {
           context.putImageData(pixels, 0, 0);
           const normalized = await new Promise<Blob>((resolve, reject) =>
             mask.toBlob((result) => result ? resolve(result) : reject(new Error("Failed to encode the Patchy mask")), "image/png"));
