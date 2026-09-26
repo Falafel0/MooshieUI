@@ -8,6 +8,30 @@ permissions:
   contents: read
 
 jobs:
+  native-windows:
+    name: Native Rust (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Rust cache
+        uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+      - name: Format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Desktop compile
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - name: Server compile
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked --no-default-features --features server
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+
   guardrails:
     name: Guardrails (build, i18n, types)
     runs-on: ubuntu-latest
