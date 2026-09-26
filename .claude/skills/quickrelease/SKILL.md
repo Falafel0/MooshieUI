@@ -96,7 +96,7 @@ gh pr merge <PR_NUMBER> --squash --delete-branch --admin
 ```powershell
 git checkout main
 git fetch origin main
-git reset --hard origin/main
+git reset --hard origin/main   # discards uncommitted work: commit or stash first
 git tag vX.Y.Z
 git -c core.hooksPath=/dev/null push origin vX.Y.Z
 ```
