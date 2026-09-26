@@ -31,6 +31,11 @@
   let tooltipColor = $state("#000000");
   let tooltipPos = $state({ x: 0, y: 0 });
   let tooltipRaf: number | null = null;
+  /** Last `layerContentBounds` answer, keyed by what can change it. */
+  let contentBoundsCache: { key: string; bounds: BoxGeometry | null } | null = null;
+  /** A hover colour sample costs a full-stage composite, so it runs at most this often. */
+  let lastTooltipSampleAt = 0;
+  const TOOLTIP_SAMPLE_INTERVAL_MS = 90;
 
   // Konva layers keyed by canvas layer ID
   let konvaLayers = new Map<string, Konva.Layer>();
@@ -158,6 +163,13 @@
       return;
     }
     
+    // The box follows the pointer every frame; only the colour inside it costs a
+    // composite of every layer, so that part runs at a readable rate instead.
+    tooltipPos = { x: pointerPos.x + 15, y: pointerPos.y + 15 };
+    const now = performance.now();
+    if (tooltipVisible && now - lastTooltipSampleAt < TOOLTIP_SAMPLE_INTERVAL_MS) return;
+    lastTooltipSampleAt = now;
+
     // Sample color from all layers
     const compositeCanvas = stage.toCanvas({ pixelRatio: 1 });
     const ctx = compositeCanvas.getContext("2d")!;
@@ -166,7 +178,6 @@
     if (pixel[3] > 0) {
       const hex = `#${pixel[0].toString(16).padStart(2, "0")}${pixel[1].toString(16).padStart(2, "0")}${pixel[2].toString(16).padStart(2, "0")}`;
       tooltipColor = hex;
-      tooltipPos = { x: pointerPos.x + 15, y: pointerPos.y + 15 };
       tooltipVisible = true;
     } else {
       tooltipVisible = false;
@@ -319,13 +330,36 @@
       if (!image) return null;
       return clampToDocument(rotatedBounds(image.x, image.y, image.width, image.height, image.rotation), canvas.canvasWidth, canvas.canvasHeight);
     }
-    const source = canvas.exportMaskLayer(layer.id);
-    if (!source) return null;
     const settings = layer.inpaintSettings ?? generation.inpaintSettings;
     const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
-    const processed = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, resolveTint(layer));
+    const blur = layer.type === 'mask' ? settings.mask_blur : 0;
+    const invert = layer.type === 'mask' && settings.invert_mask;
+    const tint = resolveTint(layer);
+    // Reading a mask means capturing the layer canvas and walking every pixel of
+    // the document, so it cannot happen on each pan or zoom frame. The answer
+    // changes only with the pixels, the layer's geometry or the very settings
+    // this mask is processed with, so those form the key.
+    // Only the layer's own content counts: `captureLayer` neutralises the
+    // container's viewport transform before reading pixels, so pan and zoom must
+    // not enter this key, while the children are exactly what a transform moves.
+    const node = konvaLayers.get(layer.id);
+    const geometry = node ? JSON.stringify(node.getChildren().map((child) => nodeGeometry(child))) : 'none';
+    const key = [
+      layer.id, canvas.paintRevision, grow, blur, invert, tint, geometry,
+      canvas.canvasWidth, canvas.canvasHeight,
+    ].join('|');
+    if (contentBoundsCache?.key === key) return contentBoundsCache.bounds;
+
+    const source = canvas.exportMaskLayer(layer.id);
+    if (!source) {
+      contentBoundsCache = { key, bounds: null };
+      return null;
+    }
+    const processed = buildProcessedMask(source, grow, blur, invert, tint);
     const bounds = processed.bounds;
-    return bounds ? clampToDocument(identityBox(bounds.x, bounds.y, bounds.width, bounds.height), canvas.canvasWidth, canvas.canvasHeight) : null;
+    const result = bounds ? clampToDocument(identityBox(bounds.x, bounds.y, bounds.width, bounds.height), canvas.canvasWidth, canvas.canvasHeight) : null;
+    contentBoundsCache = { key, bounds: result };
+    return result;
   }
 
   function nodeGeometry(node: Konva.Node): NodeGeometry {
