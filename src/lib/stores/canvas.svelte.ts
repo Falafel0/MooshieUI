@@ -952,8 +952,21 @@ class CanvasStore {
       if (!layer || !record) continue;
       if (isMaskLayer(layer)) {
         record.spatialPng = null;
+        if (!layer.visible) {
+          // A hidden mask keeps its records but not its pixels: it is not on the
+          // stage, and saving pixels of something the run will skip would be a
+          // document that changes the picture when it is opened.
+          continue;
+        }
         const konva = stageLayers.find((candidate: any) => candidate.id?.() === layer.id);
-        if (!konva) continue;
+        if (!konva) {
+          // A mask with no stage layer behind it is an inconsistency the user
+          // cannot see: say so instead of quietly saving an empty mask. An
+          // unpainted mask, on the other hand, is perfectly normal and stays
+          // silent.
+          console.warn(`No stage layer for mask ${layer.id}; its pixels are not saved`);
+          continue;
+        }
         try {
           const pixels = captureLayer(konva, this.canvasWidth, this.canvasHeight);
           const data = pixels.getContext("2d")?.getImageData(0, 0, pixels.width, pixels.height).data;
