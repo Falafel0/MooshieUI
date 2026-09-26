@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Collect installers and generate a complete, signed-platform updater manifest."""
+"""Collect the Windows installer and generate a complete, signed-platform updater manifest.
+
+The fork releases for one platform only: `windows-x86_64`, built as an NSIS
+installer by the `build` job in .github/workflows/release.yml. The bundle set is
+asserted below on purpose, so a release that silently lost its installer fails
+instead of publishing a manifest with no usable download.
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,26 +18,20 @@ from pathlib import Path
 from urllib.parse import quote
 
 
-def collect(source: Path, output: Path, tag: str, repo: str, macos: bool = False):
+def collect(source: Path, output: Path, tag: str, repo: str):
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", tag):
         raise ValueError("Expected a semver release tag beginning with v")
     version = tag[1:]
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("Release output directory must be empty")
-    suffixes = (".deb", ".rpm", ".AppImage", ".AppImage.sig", ".exe", ".exe.sig", ".msi", ".msi.sig")
-    if macos:
-        suffixes += (".dmg", ".app.tar.gz", ".app.tar.gz.sig")
+    suffixes = (".exe", ".exe.sig")
     for file in source.rglob("*"):
         if not file.is_file() or not file.name.endswith(suffixes):
             continue
         # GitHub normalizes spaces in uploaded release asset names to dots. Do
         # that before upload so the filename, checksum and updater URL agree.
         name = re.sub(r"\s+", ".", file.name)
-        # Tauri's Mac updater archive omits architecture and version. Rename
-        # the file, preserving the signed bytes and matching signature.
-        if name.endswith((".app.tar.gz", ".app.tar.gz.sig")):
-            name = f"MooshieUI_{version}_aarch64.app.tar.gz" + (".sig" if name.endswith(".sig") else "")
         destination = output / name
         if destination.exists():
             raise ValueError(f"Duplicate release asset: {name}")
@@ -44,12 +44,18 @@ def collect(source: Path, output: Path, tag: str, repo: str, macos: bool = False
         return matches[0]
 
     bundles = {
-        "linux-x86_64": one(f"*_{version}_amd64.AppImage"),
         "windows-x86_64": one(f"*_{version}_x64-setup.exe"),
     }
-    if macos:
-        one(f"*_{version}_aarch64.dmg")
-        bundles["darwin-aarch64"] = one(f"*_{version}_aarch64.app.tar.gz")
+    # One installer and its signature, nothing else. A runner that leaves a
+    # second .exe behind (an msi build, a downloaded "(1)" copy) would otherwise
+    # publish two files a user has to choose between.
+    expected = {bundles["windows-x86_64"].name, bundles["windows-x86_64"].name + ".sig"}
+    extras = sorted(
+        file.name for file in output.iterdir()
+        if file.name.endswith((".exe", ".exe.sig")) and file.name not in expected
+    )
+    if extras:
+        raise ValueError(f"Unexpected installers in the release: {extras}")
     platforms = {}
     for platform, bundle in bundles.items():
         signature = Path(str(bundle) + ".sig").read_text().strip()
@@ -81,7 +87,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--macos", action="store_true")
     args = parser.parse_args()
-    result = collect(args.source, args.output, args.tag, args.repo, args.macos)
+    result = collect(args.source, args.output, args.tag, args.repo)
     print("Prepared updater platforms:", ", ".join(result["platforms"]))

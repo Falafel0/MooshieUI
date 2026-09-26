@@ -1,15 +1,10 @@
 name: macOS Native Validation
 
+# Not part of the release path. The fork ships Windows only, so release.yml no
+# longer calls this workflow and it no longer runs on every pull request that
+# touches app code. It is kept runnable on demand for anyone building the macOS
+# bundle by hand.
 on:
-  pull_request:
-    paths:
-      - 'src-tauri/**'
-      - 'src/**'
-      - 'comfyui-nodes/**'
-      - 'package*.json'
-      - 'scripts/macos/**'
-      - 'scripts/comfyui-compat/**'
-      - '.github/workflows/macos-native.yml'
   workflow_dispatch:
   workflow_call:
     inputs:
