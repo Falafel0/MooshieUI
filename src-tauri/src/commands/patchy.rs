@@ -479,7 +479,7 @@ fn flatten_layered_document(
                 return Err(AppError::Other(format!("Failed to wait for Patchy: {}", e)));
             }
         }
-    }
+    };
 
     if !status.success() || !output.exists() {
         return Err(AppError::Other(format!(
@@ -923,6 +923,8 @@ mod tests {
         );
         // Something that exists, so path resolution accepts it, but cannot run.
         let impostor = touch(&dir, "not-really-patchy.exe");
+        let stale_output = flattened_path(Path::new(&handoff)).unwrap();
+        std::fs::write(&stale_output, b"an old flattened result").unwrap();
 
         let read = read_patchy_document(
             handoff.clone(),
@@ -937,6 +939,10 @@ mod tests {
             "the hand-off file is what comes back when the save cannot be read"
         );
         assert!(!read.flattened);
+        assert!(
+            !stale_output.exists(),
+            "a failed export must remove the previous flattened result"
+        );
         assert_eq!(
             read.layered_source.as_deref(),
             Some(format!("{}.psd", stem).as_str()),
