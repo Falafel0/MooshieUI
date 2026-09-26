@@ -10,7 +10,7 @@ import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
 
-export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform" | "canvasResize";
+export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "canvasResize";
 export type CanvasLayerType = "raster" | "mask" | "region";
 
 export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
@@ -23,6 +23,11 @@ export interface CanvasLayer {
   type: CanvasLayerType;
   visible: boolean;
   opacity: number;
+  /** How much of this layer counts for a run, 0..1. A mask's painted area
+   * multiplied by it is the mask a run reads; a raster's own opacity does the
+   * job instead. Kept apart from `opacity`, which is only how the layer is
+   * drawn on the canvas: dimming an overlay used to silently weaken the mask. */
+  coverage?: number;
   locked: boolean;
   /** Cosmetic tint key from `layerTints.ts`. Display only: generation never
    * reads it, so recolouring a mask or a region cannot change a run. */
@@ -72,6 +77,7 @@ export interface SpatialLayerSnapshot {
   type: "mask" | "region";
   visible: boolean;
   opacity: number;
+  coverage?: number;
   contentUrl: string | null;
 }
 
@@ -618,6 +624,7 @@ class CanvasStore {
           ...layer,
           visible: snapshot.visible,
           opacity: snapshot.opacity,
+          coverage: snapshot.coverage,
           image: snapshot.contentUrl ? {
             src: snapshot.contentUrl,
             x: 0,
@@ -780,7 +787,7 @@ class CanvasStore {
     const stage = this._stageRef;
     if (!stage) return null;
 
-    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && layer.visible && layer.opacity > 0);
+    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && layer.visible && (layer.coverage ?? 1) > 0);
     if (!maskMetas.length) return null;
 
     const stageLayers = stage.getLayers?.() ?? [];
@@ -797,7 +804,7 @@ class CanvasStore {
 
       try {
         const layerCanvas = captureLayer(layer, this.canvasWidth, this.canvasHeight);
-        ctx.globalAlpha = meta.opacity;
+        ctx.globalAlpha = meta.coverage ?? 1;
         ctx.drawImage(layerCanvas, 0, 0);
         drew = true;
       } catch (error) {
@@ -846,6 +853,7 @@ class CanvasStore {
           type: meta.type,
           visible: meta.visible,
           opacity: meta.opacity,
+          coverage: meta.coverage,
           contentUrl,
         };
       });
@@ -946,6 +954,9 @@ class CanvasStore {
         type,
         visible: true,
         opacity: 1,
+        // A mask or a region starts at full coverage: the sliders that dim the
+        // overlay are display-only, so this is the one value a run reads.
+        coverage: type === "raster" ? undefined : 1,
         locked: false,
         showContext: true,
         order: maxOrder + 1,
@@ -1066,6 +1077,9 @@ class CanvasStore {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l));
   }
 
+  /** How the layer is drawn. For a mask or a region this is display only — a
+   * run reads `coverage` — and for a raster it is the real opacity of a layer
+   * that becomes part of the picture. */
   setLayerOpacity(id: string, opacity: number, recordHistory = true) {
     const layer = this.layers.find((item) => item.id === id);
     // The slider stays inside 0..1; the store cannot assume its caller does.
@@ -1073,6 +1087,16 @@ class CanvasStore {
     if (!layer || layer.opacity === next) return;
     if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity: next } : l));
+  }
+
+  /** How much of a mask's painted area counts for a run, from nothing to all of
+   * it. This is the value the exported mask is scaled by. */
+  setLayerCoverage(id: string, coverage: number, recordHistory = true) {
+    const layer = this.layers.find((item) => item.id === id && item.type !== "raster");
+    const next = Math.max(0, Math.min(1, coverage));
+    if (!layer || (layer.coverage ?? 1) === next) return;
+    if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, coverage: next } : l));
   }
 
   /** Whether this mask's density drives its denoise per pixel. Stored as
@@ -1261,16 +1285,17 @@ class CanvasStore {
   }
 
   exportMaskLayer(id: string): HTMLCanvasElement | null {
-    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && layer.opacity > 0);
+    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && (layer.coverage ?? 1) > 0);
     const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === id);
     if (!meta || !node) return null;
     const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight);
     const result = maskToGrayscale(pixels);
     if (!result) return null;
-    // Apply the layer's coverage once, independently of preview visibility.
+    // Apply the layer's coverage once, independently of how the overlay is
+    // drawn: dimming what you see must not weaken what a run reads.
     const ctx = result.getContext("2d")!;
     ctx.globalCompositeOperation = "source-atop";
-    ctx.globalAlpha = 1 - meta.opacity;
+    ctx.globalAlpha = 1 - (meta.coverage ?? 1);
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, result.width, result.height);
     ctx.globalAlpha = 1;
