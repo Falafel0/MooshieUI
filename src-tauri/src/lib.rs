@@ -37,9 +37,15 @@ pub mod user_prefs;
 pub mod user_secrets;
 pub mod webserver;
 
+// The desktop entry point builds the app state and loads the persisted config;
+// the server binary serves the same modules through axum and never touches
+// these, so they are gated with the feature that uses them.
+#[cfg(feature = "desktop")]
 use std::sync::Arc;
 
+#[cfg(feature = "desktop")]
 use config::load_persisted_config;
+#[cfg(feature = "desktop")]
 use state::AppState;
 
 /// Fix Wayland rendering in AppImage builds.

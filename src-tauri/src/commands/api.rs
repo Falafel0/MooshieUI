@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::comfyui::process::tokio_command_no_window;
+// The ComfyUI payload types are read by the desktop-only commands in this file;
+// the server build keeps the module without them (and without the warning).
+#[cfg(feature = "desktop")]
 use crate::comfyui::types::*;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -6519,6 +6522,10 @@ pub async fn import_image_directory(
 }
 
 /// Recursively collect all image files (PNG, JPG, WebP) from a directory.
+///
+/// Used by the desktop-only directory import; the server build has no such
+/// command, so the helpers are gated with it rather than left dangling.
+#[cfg(feature = "desktop")]
 fn collect_image_files(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, AppError> {
     let mut files = Vec::new();
     collect_image_files_recursive(dir, &mut files)?;
@@ -6531,6 +6538,7 @@ fn collect_image_files(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>,
     Ok(files)
 }
 
+#[cfg(feature = "desktop")]
 fn collect_image_files_recursive(
     dir: &std::path::Path,
     files: &mut Vec<std::path::PathBuf>,
