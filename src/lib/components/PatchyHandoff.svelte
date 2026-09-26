@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { locale } from "../stores/locale.svelte.js";
   import { generation } from "../stores/generation.svelte.js";
   import { isTauri, ipcListen } from "../utils/ipc.js";
@@ -576,12 +577,19 @@
     );
   }
 
+  // Re-runs on the dialog and the image only. Everything prepare()/resetState()
+  // touches is read untracked: otherwise a read-back result would re-trigger the
+  // hand-off, re-export the document, and wipe the result the user just asked for.
   $effect(() => {
-    if (!open) {
-      resetState();
+    const isOpen = open;
+    const source = image;
+    if (!isOpen || !source) {
+      untrack(() => resetState());
       return;
     }
-    void prepare();
+    untrack(() => {
+      void prepare();
+    });
   });
 </script>
 
