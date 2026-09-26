@@ -304,9 +304,6 @@
         return;
       }
       await exportDocument();
-      // Auto-start: the editor opens as soon as the document exists, so opening
-      // it is not a separate step the user has to know about.
-      await launch();
     } catch (e) {
       phase = "error";
       error = locale.t("patchy.load_failed");
@@ -561,7 +558,6 @@
         return;
       }
       await exportDocument();
-      await launch();
     } catch (e) {
       phase = "error";
       error = locale.t("patchy.load_failed");

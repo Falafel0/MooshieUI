@@ -76,3 +76,30 @@ test('only the dialog and the image are tracked by the hand-off effect', () => {
   assert.match(tracked, /\bopen\b/, 'the effect re-runs when the dialog opens');
   assert.match(tracked, /\bimage\b/, 'the effect re-runs when a different image is handed off');
 });
+
+function namedFunctionBody(text, name) {
+  const start = text.indexOf(`async function ${name}(`);
+  assert.notEqual(start, -1, `PatchyHandoff.svelte no longer has ${name}()`);
+  const open = text.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) return text.slice(open, i + 1);
+  }
+  throw new Error(`unclosed ${name}()`);
+}
+
+test('opening the hand-off never launches Patchy without an explicit click', () => {
+  const text = fs.readFileSync(SOURCE, 'utf8');
+  assert.doesNotMatch(
+    namedFunctionBody(text, 'prepare'),
+    /\blaunch\s*\(/,
+    'prepare() must prepare the document without unexpectedly opening Patchy',
+  );
+  assert.doesNotMatch(
+    namedFunctionBody(text, 'installAndPrepare'),
+    /\blaunch\s*\(/,
+    'installing Patchy must not auto-open it; the Launch button is explicit',
+  );
+  assert.match(text, /onclick=\{launch\}/, 'keep Patchy launch behind its explicit button');
+});
