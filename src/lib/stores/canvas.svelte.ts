@@ -9,6 +9,12 @@ import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpa
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
+import {
+  PROJECT_DOCUMENT_VERSION,
+  emptyDocument,
+  type ProjectDocument,
+  type ProjectLayer,
+} from "../utils/projectDocument.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "canvasResize";
 export type CanvasLayerType = "raster" | "mask" | "region";
@@ -111,6 +117,31 @@ function genLayerId(): string {
   return `layer_${++nextLayerId}`;
 }
 
+/**
+ * A document carries its pixels, so whatever a raster layer points at is read
+ * and handed back as a data URL: reopening a project must not depend on this
+ * session's object URLs. A source that cannot be read is returned as it is and
+ * refused by the document check before a save, rather than saved as an empty
+ * layer.
+ */
+async function inlineImageSource(src: string): Promise<string> {
+  if (src.startsWith("data:")) return src;
+  try {
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error("Could not inline an image for the document:", error);
+    return src;
+  }
+}
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -122,6 +153,10 @@ class CanvasStore {
   // Layers
   layers = $state<CanvasLayer[]>([]);
   activeLayerId = $state<string | null>(null);
+  /** Bumped whenever pixels change without the layer records changing: painted
+   * strokes, a replaced image, an applied result. A project reads it to know it
+   * has unsaved picture changes, not only metadata changes. */
+  paintRevision = $state(0);
   baseColor = $state("#808080");
   selectedWorkspaceSection = $state<"base" | "layers" | "control">("layers");
   lastSubmittedMaskUrl: string | null = null;
@@ -536,6 +571,7 @@ class CanvasStore {
   }
 
   restoreOriginalInpaintSource() {
+    this.bumpPaintRevision();
     if (!this.originalInpaintInputImageName || this.originalInpaintWidth == null || this.originalInpaintHeight == null) {
       // A Patchy/base import may start from an empty document. In that case
       // "restore original" means returning to the blank base, not doing nothing.
@@ -583,6 +619,7 @@ class CanvasStore {
   // Step the inpaint base back to the previous image while preserving the
   // editable layer stack. The current prepared preview is revoked.
   undoInpaintBase() {
+    this.bumpPaintRevision();
     if (!this.inpaintBaseHistory.length) return;
 
     // Stepping back discards any un-applied result being previewed.
@@ -857,6 +894,138 @@ class CanvasStore {
           contentUrl,
         };
       });
+  }
+
+  /** Say that the picture changed, not just the layer list. */
+  bumpPaintRevision() {
+    this.paintRevision += 1;
+  }
+
+  /**
+   * The whole workspace as a document: the canvas, every layer with its pixels,
+   * the prompts that belong to them and where the view was.
+   *
+   * Mask and region pixels are captured exactly the way an inpaint-base undo
+   * captures them, and a raster's pixels are inlined, so a saved project opens
+   * without this session's object URLs.
+   */
+  /**
+   * The document's shape without its pixels: cheap enough to compare on a
+   * timer, which is what the unsaved-changes dot needs. Pixels are covered by
+   * `paintRevision`, not by this.
+   */
+  documentShape(): ProjectDocument {
+    const layers: ProjectLayer[] = [];
+    for (const layer of [...this.layers].sort((a, b) => a.order - b.order)) {
+      const { id: _id, image, ...meta } = layer;
+      const record: ProjectLayer = { ...meta };
+      if (isMaskLayer(layer)) record.spatialPng = null;
+      else if (image) record.image = { ...image };
+      layers.push(record);
+    }
+    return {
+      version: PROJECT_DOCUMENT_VERSION,
+      canvasWidth: this.canvasWidth,
+      canvasHeight: this.canvasHeight,
+      baseColor: this.baseColor,
+      backgroundColor: this.backgroundColor,
+      viewport: { ...this.viewport },
+      layers,
+    };
+  }
+
+  /**
+   * The whole workspace as a document: the canvas, every layer with its pixels,
+   * the prompts that belong to them and where the view was.
+   *
+   * Mask and region pixels are captured exactly the way an inpaint-base undo
+   * captures them, and a raster's pixels are inlined, so a saved project opens
+   * without this session's object URLs.
+   */
+  async captureDocument(): Promise<ProjectDocument> {
+    const doc = this.documentShape();
+    const ordered = [...this.layers].sort((a, b) => a.order - b.order);
+    const stageLayers = this._stageRef?.getLayers?.() ?? [];
+    for (let index = 0; index < ordered.length; index += 1) {
+      const layer = ordered[index];
+      const record = doc.layers[index];
+      if (!layer || !record) continue;
+      if (isMaskLayer(layer)) {
+        record.spatialPng = null;
+        const konva = stageLayers.find((candidate: any) => candidate.id?.() === layer.id);
+        if (!konva) continue;
+        try {
+          const pixels = captureLayer(konva, this.canvasWidth, this.canvasHeight);
+          const data = pixels.getContext("2d")?.getImageData(0, 0, pixels.width, pixels.height).data;
+          if (data?.some((value, i) => i % 4 === 3 && value > 0)) {
+            record.spatialPng = pixels.toDataURL("image/png");
+          }
+        } catch (error) {
+          console.error("Failed to capture a layer's pixels:", error);
+        }
+      } else if (layer.image) {
+        record.image = { ...layer.image, src: await inlineImageSource(layer.image.src) };
+      }
+    }
+    return doc;
+  }
+
+  /**
+   * Replace the workspace with a stored document.
+   *
+   * Layer ids are handed out fresh so they cannot collide with ids this session
+   * already used, and everything that belonged to the previous document — the
+   * inpaint session, the base history, staged images, the pending result — is
+   * cleared: a loaded project starts from its own base, not the old one's.
+   */
+  loadDocument(doc: ProjectDocument) {
+    this.canvasWidth = doc.canvasWidth;
+    this.canvasHeight = doc.canvasHeight;
+    this.baseColor = doc.baseColor;
+    this.backgroundColor = doc.backgroundColor;
+    // The canvas follows the generation size while the workspace is in canvas
+    // mode, so a document has to carry its size into both: otherwise opening a
+    // project would resize it the moment the editor synced its dimensions.
+    generation.width = doc.canvasWidth;
+    generation.height = doc.canvasHeight;
+    this.viewport = { ...doc.viewport };
+    this.viewportInitialized = true;
+
+    this.clearInpaintSession();
+    this.dismissInpaintResult();
+    this.clearStaging();
+    this.clearMask();
+    this.referenceImageUrl = null;
+    this.lastSubmittedMaskUrl = null;
+    this.persistedMaskPreviewUrl = null;
+    canvasHistory.clear();
+
+    const spatial: SpatialLayerSnapshot[] = [];
+    this.layers = doc.layers.map((layer) => {
+      const { spatialPng, ...meta } = layer;
+      const id = genLayerId();
+      if (layer.type !== "raster") {
+        spatial.push({
+          id,
+          type: layer.type,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          coverage: layer.coverage,
+          contentUrl: spatialPng ?? null,
+        });
+      }
+      return { ...meta, id } as CanvasLayer;
+    });
+    this.activeLayerId = this.layers[0]?.id ?? null;
+    // The stage re-hydrates mask and region pixels from these once it has built
+    // the Konva layers for the new document, the same way a base undo does.
+    this.pendingSpatialLayerRestore = spatial.length > 0 ? spatial : null;
+    this.bumpPaintRevision();
+  }
+
+  /** Start an empty document at the given size. */
+  newDocument(width: number, height: number, background = "#000000") {
+    this.loadDocument(emptyDocument(width, height, background));
   }
 
   setInpaintDrawMode(mode: "mask" | "regular") {
@@ -1201,6 +1370,9 @@ class CanvasStore {
   }
 
   updateLayerImage(id: string, patch: Partial<NonNullable<CanvasLayer['image']>>) {
+    // The pixels or the placement of the picture changed; the layer record
+    // around them may be identical, so the picture revision moves instead.
+    this.bumpPaintRevision();
     this.layers = this.layers.map((layer) => layer.id === id && layer.image && !layer.locked ? { ...layer, image: { ...layer.image, ...patch } } : layer);
   }
 
@@ -1250,6 +1422,7 @@ class CanvasStore {
   }
 
   async insertInpaintResult(masked: boolean) {
+    this.bumpPaintRevision();
     if (!this.pendingResultPreviewUrl || this.insertingResult) return;
     this.insertingResult = true;
     const resultUrl = this.pendingResultPreviewUrl;

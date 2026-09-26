@@ -4,11 +4,28 @@
   import { resolveTint } from "../../utils/layerTints.js";
   const maskCount = $derived(canvas.layers.filter((layer) => layer.type === 'mask').length);
   const regionCount = $derived(canvas.layers.filter((layer) => layer.type === 'region').length);
+  // A finished result is the one piece of canvas state with no other permanent
+  // trace: the card explains it while it is in hand, and this keeps saying a
+  // result is waiting (even while a newer run hides the card).
+  const pendingResultSize = $derived(
+    canvas.pendingResultWidth != null && canvas.pendingResultHeight != null
+      ? locale.t('compare.summary.dimensions', { width: canvas.pendingResultWidth, height: canvas.pendingResultHeight })
+      : null,
+  );
 </script>
 
 <div class="flex h-7 items-center justify-between gap-2 border-t border-neutral-800 bg-neutral-900 px-2 text-[10px] text-neutral-500">
   <div class="flex min-w-0 items-center gap-2.5 overflow-hidden">
     <span class="shrink-0 tabular-nums">{canvas.canvasWidth} × {canvas.canvasHeight}</span>
+    {#if canvas.pendingResultPreviewUrl}
+      <span class="flex shrink-0 items-center gap-1" title={locale.t('canvas.result_preview_note')}>
+        <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></span>
+        <span class="text-indigo-300">{locale.t('canvas.result_status_preview')}</span>
+        {#if pendingResultSize}
+          <span class="tabular-nums text-neutral-400">{pendingResultSize}</span>
+        {/if}
+      </span>
+    {/if}
     {#if canvas.cursorPos}
       <span class="hidden shrink-0 tabular-nums sm:inline">X {Math.round(canvas.cursorPos.x)} · Y {Math.round(canvas.cursorPos.y)}</span>
     {/if}

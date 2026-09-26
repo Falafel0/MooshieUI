@@ -1558,6 +1558,9 @@
     }
 
     if (shouldAutoCommitMask) {
+      // Pixels went down: the picture changed even though the layer records did
+      // not, and a project has to know that before it can call itself saved.
+      canvas.bumpPaintRevision();
       void autoCommitMaskIfNeeded();
     }
   }
