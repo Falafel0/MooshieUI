@@ -165,7 +165,11 @@
     
     // The box follows the pointer every frame; only the colour inside it costs a
     // composite of every layer, so that part runs at a readable rate instead.
-    tooltipPos = { x: pointerPos.x + 15, y: pointerPos.y + 15 };
+    // `fixed` is measured against the viewport, the pointer against the stage
+    // container: without the container's offset the colour box sat away from the
+    // cursor whenever the canvas was not at the page origin.
+    const containerRect = stage.container().getBoundingClientRect();
+    tooltipPos = { x: containerRect.left + pointerPos.x + 15, y: containerRect.top + pointerPos.y + 15 };
     const now = performance.now();
     if (tooltipVisible && now - lastTooltipSampleAt < TOOLTIP_SAMPLE_INTERVAL_MS) return;
     lastTooltipSampleAt = now;
@@ -228,8 +232,6 @@
     contextLayer = new Konva.Layer({ listening: false });
     stage.add(contextLayer);
 
-    livePreviewLayer = new Konva.Layer({ listening: false });
-    stage.add(livePreviewLayer);
 
     transformLayer = new Konva.Layer();
     stage.add(transformLayer);
@@ -509,6 +511,13 @@
   }
 
   function updateLivePreview(url: string | null) {
+    // Created on first use: most sessions never show a live preview, and an
+    // unused layer still costs a scene canvas the size of the document.
+    if (!livePreviewLayer && stage) {
+      livePreviewLayer = new Konva.Layer({ listening: false });
+      stage.add(livePreviewLayer);
+      reorderStageLayers();
+    }
     if (!livePreviewLayer) return;
     if (!url || !showLivePreview || generation.mode !== 'inpainting' || !progress.isGenerating) {
       lastLivePreviewSource = null;
@@ -867,10 +876,15 @@
       const effectiveVisible = layer.visible;
       if (!konvaLayers.has(layer.id)) {
         const existing = stage.getLayers().find((node) => node.id() === layer.id) ?? canvas.takeLayerNode(layer.id);
+        // No hit canvas: a document layer is painted through the active layer and
+        // the one hit-testable thing on this stage -- the transformer -- lives on
+        // its own layer. This drops a full-size canvas per layer plus the pixel
+        // readback Konva performs on each of them for every pointer event.
         const kLayer = existing ?? new Konva.Layer({
           id: layer.id,
           opacity: displayOpacity(layer),
           visible: effectiveVisible,
+          listening: false,
         });
 
         // Clip to canvas bounds

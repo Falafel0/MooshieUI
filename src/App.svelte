@@ -65,6 +65,7 @@
   import PatchyHandoff from "./lib/components/PatchyHandoff.svelte";
   import { canComparePaintedCoverage, opaqueMaskLuminanceToAlpha, paintedCoverageToAlpha } from "./lib/utils/canvasLayerExport.js";
   import GlobalErrorModal from "./lib/components/errors/GlobalErrorModal.svelte";
+  import ProjectGuardDialog from "./lib/components/projects/ProjectGuardDialog.svelte";
   import NaiEnhanceModal from "./lib/components/generation/NaiEnhanceModal.svelte";
   import DirectorToolsModal from "./lib/components/generation/DirectorToolsModal.svelte";
   import NaiImageEnhanceModal from "./lib/components/generation/NaiImageEnhanceModal.svelte";
@@ -4963,6 +4964,7 @@
 <NovelAiPositionModal />
 
 <!-- Global human-readable error surface -->
+<ProjectGuardDialog />
 <GlobalErrorModal />
 
 {#if showBugReport}
