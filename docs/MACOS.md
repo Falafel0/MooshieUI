@@ -1,5 +1,11 @@
 # macOS (Apple Silicon)
 
+> **This fork ships Windows only.** The release workflow does not build a macOS
+> bundle and `MACOS_RELEASE_ENABLED` is unused here, so the workflow below is a
+> manual build-and-check path for anyone compiling the macOS bundle by hand. The
+> notes on this page describe that path; they are not a release gate, and no
+> automatic update reaches a macOS build from this repository.
+
 As of v2.3.1, native macOS installers remain experimental candidates until
 the physical-Mac checks below have passed. Stable macOS downloads and automatic
 updates remain gated. Intel
