@@ -7056,18 +7056,6 @@ pub async fn build_diagnostic_log(state: &AppState, frontend_logs: Option<Vec<St
             }
         }
 
-        // Default generation parameters
-        let _ = writeln!(
-            output,
-            "Defaults: checkpoint={}, sampler={}, scheduler={}, steps={}, cfg={}, {}x{}",
-            config.default_checkpoint.as_deref().unwrap_or("(none)"),
-            config.default_sampler,
-            config.default_scheduler,
-            config.default_steps,
-            config.default_cfg,
-            config.default_width,
-            config.default_height,
-        );
         let _ = writeln!(
             output,
             "Interrogator thresholds: general={}, character={}",

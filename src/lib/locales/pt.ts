@@ -3249,8 +3249,6 @@ const pt: Record<string, string> = {
   "settings.developer.title": "Developer",
   "settings.developer.force_checkpoints": "Force-show checkpoints tab",
   "settings.developer.force_checkpoints_desc": "Shows the Checkpoints tab in the bottom panel even when fewer than 10 checkpoints are installed.",
-  "settings.developer.terminal_log": "Show terminal log panel",
-  "settings.developer.terminal_log_desc": "Adds a live log viewer to the sidebar showing ComfyUI output and app messages. Useful for diagnosing errors.",
   "settings.restart_required": "É necessário reiniciar o ComfyUI para que tenha efeito.",
 
   "settings.gpu.loading": "Carregando informações da GPU…",

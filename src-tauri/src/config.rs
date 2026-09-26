@@ -82,13 +82,6 @@ pub struct AppConfig {
     pub comfyui_path: String,
     pub venv_path: String,
     pub extra_args: Vec<String>,
-    pub default_checkpoint: Option<String>,
-    pub default_sampler: String,
-    pub default_scheduler: String,
-    pub default_steps: u32,
-    pub default_cfg: f64,
-    pub default_width: u32,
-    pub default_height: u32,
     /// VRAM management mode: "auto", "high", "normal", "low", "none"
     pub vram_mode: String,
     /// Keep ComfyUI running after the app closes (default: false)
@@ -262,9 +255,10 @@ pub struct AppConfig {
     /// clients only as a `monbooru_api_token_configured` boolean.
     #[serde(default)]
     pub monbooru_api_token: Option<String>,
-    /// Download and install the monbooru server automatically the first time
-    /// the tab opens without one (default: true). Mirrors Patchy's
-    /// `patchy_auto_install`; only ever acts when no remote URL is configured.
+    /// Download and install the monbooru server automatically the first time the
+    /// monbooru settings section is opened without one (default: true). Mirrors
+    /// Patchy's `patchy_auto_install`; only ever acts when no remote URL is
+    /// configured, and the section's own switch turns it off.
     #[serde(default)]
     pub monbooru_auto_install: bool,
     /// Start the installed monbooru server together with the app
@@ -313,13 +307,6 @@ impl Default for AppConfig {
             comfyui_path: String::new(),
             venv_path: String::new(),
             extra_args: vec![],
-            default_checkpoint: None,
-            default_sampler: "euler_cfg_pp".to_string(),
-            default_scheduler: "sgm_uniform".to_string(),
-            default_steps: 20,
-            default_cfg: 1.4,
-            default_width: 1024,
-            default_height: 1024,
             vram_mode: "normal".to_string(),
             keep_alive: false,
             auto_start: true,

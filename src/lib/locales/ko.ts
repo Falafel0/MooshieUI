@@ -3248,8 +3248,6 @@ const ko: Record<string, string> = {
   "settings.developer.title": "Developer",
   "settings.developer.force_checkpoints": "Force-show checkpoints tab",
   "settings.developer.force_checkpoints_desc": "Shows the Checkpoints tab in the bottom panel even when fewer than 10 checkpoints are installed.",
-  "settings.developer.terminal_log": "Show terminal log panel",
-  "settings.developer.terminal_log_desc": "Adds a live log viewer to the sidebar showing ComfyUI output and app messages. Useful for diagnosing errors.",
   "settings.restart_required": "적용하려면 ComfyUI를 다시 시작해야 합니다.",
 
   "settings.gpu.loading": "GPU 정보 불러오는 중…",

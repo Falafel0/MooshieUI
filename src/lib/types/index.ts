@@ -616,13 +616,6 @@ export interface AppConfig {
   comfyui_path: string;
   venv_path: string;
   extra_args: string[];
-  default_checkpoint: string | null;
-  default_sampler: string;
-  default_scheduler: string;
-  default_steps: number;
-  default_cfg: number;
-  default_width: number;
-  default_height: number;
   vram_mode: string;
   keep_alive: boolean;
   auto_start: boolean;

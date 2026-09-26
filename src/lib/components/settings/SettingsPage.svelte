@@ -4730,18 +4730,7 @@
                 <p class="text-[11px] text-neutral-500 mt-0.5">{locale.t('settings.developer.force_checkpoints_desc')}</p>
               </div>
             </label>
-            <label class="flex items-center gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                class="w-4 h-4 rounded accent-amber-400"
-                bind:checked={generation.showTerminalLog}
-              />
-              <div>
-                <p class="text-xs font-medium text-neutral-200">{locale.t('settings.developer.terminal_log')}</p>
-                <p class="text-[11px] text-neutral-500 mt-0.5">{locale.t('settings.developer.terminal_log_desc')}</p>
-              </div>
-            </label>
-          </div>
+                      </div>
         </section>
         {/if}
 

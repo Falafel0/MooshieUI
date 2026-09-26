@@ -3476,8 +3476,6 @@ const pl: Record<string, string> = {
   "settings.developer.title": "Deweloper",
   "settings.developer.force_checkpoints": "Wymuś pokazywanie zakładki Checkpoint",
   "settings.developer.force_checkpoints_desc": "Pokazuje zakładkę Checkpoint w dolnym panelu nawet gdy zainstalowano mniej niż 10 checkpointów.",
-  "settings.developer.terminal_log": "Pokaż panel dziennika terminala",
-  "settings.developer.terminal_log_desc": "Dodaje podgląd dziennika na żywo do paska bocznego, pokazując dane wyjściowe ComfyUI i komunikaty aplikacji. Przydatne do diagnozowania błędów.",
   "settings.restart_required": "Wymaga ponownego uruchomienia ComfyUI, aby wprowadzić zmiany.",
 
   "settings.gpu.loading": "Ładowanie informacji o GPU…",

@@ -1117,8 +1117,6 @@ class GenerationStore {
   devModeUnlocked = $state(false);
   /** Developer mode: bypasses checkpoint selector restrictions. Not persisted. */
   devMode = $state(false);
-  /** Show the terminal log panel in the sidebar. Not persisted. */
-  showTerminalLog = $state(false);
 
   /** Raw ModelSpec prediction type signal (e.g. "v", "epsilon"). */
   modelspecPredictionType = $state<string | null>(null);

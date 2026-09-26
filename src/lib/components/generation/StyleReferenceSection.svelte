@@ -272,7 +272,7 @@
           onclick={handleFileBrowse}
         >
           {#if uploadingImage}
-            <span class="text-indigo-400">Uploading...</span>
+            <span class="text-indigo-400">{locale.t("generation.image.uploading")}</span>
           {:else}
             {locale.t("generation.style_ref.drop_image")}
             <span class="cursor-pointer text-indigo-400 underline"
