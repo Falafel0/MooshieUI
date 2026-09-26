@@ -644,6 +644,14 @@ export interface AppConfig {
   monbooru_api_token: string | null;
   /** True when a token is stored, so the UI can show "token set" without the value. */
   monbooru_api_token_configured?: boolean;
+  /** Download and install the monbooru server automatically when its tab opens without one. */
+  monbooru_auto_install?: boolean;
+  /** Start the installed monbooru server together with the app. */
+  monbooru_auto_start?: boolean;
+  /** Keep the monbooru server running after the app closes. */
+  monbooru_keep_alive?: boolean;
+  /** Which portable monbooru build an install picks: `"lite"` or `"bundled"`. */
+  monbooru_flavor?: string;
   theme: string;
   theme_palette: string;
   font_scale: number;

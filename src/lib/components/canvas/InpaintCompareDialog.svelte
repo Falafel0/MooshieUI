@@ -143,6 +143,12 @@
     </button>
   </div>
 
+  <!-- The dialog opens on a result that is still held for preview, so it names
+       both sides itself instead of leaving the A/B labels to carry the story. -->
+  <p class="border-b border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400">
+    {locale.t("canvas.compare_context")}
+  </p>
+
   <!-- Viewer -->
   <div class="relative min-h-0 flex-1 p-3">
     <ImageCompare

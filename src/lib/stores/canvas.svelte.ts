@@ -9,8 +9,14 @@ import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpa
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
+import {
+  PROJECT_DOCUMENT_VERSION,
+  emptyDocument,
+  type ProjectDocument,
+  type ProjectLayer,
+} from "../utils/projectDocument.js";
 
-export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "transform" | "canvasResize";
+export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "canvasResize";
 export type CanvasLayerType = "raster" | "mask" | "region";
 
 export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
@@ -23,6 +29,11 @@ export interface CanvasLayer {
   type: CanvasLayerType;
   visible: boolean;
   opacity: number;
+  /** How much of this layer counts for a run, 0..1. A mask's painted area
+   * multiplied by it is the mask a run reads; a raster's own opacity does the
+   * job instead. Kept apart from `opacity`, which is only how the layer is
+   * drawn on the canvas: dimming an overlay used to silently weaken the mask. */
+  coverage?: number;
   locked: boolean;
   /** Cosmetic tint key from `layerTints.ts`. Display only: generation never
    * reads it, so recolouring a mask or a region cannot change a run. */
@@ -72,6 +83,7 @@ export interface SpatialLayerSnapshot {
   type: "mask" | "region";
   visible: boolean;
   opacity: number;
+  coverage?: number;
   contentUrl: string | null;
 }
 
@@ -105,6 +117,31 @@ function genLayerId(): string {
   return `layer_${++nextLayerId}`;
 }
 
+/**
+ * A document carries its pixels, so whatever a raster layer points at is read
+ * and handed back as a data URL: reopening a project must not depend on this
+ * session's object URLs. A source that cannot be read is returned as it is and
+ * refused by the document check before a save, rather than saved as an empty
+ * layer.
+ */
+async function inlineImageSource(src: string): Promise<string> {
+  if (src.startsWith("data:")) return src;
+  try {
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error("Could not inline an image for the document:", error);
+    return src;
+  }
+}
+
 class CanvasStore {
   // Tool state
   activeTool = $state<ToolType>("brush");
@@ -116,6 +153,10 @@ class CanvasStore {
   // Layers
   layers = $state<CanvasLayer[]>([]);
   activeLayerId = $state<string | null>(null);
+  /** Bumped whenever pixels change without the layer records changing: painted
+   * strokes, a replaced image, an applied result. A project reads it to know it
+   * has unsaved picture changes, not only metadata changes. */
+  paintRevision = $state(0);
   baseColor = $state("#808080");
   selectedWorkspaceSection = $state<"base" | "layers" | "control">("layers");
   lastSubmittedMaskUrl: string | null = null;
@@ -530,6 +571,7 @@ class CanvasStore {
   }
 
   restoreOriginalInpaintSource() {
+    this.bumpPaintRevision();
     if (!this.originalInpaintInputImageName || this.originalInpaintWidth == null || this.originalInpaintHeight == null) {
       // A Patchy/base import may start from an empty document. In that case
       // "restore original" means returning to the blank base, not doing nothing.
@@ -577,6 +619,7 @@ class CanvasStore {
   // Step the inpaint base back to the previous image while preserving the
   // editable layer stack. The current prepared preview is revoked.
   undoInpaintBase() {
+    this.bumpPaintRevision();
     if (!this.inpaintBaseHistory.length) return;
 
     // Stepping back discards any un-applied result being previewed.
@@ -618,6 +661,7 @@ class CanvasStore {
           ...layer,
           visible: snapshot.visible,
           opacity: snapshot.opacity,
+          coverage: snapshot.coverage,
           image: snapshot.contentUrl ? {
             src: snapshot.contentUrl,
             x: 0,
@@ -780,7 +824,7 @@ class CanvasStore {
     const stage = this._stageRef;
     if (!stage) return null;
 
-    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && layer.visible && layer.opacity > 0);
+    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && layer.visible && (layer.coverage ?? 1) > 0);
     if (!maskMetas.length) return null;
 
     const stageLayers = stage.getLayers?.() ?? [];
@@ -797,7 +841,7 @@ class CanvasStore {
 
       try {
         const layerCanvas = captureLayer(layer, this.canvasWidth, this.canvasHeight);
-        ctx.globalAlpha = meta.opacity;
+        ctx.globalAlpha = meta.coverage ?? 1;
         ctx.drawImage(layerCanvas, 0, 0);
         drew = true;
       } catch (error) {
@@ -846,9 +890,155 @@ class CanvasStore {
           type: meta.type,
           visible: meta.visible,
           opacity: meta.opacity,
+          coverage: meta.coverage,
           contentUrl,
         };
       });
+  }
+
+  /** Say that the picture changed, not just the layer list. */
+  bumpPaintRevision() {
+    this.paintRevision += 1;
+  }
+
+  /**
+   * The whole workspace as a document: the canvas, every layer with its pixels,
+   * the prompts that belong to them and where the view was.
+   *
+   * Mask and region pixels are captured exactly the way an inpaint-base undo
+   * captures them, and a raster's pixels are inlined, so a saved project opens
+   * without this session's object URLs.
+   */
+  /**
+   * The document's shape without its pixels: cheap enough to compare on a
+   * timer, which is what the unsaved-changes dot needs. Pixels are covered by
+   * `paintRevision`, not by this.
+   */
+  documentShape(): ProjectDocument {
+    const layers: ProjectLayer[] = [];
+    for (const layer of [...this.layers].sort((a, b) => a.order - b.order)) {
+      const { id: _id, image, ...meta } = layer;
+      const record: ProjectLayer = { ...meta };
+      if (isMaskLayer(layer)) record.spatialPng = null;
+      else if (image) record.image = { ...image };
+      layers.push(record);
+    }
+    return {
+      version: PROJECT_DOCUMENT_VERSION,
+      canvasWidth: this.canvasWidth,
+      canvasHeight: this.canvasHeight,
+      baseColor: this.baseColor,
+      backgroundColor: this.backgroundColor,
+      viewport: { ...this.viewport },
+      layers,
+    };
+  }
+
+  /**
+   * The whole workspace as a document: the canvas, every layer with its pixels,
+   * the prompts that belong to them and where the view was.
+   *
+   * Mask and region pixels are captured exactly the way an inpaint-base undo
+   * captures them, and a raster's pixels are inlined, so a saved project opens
+   * without this session's object URLs.
+   */
+  async captureDocument(): Promise<ProjectDocument> {
+    const doc = this.documentShape();
+    const ordered = [...this.layers].sort((a, b) => a.order - b.order);
+    const stageLayers = this._stageRef?.getLayers?.() ?? [];
+    for (let index = 0; index < ordered.length; index += 1) {
+      const layer = ordered[index];
+      const record = doc.layers[index];
+      if (!layer || !record) continue;
+      if (isMaskLayer(layer)) {
+        record.spatialPng = null;
+        if (!layer.visible) {
+          // A hidden mask keeps its records but not its pixels: it is not on the
+          // stage, and saving pixels of something the run will skip would be a
+          // document that changes the picture when it is opened.
+          continue;
+        }
+        const konva = stageLayers.find((candidate: any) => candidate.id?.() === layer.id);
+        if (!konva) {
+          // A mask with no stage layer behind it is an inconsistency the user
+          // cannot see: say so instead of quietly saving an empty mask. An
+          // unpainted mask, on the other hand, is perfectly normal and stays
+          // silent.
+          console.warn(`No stage layer for mask ${layer.id}; its pixels are not saved`);
+          continue;
+        }
+        try {
+          const pixels = captureLayer(konva, this.canvasWidth, this.canvasHeight);
+          const data = pixels.getContext("2d")?.getImageData(0, 0, pixels.width, pixels.height).data;
+          if (data?.some((value, i) => i % 4 === 3 && value > 0)) {
+            record.spatialPng = pixels.toDataURL("image/png");
+          }
+        } catch (error) {
+          console.error("Failed to capture a layer's pixels:", error);
+        }
+      } else if (layer.image) {
+        record.image = { ...layer.image, src: await inlineImageSource(layer.image.src) };
+      }
+    }
+    return doc;
+  }
+
+  /**
+   * Replace the workspace with a stored document.
+   *
+   * Layer ids are handed out fresh so they cannot collide with ids this session
+   * already used, and everything that belonged to the previous document — the
+   * inpaint session, the base history, staged images, the pending result — is
+   * cleared: a loaded project starts from its own base, not the old one's.
+   */
+  loadDocument(doc: ProjectDocument) {
+    this.canvasWidth = doc.canvasWidth;
+    this.canvasHeight = doc.canvasHeight;
+    this.baseColor = doc.baseColor;
+    this.backgroundColor = doc.backgroundColor;
+    // The canvas follows the generation size while the workspace is in canvas
+    // mode, so a document has to carry its size into both: otherwise opening a
+    // project would resize it the moment the editor synced its dimensions.
+    generation.width = doc.canvasWidth;
+    generation.height = doc.canvasHeight;
+    this.viewport = { ...doc.viewport };
+    this.viewportInitialized = true;
+
+    this.clearInpaintSession();
+    this.dismissInpaintResult();
+    this.clearStaging();
+    this.clearMask();
+    this.referenceImageUrl = null;
+    this.lastSubmittedMaskUrl = null;
+    this.persistedMaskPreviewUrl = null;
+    canvasHistory.clear();
+
+    const spatial: SpatialLayerSnapshot[] = [];
+    this.layers = doc.layers.map((layer) => {
+      const { spatialPng, ...meta } = layer;
+      const id = genLayerId();
+      if (layer.type !== "raster") {
+        spatial.push({
+          id,
+          type: layer.type,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          coverage: layer.coverage,
+          contentUrl: spatialPng ?? null,
+        });
+      }
+      return { ...meta, id } as CanvasLayer;
+    });
+    this.activeLayerId = this.layers[0]?.id ?? null;
+    // The stage re-hydrates mask and region pixels from these once it has built
+    // the Konva layers for the new document, the same way a base undo does.
+    this.pendingSpatialLayerRestore = spatial.length > 0 ? spatial : null;
+    this.bumpPaintRevision();
+  }
+
+  /** Start an empty document at the given size. */
+  newDocument(width: number, height: number, background = "#000000") {
+    this.loadDocument(emptyDocument(width, height, background));
   }
 
   setInpaintDrawMode(mode: "mask" | "regular") {
@@ -946,6 +1136,9 @@ class CanvasStore {
         type,
         visible: true,
         opacity: 1,
+        // A mask or a region starts at full coverage: the sliders that dim the
+        // overlay are display-only, so this is the one value a run reads.
+        coverage: type === "raster" ? undefined : 1,
         locked: false,
         showContext: true,
         order: maxOrder + 1,
@@ -1066,6 +1259,9 @@ class CanvasStore {
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l));
   }
 
+  /** How the layer is drawn. For a mask or a region this is display only — a
+   * run reads `coverage` — and for a raster it is the real opacity of a layer
+   * that becomes part of the picture. */
   setLayerOpacity(id: string, opacity: number, recordHistory = true) {
     const layer = this.layers.find((item) => item.id === id);
     // The slider stays inside 0..1; the store cannot assume its caller does.
@@ -1073,6 +1269,16 @@ class CanvasStore {
     if (!layer || layer.opacity === next) return;
     if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, opacity: next } : l));
+  }
+
+  /** How much of a mask's painted area counts for a run, from nothing to all of
+   * it. This is the value the exported mask is scaled by. */
+  setLayerCoverage(id: string, coverage: number, recordHistory = true) {
+    const layer = this.layers.find((item) => item.id === id && item.type !== "raster");
+    const next = Math.max(0, Math.min(1, coverage));
+    if (!layer || (layer.coverage ?? 1) === next) return;
+    if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, coverage: next } : l));
   }
 
   /** Whether this mask's density drives its denoise per pixel. Stored as
@@ -1177,6 +1383,9 @@ class CanvasStore {
   }
 
   updateLayerImage(id: string, patch: Partial<NonNullable<CanvasLayer['image']>>) {
+    // The pixels or the placement of the picture changed; the layer record
+    // around them may be identical, so the picture revision moves instead.
+    this.bumpPaintRevision();
     this.layers = this.layers.map((layer) => layer.id === id && layer.image && !layer.locked ? { ...layer, image: { ...layer.image, ...patch } } : layer);
   }
 
@@ -1226,6 +1435,7 @@ class CanvasStore {
   }
 
   async insertInpaintResult(masked: boolean) {
+    this.bumpPaintRevision();
     if (!this.pendingResultPreviewUrl || this.insertingResult) return;
     this.insertingResult = true;
     const resultUrl = this.pendingResultPreviewUrl;
@@ -1261,16 +1471,17 @@ class CanvasStore {
   }
 
   exportMaskLayer(id: string): HTMLCanvasElement | null {
-    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && layer.opacity > 0);
+    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && (layer.coverage ?? 1) > 0);
     const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === id);
     if (!meta || !node) return null;
     const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight);
     const result = maskToGrayscale(pixels);
     if (!result) return null;
-    // Apply the layer's coverage once, independently of preview visibility.
+    // Apply the layer's coverage once, independently of how the overlay is
+    // drawn: dimming what you see must not weaken what a run reads.
     const ctx = result.getContext("2d")!;
     ctx.globalCompositeOperation = "source-atop";
-    ctx.globalAlpha = 1 - meta.opacity;
+    ctx.globalAlpha = 1 - (meta.coverage ?? 1);
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, result.width, result.height);
     ctx.globalAlpha = 1;

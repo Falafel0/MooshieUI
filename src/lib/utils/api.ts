@@ -463,14 +463,53 @@ export async function resolvePatchyPath(explicit?: string | null): Promise<strin
   return resolved ?? null;
 }
 
-/** Write the document handed to Patchy and return its absolute path. */
-export async function writePatchyDocument(bytes: number[], fileName: string): Promise<string> {
-  return ipcInvoke<string>("write_patchy_document", { bytes, fileName });
+/** Write the document handed to Patchy and return its absolute path.
+ *
+ *  `handoffPath` names the document of an existing hand-off: passing it back
+ *  rewrites that same file, which is what a retry must do. Without it the write
+ *  starts a new hand-off, under a name of its own — one document per hand-off,
+ *  so a later hand-off can never overwrite an earlier one's result. */
+export async function writePatchyDocument(
+  bytes: number[],
+  fileName: string,
+  handoffPath?: string | null,
+): Promise<string> {
+  return ipcInvoke<string>("write_patchy_document", {
+    bytes,
+    fileName,
+    handoffPath: handoffPath ?? null,
+  });
 }
 
-/** Read the edited document back. Throws when the file is not there yet. */
-export async function readPatchyDocument(path: string): Promise<number[]> {
-  return ipcInvoke<number[]>("read_patchy_document", { path });
+/** The edited document, and which file it was read from. */
+export interface PatchyDocumentRead {
+  /** Absolute path of the file the bytes came from. */
+  path: string;
+  /** Bytes ready to import. */
+  bytes: number[];
+  /** True when a layered save (PSD/PSB) sitting beside the hand-off file was
+   *  flattened through Patchy and returned instead of the hand-off file. */
+  flattened: boolean;
+  /** File name of that layered save, so the UI can name what it imported. */
+  layered_source: string | null;
+}
+
+/** Read the edited document back. Throws when the file is not there yet.
+ *
+ *  `flattenLayered` resolves the other form the edit takes: Patchy's flat-save
+ *  guard routes Save to Save As once a document has grown layers, writing a
+ *  `.psd` beside the hand-off file instead of over it. With this set, such a
+ *  save is flattened through the editor and returned as the result. */
+export async function readPatchyDocument(
+  path: string,
+  flattenLayered?: boolean | null,
+  explicit?: string | null,
+): Promise<PatchyDocumentRead> {
+  return ipcInvoke<PatchyDocumentRead>("read_patchy_document", {
+    path,
+    flattenLayered: flattenLayered ?? null,
+    explicit: explicit ?? null,
+  });
 }
 
 /** Launch Patchy on a document (null opens the editor empty) and return the executable path used. */
@@ -1820,4 +1859,55 @@ export async function monbooruCategories(): Promise<MonbooruRawJson> {
 /** Thumbnail bytes as a `data:` URL, ready for `<img src>`. */
 export async function monbooruThumbnail(id: number): Promise<string> {
   return ipcInvoke("monbooru_thumbnail", { id });
+}
+
+/** Managed install of the monbooru server: what is on disk, and what an
+ *  install would choose for this platform. */
+export interface MonbooruInstallStatus {
+  installed: boolean;
+  /** Version directory of the managed install (`v1.21.1`), when present. */
+  version: string | null;
+  /** Executable of the managed install, when present. */
+  executable: string | null;
+  /** False on platforms monbooru publishes no build for. */
+  canInstall: boolean;
+  /** `"lite"` or `"bundled"` — the archive an install would pick. */
+  flavor: string;
+}
+
+/** The monbooru process this app manages. `running` means *ours*: spawned by
+ *  this app, or reclaimed from the keep-alive record of an earlier session. */
+export interface MonbooruServerStatus {
+  running: boolean;
+  pid: number | null;
+  version: string | null;
+  executable: string | null;
+  url: string;
+  /** monbooru answered on the local URL — whoever started it. */
+  responding: boolean;
+}
+
+/** What is installed, and whether this platform can install at all. */
+export async function monbooruInstallStatus(): Promise<MonbooruInstallStatus> {
+  return ipcInvoke("monbooru_install_status");
+}
+
+/** Install the managed monbooru build. Never overwrites a URL the user set. */
+export async function monbooruInstallStart(): Promise<MonbooruInstallStatus> {
+  return ipcInvoke("monbooru_install_start");
+}
+
+/** State of the managed monbooru server, without starting anything. */
+export async function monbooruServerStatus(): Promise<MonbooruServerStatus> {
+  return ipcInvoke("monbooru_server_status");
+}
+
+/** Start the managed monbooru server (no-op when one is already running). */
+export async function monbooruServerStart(): Promise<MonbooruServerStatus> {
+  return ipcInvoke("monbooru_server_start");
+}
+
+/** Stop the server this app started; a server the user runs is left alone. */
+export async function monbooruServerStop(): Promise<MonbooruServerStatus> {
+  return ipcInvoke("monbooru_server_stop");
 }

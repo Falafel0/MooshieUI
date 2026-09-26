@@ -5,6 +5,15 @@
   import { processMaskCoverage } from "../../utils/maskProcessing.js";
   import { resolveTint, resolveTintKey } from "../../utils/layerTints.js";
   import { isTypingTarget } from "../../utils/keyboardTarget.js";
+  import {
+    clampToDocument,
+    identityBox,
+    isTransformable,
+    projectNode,
+    rotatedBounds,
+    type BoxGeometry,
+    type NodeGeometry,
+  } from "../../utils/canvasTransform.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { canvas, isMaskLayer, type CanvasLayer, type SpatialLayerSnapshot, type ToolType } from "../../stores/canvas.svelte.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
@@ -50,6 +59,17 @@
   let transformLayer: Konva.Layer | null = null;
   let selectionTransformer: Konva.Transformer | null = null;
   let canvasBoundsNode: Konva.Rect | null = null;
+  /** The box the move/resize tool hands to Konva's transformer. It covers the
+   * layer's real content, so a handle sits exactly where the mask, region or
+   * image actually is, and the transform it performs is the transform that is
+   * stored. */
+  let layerBoxNode: Konva.Rect | null = null;
+  /** Geometry captured when a transform starts, so every step of a live drag
+   * projects from the original shapes instead of accumulating rounding. */
+  let transformBase: { reference: BoxGeometry; nodes: Array<{ node: Konva.Node; base: NodeGeometry }> } | null = null;
+  /** The dashed context guides, grouped so a live drag or resize can carry them
+   * with the layer instead of leaving them behind until pixels are re-read. */
+  let overlayGroup: Konva.Group | null = null;
   // UI overlay layer (brush cursor, bounding box)
   let uiLayer: Konva.Layer | null = null;
 
@@ -204,14 +224,19 @@
     stage.add(transformLayer);
     canvasBoundsNode = new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, fill: 'rgba(0,0,0,0.001)', listening: false });
     transformLayer.add(canvasBoundsNode);
+    layerBoxNode = new Konva.Rect({ name: 'layer-content-box', x: 0, y: 0, width: 0, height: 0, fill: 'rgba(0,0,0,0.001)', listening: false });
+    transformLayer.add(layerBoxNode);
     selectionTransformer = new Konva.Transformer({
       borderStroke: '#60a5fa', anchorFill: '#f8fafc', anchorStroke: '#2563eb',
       anchorCornerRadius: 1, rotateAnchorOffset: 22, keepRatio: false, flipEnabled: false,
       boundBoxFunc: (oldBox, newBox) => Math.abs(newBox.width) < 8 || Math.abs(newBox.height) < 8 ? oldBox : newBox,
     });
     selectionTransformer.on('transformstart', () => {
-      if (canvas.activeTool !== 'canvasResize' && canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId);
+      if (canvas.activeTool === 'canvasResize') return;
+      if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId);
+      beginOnCanvasTransform();
     });
+    selectionTransformer.on('transform', applyOnCanvasTransform);
     selectionTransformer.on('transformend', finishOnCanvasTransform);
     transformLayer.add(selectionTransformer);
 
@@ -284,6 +309,88 @@
     uiLayer?.moveToTop();
   }
 
+  /** The box around a layer's real content: the painted pixels of a mask or a
+   * region (processed exactly as the run will read them), the image asset of a
+   * raster. This is why the handles sit where they should: Konva's own client
+   * rect would add a stroke's width to the box and the box would lie. */
+  function layerContentBounds(layer: CanvasLayer): BoxGeometry | null {
+    if (layer.type === 'raster') {
+      const image = layer.image;
+      if (!image) return null;
+      return clampToDocument(rotatedBounds(image.x, image.y, image.width, image.height, image.rotation), canvas.canvasWidth, canvas.canvasHeight);
+    }
+    const source = canvas.exportMaskLayer(layer.id);
+    if (!source) return null;
+    const settings = layer.inpaintSettings ?? generation.inpaintSettings;
+    const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
+    const processed = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, resolveTint(layer));
+    const bounds = processed.bounds;
+    return bounds ? clampToDocument(identityBox(bounds.x, bounds.y, bounds.width, bounds.height), canvas.canvasWidth, canvas.canvasHeight) : null;
+  }
+
+  function nodeGeometry(node: Konva.Node): NodeGeometry {
+    const shape = node as Konva.Shape;
+    const geometry: NodeGeometry = { x: node.x(), y: node.y(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() };
+    if (typeof node.rotation === 'function') {
+      const strokeWidth = shape.strokeWidth?.();
+      if (typeof strokeWidth === 'number') geometry.strokeWidth = strokeWidth;
+    }
+    return geometry;
+  }
+
+  function boxGeometryOf(node: Konva.Rect): BoxGeometry {
+    return { x: node.x(), y: node.y(), width: node.width(), height: node.height(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() };
+  }
+
+  function beginOnCanvasTransform() {
+    const layer = canvas.activeLayer;
+    const kLayer = layer ? konvaLayers.get(layer.id) : null;
+    transformBase = layerBoxNode && kLayer
+      ? { reference: boxGeometryOf(layerBoxNode), nodes: kLayer.getChildren().map((node) => ({ node, base: nodeGeometry(node) })) }
+      : null;
+  }
+
+  /** Carry the guides with the layer while it is being dragged or resized, so
+   * what the dashed outline shows is what the run will read. */
+  function liveOverlayTransform(box: BoxGeometry, reference: BoxGeometry) {
+    if (!overlayGroup || !contextLayer) return;
+    overlayGroup.setAttrs({
+      x: box.x,
+      y: box.y,
+      offsetX: reference.x,
+      offsetY: reference.y,
+      scaleX: reference.scaleX === 0 ? 1 : box.scaleX / reference.scaleX,
+      scaleY: reference.scaleY === 0 ? 1 : box.scaleY / reference.scaleY,
+      rotation: box.rotation - reference.rotation,
+    });
+    contextLayer.batchDraw();
+  }
+
+  function liveOverlayOffset(dx: number, dy: number) {
+    if (!overlayGroup || !contextLayer) return;
+    overlayGroup.setAttrs({ x: dx, y: dy, offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+    contextLayer.batchDraw();
+  }
+
+  function resetOverlayTransform() {
+    if (!overlayGroup) return;
+    overlayGroup.setAttrs({ x: 0, y: 0, offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  }
+
+  /** Konva's transformer reports every step of a drag: project each shape from
+   * the geometry it had when the drag started. */
+  function applyOnCanvasTransform() {
+    if (canvas.activeTool !== 'move' || !layerBoxNode || !transformBase) return;
+    const box = boxGeometryOf(layerBoxNode);
+    const layer = canvas.activeLayer;
+    const kLayer = layer ? konvaLayers.get(layer.id) : null;
+    for (const entry of transformBase.nodes) {
+      entry.node.setAttrs(projectNode(entry.base, box, transformBase.reference) as unknown as Konva.NodeConfig);
+    }
+    kLayer?.batchDraw();
+    liveOverlayTransform(box, transformBase.reference);
+  }
+
   function finishOnCanvasTransform() {
     if (!selectionTransformer) return;
     if (canvas.activeTool === 'canvasResize' && canvasBoundsNode) {
@@ -316,8 +423,15 @@
         });
       }
     }
+    transformBase = null;
+    resetOverlayTransform();
     scheduleThumbRefresh(layer.id);
     selectionTransformer.forceUpdate();
+    // The handles must land on the content that just changed, and the guides on
+    // the pixels the export will hand to a run.
+    refreshSelectionTransformer();
+    void updateContextOverlay();
+    if (isMaskLayer(layer)) void autoCommitMaskIfNeeded();
   }
 
   function refreshSelectionTransformer() {
@@ -333,23 +447,27 @@
       canvasBoundsNode.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, width: canvas.canvasWidth, height: canvas.canvasHeight });
       selectionTransformer.setAttrs({ rotateEnabled: false, keepRatio: false, enabledAnchors: ['middle-right', 'bottom-center', 'bottom-right'] });
       selectionTransformer.nodes([canvasBoundsNode]);
-    } else if (canvas.activeTool === 'transform') {
+    } else if (canvas.activeTool === 'move') {
+      // One tool for moving and resizing, and one box for both: the handles sit
+      // on the layer's real content, and a drag anywhere else moves it. Every
+      // layer kind rotates, and the modifiers are Konva's own - Shift keeps the
+      // proportions, Alt scales from the centre, only upright angles snap.
       const layer = canvas.activeLayer;
-      const kLayer = layer && layer.visible && !layer.locked ? konvaLayers.get(layer.id) : null;
-      const nodes = kLayer ? kLayer.getChildren().map((node) => node) : [];
-      selectionTransformer.setAttrs({
-        // Every layer kind rotates: a mask and a region are turned as a group of
-        // strokes (Konva rotates a multi-node selection about its centre), and
-        // the export bakes whatever is on the canvas. Konva already gives the
-        // familiar modifiers on its own: Shift keeps the proportions, Alt scales
-        // from the centre, and only the upright angles snap.
-        rotateEnabled: true,
-        keepRatio: false,
-        rotationSnaps: [0, 90, 180, 270, 360],
-        rotationSnapTolerance: 4,
-        enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
-      });
-      selectionTransformer.nodes(nodes);
+      const onCanvas = canvas.selectedWorkspaceSection === 'layers';
+      const bounds = layer && onCanvas && layer.visible && !layer.locked ? layerContentBounds(layer) : null;
+      if (layerBoxNode && isTransformable(bounds)) {
+        layerBoxNode.setAttrs({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: 0, scaleX: 1, scaleY: 1 });
+        selectionTransformer.setAttrs({
+          rotateEnabled: true,
+          keepRatio: false,
+          rotationSnaps: [0, 90, 180, 270, 360],
+          rotationSnapTolerance: 4,
+          enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
+        });
+        selectionTransformer.nodes([layerBoxNode]);
+      } else {
+        selectionTransformer.nodes([]);
+      }
     } else {
       selectionTransformer.nodes([]);
     }
@@ -431,6 +549,10 @@
     if (!contextLayer) return;
     const revision = ++contextRevision;
     contextLayer.destroyChildren();
+    // One group for the guides that belong to the active layer, so a drag or a
+    // resize can move them with it. The group is rebuilt by every pass.
+    overlayGroup = new Konva.Group({ listening: false });
+    contextLayer.add(overlayGroup);
 
     if (canvas.selectedWorkspaceSection === 'control' && canvas.controlContextPreviewUrl) {
       if (!canvas.showLayerContext) { contextLayer.batchDraw(); return; }
@@ -455,7 +577,8 @@
     const { bounds } = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, color);
     if (!contextLayer || revision !== contextRevision) return;
     if (bounds) {
-      contextLayer.add(new Konva.Rect({ ...bounds, stroke: color, strokeWidth: 1.5 / canvas.viewport.zoom, dash: [7 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .95, listening: false }));
+      const holder: Konva.Container = overlayGroup ?? contextLayer;
+      holder.add(new Konva.Rect({ ...bounds, stroke: color, strokeWidth: 1.5 / canvas.viewport.zoom, dash: [7 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .95, listening: false }));
       if (layer.type === 'mask' && settings.area === 'masked') {
         const px = settings.context_padding_x ?? settings.padding;
         const py = settings.context_padding_y ?? settings.padding;
@@ -469,7 +592,7 @@
         const cx = (left + right) / 2, cy = (top + bottom) / 2;
         const x = Math.max(0, Math.min(canvas.canvasWidth - width, cx - width / 2));
         const y = Math.max(0, Math.min(canvas.canvasHeight - height, cy - height / 2));
-        contextLayer.add(new Konva.Rect({ x, y, width, height, stroke: '#f8fafc', strokeWidth: 1 / canvas.viewport.zoom, dash: [3 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .72, listening: false }));
+        holder.add(new Konva.Rect({ x, y, width, height, stroke: '#f8fafc', strokeWidth: 1 / canvas.viewport.zoom, dash: [3 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .72, listening: false }));
       }
     }
     reorderStageLayers(); contextLayer.batchDraw();
@@ -1064,6 +1187,11 @@
   function handlePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     const evt = e.evt as MouseEvent;
 
+    // A pointerdown that lands on the transformer (an anchor or its border) is
+    // the resize the user asked for; it must not also start a move.
+    const target = e.target as Konva.Node | null;
+    if (target && (target === selectionTransformer || target.getParent?.() === selectionTransformer || target.hasName?.('_anchor'))) return;
+
     // Middle mouse → pan
     if (evt.button === 1) {
       isPanning = true;
@@ -1289,6 +1417,9 @@
         entry.node.y(entry.y + dy);
       }
       getActiveKonvaLayer()?.batchDraw();
+      // The dashed guides move with the layer: the outline the user is dragging
+      // is the outline the run will read.
+      liveOverlayOffset(dx, dy);
     }
 
     // Lasso preview (append screen-space point to the dashed outline)
@@ -1416,9 +1547,20 @@
       moveStartPos = null;
       moveNodeStarts = [];
       canvas.endMove();
+      resetOverlayTransform();
+      selectionTransformer?.forceUpdate();
+      // The handles and the guides must sit on the moved content, and a moved
+      // mask is a changed mask: the run reads the pixels, not the position.
+      refreshSelectionTransformer();
+      void updateContextOverlay();
+      if (layer) scheduleThumbRefresh(layer.id);
+      if (isMaskLayer(layer)) void autoCommitMaskIfNeeded();
     }
 
     if (shouldAutoCommitMask) {
+      // Pixels went down: the picture changed even though the layer records did
+      // not, and a project has to know that before it can call itself saved.
+      canvas.bumpPaintRevision();
       void autoCommitMaskIfNeeded();
     }
   }
@@ -1473,6 +1615,9 @@
       moveStartPos = null;
       moveNodeStarts = [];
       canvas.endMove();
+      resetOverlayTransform();
+      refreshSelectionTransformer();
+      void updateContextOverlay();
     }
   }
 
@@ -1753,7 +1898,9 @@
       if (!kLayer) continue;
 
       const layerCanvas = captureLayer(kLayer, canvas.canvasWidth, canvas.canvasHeight);
-      ctx.globalAlpha = layer.opacity;
+      // Coverage, not the display slider: the overlay may be drawn faint and
+      // still edit at full strength.
+      ctx.globalAlpha = layer.coverage ?? 1;
       ctx.drawImage(layerCanvas, 0, 0);
     }
     ctx.globalAlpha = 1;

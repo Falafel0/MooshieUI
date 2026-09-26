@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AppConfig, InterrogatorModelStatus, LlmProviderState, QueueInfo } from "../../types/index.js";
+  import MonbooruServerSection from "./MonbooruServerSection.svelte";
   import { getConfig, updateConfig, stopComfyui, startComfyui, fetchReleaseNotes, importImageDirectory, exportLogs, exportLogsContent, getGalleryPath, setGalleryPath, setStorageLimit, installAttentionBackend, checkAttentionBackend, clearAllQueues, getQueue, getGpuStats, updateComfyui, listInterrogatorModels, deleteInterrogatorModel, addCustomInterrogatorModel, removeCustomInterrogatorModel, getPatchyStatus, installPatchy } from "../../utils/api.js";
   import { monbooru } from "../../monbooru/store.svelte.js";
   import { setMonbooruApiToken } from "../../utils/api.js";
@@ -4303,6 +4304,7 @@
             </div>
           </section>
           {/if}
+          <MonbooruServerSection {config} onsave={() => autoSave()} />
         {/if}
 
         <!-- Projects: named snapshots of the app's local state (desktop only) -->

@@ -6,6 +6,7 @@
   import { uploadImageBytes } from "../../../utils/api.js";
   import { prepareOutputImageForEditMode } from "../../../utils/editImagePreparation.js";
   import { getInpaintComparePair } from "../../../utils/inpaintComparePair.js";
+  import { inpaintResultStatus } from "./inpaintResultStatus.svelte.js";
   import InpaintCompareDialog from "../InpaintCompareDialog.svelte";
   import type { OutputImage } from "../../../types/index.js";
 
@@ -72,6 +73,9 @@
 
 <div class="border-t border-neutral-800 bg-neutral-900/70 px-3 py-2">
   {#if generation.mode === "inpainting"}
+    <!-- Track of what is in hand: the base the next run starts from, and the
+         finished result held for preview. The actions that change the document
+         (apply, undo, restore) sit apart from the chips on the right. -->
     <div class="mb-2 flex min-h-10 items-center gap-2">
       {#if canvas.resettableInpaintPreviewImage}
         <div class="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/40 p-1 pr-2">
@@ -84,7 +88,10 @@
         </div>
       {/if}
       {#if canvas.pendingResultPreviewUrl}
-        <div class="flex items-center gap-2 rounded-md border border-indigo-500/60 bg-indigo-500/10 p-1 pr-2">
+        <div
+          class="flex items-center gap-2 rounded-md border border-indigo-500/60 bg-indigo-500/10 p-1 pr-2"
+          title={locale.t('canvas.result_preview_note')}
+        >
           <img
             src={canvas.pendingResultPreviewUrl}
             alt={locale.t("canvas.inpaint_result_ready")}
@@ -98,10 +105,10 @@
               type="button"
               aria-expanded={compareOpen}
               class="rounded border border-indigo-400/60 px-2 py-1 text-[11px] text-indigo-200 hover:border-indigo-300 hover:bg-indigo-500/20 focus-visible:outline-2 focus-visible:outline-indigo-400"
-              title={locale.t('gallery.compare.title')}
+              title={locale.t('canvas.compare_with_original')}
               onclick={() => (compareOpen = true)}
             >
-              {locale.t('gallery.compare.short')}
+              {locale.t('canvas.compare_with_original')}
             </button>
           {/if}
         </div>
@@ -109,12 +116,15 @@
       <div class="ml-auto flex items-center gap-1">
         {#if canvas.canApplyInpaintResult}
           <button
-            onclick={() => canvas.applyInpaintResult()}
+            onclick={() => inpaintResultStatus.applyToBase()}
             class="rounded border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-[11px] text-emerald-200 hover:border-emerald-400 hover:bg-emerald-600/30 hover:text-emerald-100"
             title={locale.t('canvas.apply_inpaint_title')}
           >
-            {locale.t('canvas.accept')}
+            {locale.t('canvas.result_base')}
           </button>
+        {/if}
+        {#if canvas.canUndoInpaintBase || canvas.currentPreparedInputImage}
+          <span class="mx-0.5 h-5 w-px bg-neutral-700"></span>
         {/if}
         {#if canvas.canUndoInpaintBase}
           <button
@@ -171,22 +181,28 @@
     </div>
   {/if}
 
-  <div class="flex gap-2 overflow-x-auto">
-    {#if editSessionImages.length === 0}
-      <span class="text-[11px] text-neutral-500">{locale.t('bottom_panel.no_images')}</span>
-    {:else}
-      {#each editSessionImages as image}
-        <button
-          class="shrink-0 w-14 h-14 rounded border overflow-hidden transition-colors {selectingFilename === image.filename || canvas.pendingResultSourceKey === imageKey(image)
-            ? 'border-indigo-400'
-            : 'border-neutral-700 hover:border-indigo-500'}"
-          onclick={() => void previewEditResult(image)}
-          title={image.filename}
-        >
-          <img src={image.url} alt={image.filename} class="w-full h-full object-cover" />
-        </button>
-      {/each}
-    {/if}
+  <!-- The results of this session, newest first: clicking one loads it into the
+       canvas (as the result in hand while inpainting). Without a label the row
+       read as decoration rather than as the session's history. -->
+  <div class="flex items-center gap-2">
+    <span class="shrink-0 text-[10px] uppercase tracking-wide text-neutral-500" title={locale.t('canvas.session_images_tip')}>{locale.t('canvas.session_images')}</span>
+    <div class="flex gap-2 overflow-x-auto">
+      {#if editSessionImages.length === 0}
+        <span class="text-[11px] text-neutral-500">{locale.t('bottom_panel.no_images')}</span>
+      {:else}
+        {#each editSessionImages as image}
+          <button
+            class="shrink-0 w-14 h-14 rounded border overflow-hidden transition-colors {selectingFilename === image.filename || canvas.pendingResultSourceKey === imageKey(image)
+              ? 'border-indigo-400'
+              : 'border-neutral-700 hover:border-indigo-500'}"
+            onclick={() => void previewEditResult(image)}
+            title={image.filename}
+          >
+            <img src={image.url} alt={image.filename} class="w-full h-full object-cover" />
+          </button>
+        {/each}
+      {/if}
+    </div>
   </div>
 
   {#if compareOpen && comparePair}

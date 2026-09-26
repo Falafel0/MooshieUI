@@ -44,16 +44,12 @@
       icon: `<path d="M2 22l1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="M14.5 5.5l4-4a1.4 1.4 0 0 1 2 2l-4 4"/>`,
     },
     {
+      // Moving and resizing share one tool and one box: the handles sit on the
+      // layer's real content, and a drag anywhere else moves the layer.
       id: "move",
       labelKey: "canvas.move",
       hotkey: "V",
       icon: `<polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>`,
-    },
-    {
-      id: "transform",
-      labelKey: "canvas.transform",
-      hotkey: "T",
-      icon: `<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>`,
     },
     {
       id: "canvasResize",
@@ -113,7 +109,6 @@
       case "q": canvas.setTool("lasso"); break;
       case "i": if (canvas.canPickColor) canvas.setTool("eyedropper"); break;
       case "v": canvas.setTool("move"); break;
-      case "t": canvas.setTool("transform"); break;
       case "c": canvas.setTool("canvasResize"); break;
       case "h": canvas.setTool("view"); break;
       case "x": canvas.swapColors(); break;

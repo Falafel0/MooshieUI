@@ -21,7 +21,10 @@ export type InpaintConditioningRegion = RegionalPromptSelection & {
  */
 export function editMaskPassOrder(layers: CanvasLayer[]): CanvasLayer[] {
   return layers
-    .filter((layer) => layer.type === "mask" && layer.visible && layer.opacity > 0)
+    // A mask with no coverage left has nothing to edit, so it is not a pass.
+    // How the overlay is drawn is not consulted: an overlay may be dimmed to
+    // nothing on screen and still edit, and the reverse.
+    .filter((layer) => layer.type === "mask" && layer.visible && (layer.coverage ?? 1) > 0)
     .reverse();
 }
 
@@ -39,8 +42,10 @@ export async function prepareConditioningRegions(): Promise<InpaintConditioningR
   // settings, and takes the global prompt — plus the text of any region it
   // overlaps, which arrives through this conditioning rather than through a
   // prompt of its own.
+  // A region conditions on being visible. Dimming its overlay is a display
+  // choice and must not quietly drop a prompt out of a run.
   const candidates = canvas.sortedLayers.filter(
-    (layer) => layer.visible && layer.opacity > 0 && layer.type === "region",
+    (layer) => layer.visible && layer.type === "region",
   );
   const prepared = candidates.map((layer) => {
     const text = layer.regionalPrompt?.trim() ?? "";
