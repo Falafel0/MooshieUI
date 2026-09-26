@@ -1040,9 +1040,9 @@
 
       // Decoding, mask conversion and uploading can outlive the document that
       // started the import. Never apply those bytes to a newer source.
-      if (sourceVersion !== canvas.inpaintSourceVersion) return;
+      if (sourceVersion !== canvas.inpaintSourceVersion) return false;
       const uploaded = target === "base" ? await uploadImageBytes(bytes, suggestedName) : null;
-      if (sourceVersion !== canvas.inpaintSourceVersion) return;
+      if (sourceVersion !== canvas.inpaintSourceVersion) return false;
 
       generation.mode = "inpainting";
       canvas.isCanvasMode = true;

@@ -440,6 +440,11 @@ fn flatten_layered_document(
     layered: &Path,
     output: &Path,
 ) -> Result<(), AppError> {
+    // A previous read may have produced this deterministic filename. Never
+    // accept that old image as the result of a failed or interrupted export.
+    if output.exists() {
+        std::fs::remove_file(output)?;
+    }
     let mut child = Command::new(executable)
         .arg("--headless")
         .arg("--export")
@@ -454,9 +459,9 @@ fn flatten_layered_document(
         })?;
 
     let started = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) => {
                 if started.elapsed() > FLATTEN_TIMEOUT {
                     let _ = child.kill();
@@ -476,9 +481,17 @@ fn flatten_layered_document(
         }
     }
 
-    if !output.exists() {
+    if !status.success() || !output.exists() {
         return Err(AppError::Other(format!(
-            "Patchy did not write the flattened document at {}",
+            "Patchy export failed (status {}) for {}",
+            status,
+            layered.display()
+        )));
+    }
+    let bytes = std::fs::read(output)?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(AppError::Other(format!(
+            "Patchy export did not produce a PNG at {}",
             output.display()
         )));
     }
@@ -600,14 +613,19 @@ pub async fn read_patchy_document(
             })
             .await
             .map_err(|e| AppError::Other(format!("Flatten task failed: {}", e)))?;
-            if flattened.is_ok() {
-                let flattened_bytes = std::fs::read(&output)?;
-                return Ok(PatchyDocumentRead {
-                    path: output.to_string_lossy().to_string(),
-                    bytes: flattened_bytes,
-                    flattened: true,
-                    layered_source: layered_source.clone(),
-                });
+            match flattened {
+                Ok(()) => {
+                    let flattened_bytes = std::fs::read(&output)?;
+                    return Ok(PatchyDocumentRead {
+                        path: output.to_string_lossy().to_string(),
+                        bytes: flattened_bytes,
+                        flattened: true,
+                        layered_source: layered_source.clone(),
+                    });
+                }
+                Err(error) => {
+                    log::warn!("Patchy could not flatten {}: {}", layered.display(), error);
+                }
             }
         }
         // The save is there, but it could not be read back. Naming it is the
@@ -924,6 +942,26 @@ mod tests {
             Some(format!("{}.psd", stem).as_str()),
             "the unread layered save is named, not dropped"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_flatten_cannot_reuse_an_older_export() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_dir("stale-flatten");
+        let executable = dir.join("patchy-fails");
+        std::fs::write(&executable, b"#!/bin/sh\nexit 4\n").unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        let layered = touch(&dir, "edited.psd");
+        let output = touch(&dir, "edited-import.png");
+
+        assert!(flatten_layered_document(&executable, &layered, &output).is_err());
+        assert!(!output.exists(), "a stale PNG must never be imported as the new edit");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

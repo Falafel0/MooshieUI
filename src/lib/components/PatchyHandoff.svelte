@@ -174,6 +174,18 @@
     importPreviewUrl = null;
   }
 
+  function reportNoSavedResult(layeredSource: string | null) {
+    importLayeredFailure = layeredSource;
+    importLayered = false;
+    importInfo = null;
+    importOrigin = "";
+    releaseImportPreview();
+    importStatus = "idle";
+    importError = layeredSource
+      ? locale.t("patchy.result_flatten_failed", { name: layeredSource })
+      : locale.t("patchy.result_missing");
+  }
+
   function resetState() {
     phase = "preparing";
     documentPath = null;
@@ -376,7 +388,7 @@
       // Nothing new came back. When a layered save *is* there, the edit exists
       // but could not be read: that is a different situation from "not saved",
       // and the panel says which one it is.
-      importLayeredFailure = read.layered_source;
+      reportNoSavedResult(read.layered_source);
       return null;
     }
     importLayeredFailure = null;
@@ -403,10 +415,9 @@
       const bytes = await readImportBytes();
       // A fresh look invalidates a confirmation prompt held for older bytes.
       pendingImport = null;
-      importStatus = bytes ? "ready" : "idle";
+      if (bytes) importStatus = "ready";
     } catch (e) {
-      importStatus = "idle";
-      importError = locale.t("patchy.result_missing");
+      reportNoSavedResult(null);
       console.error("Patchy: no saved document to read back:", e);
     } finally {
       busy = false;
@@ -431,9 +442,8 @@
     try {
       read = await readPatchyDocument(documentPath, true);
     } catch (e) {
-      importStatus = "idle";
+      reportNoSavedResult(null);
       busy = false;
-      importError = locale.t("patchy.result_missing");
       console.error("Patchy: no saved document to read back:", e);
       return;
     }
@@ -441,8 +451,7 @@
       // Still the file this dialog exported: Patchy has not saved over it. A
       // layered save beside it means the edit exists and could not be read —
       // the card says which of the two it is.
-      importLayeredFailure = read.layered_source;
-      importStatus = "idle";
+      reportNoSavedResult(read.layered_source);
       busy = false;
       return;
     }
