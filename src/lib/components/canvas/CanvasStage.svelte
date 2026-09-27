@@ -10,7 +10,6 @@
     identityBox,
     isTransformable,
     projectNode,
-    rotatedBounds,
     type BoxGeometry,
     type NodeGeometry,
   } from "../../utils/canvasTransform.js";
@@ -64,14 +63,17 @@
   let transformLayer: Konva.Layer | null = null;
   let selectionTransformer: Konva.Transformer | null = null;
   let canvasBoundsNode: Konva.Rect | null = null;
-  /** The box the move/resize tool hands to Konva's transformer. It covers the
-   * layer's real content, so a handle sits exactly where the mask, region or
-   * image actually is, and the transform it performs is the transform that is
-   * stored. */
+  /** The box the move/resize tool hands to Konva's transformer for painted
+   * mask and region layers. Raster assets attach directly to the transformer:
+   * their origin, rotation and flips are already the persisted geometry. */
   let layerBoxNode: Konva.Rect | null = null;
   /** Geometry captured when a transform starts, so every step of a live drag
    * projects from the original shapes instead of accumulating rounding. */
   let transformBase: { reference: BoxGeometry; nodes: Array<{ node: Konva.Node; base: NodeGeometry }> } | null = null;
+  /** A raster is transformed by Konva itself, not projected through layerBox.
+   * While a handle is down the Konva node is the one live source of truth; the
+   * serialized layer image is updated once at the end of the gesture. */
+  let isTransformingRaster = false;
   /** The dashed context guides, grouped so a live drag or resize can carry them
    * with the layer instead of leaving them behind until pixels are re-read. */
   let overlayGroup: Konva.Group | null = null;
@@ -92,6 +94,7 @@
   let rectStartPos: { x: number; y: number } | null = null;
   let rectPreview: Konva.Rect | null = null;
   let isMovingLayer = false;
+  let movingLayerId: string | null = null;
   let moveStartPos: { x: number; y: number } | null = null;
   let moveNodeStarts: Array<{ node: Konva.Node; x: number; y: number }> = [];
   let viewportRaf: number | null = null;
@@ -121,6 +124,10 @@
   });
 
   onDestroy(() => {
+    // A pointer can be released outside the stage, or the editor can be
+    // unmounted mid-drag. Commit the last raster position before retaining its
+    // layer node so a remount cannot snap it back to an older store value.
+    finishLayerMove();
     if (tooltipRaf !== null) {
       cancelAnimationFrame(tooltipRaf);
     }
@@ -247,6 +254,7 @@
     selectionTransformer.on('transformstart', () => {
       if (canvas.activeTool === 'canvasResize') return;
       if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId);
+      isTransformingRaster = canvas.activeLayer?.type === 'raster';
       beginOnCanvasTransform();
     });
     selectionTransformer.on('transform', applyOnCanvasTransform);
@@ -330,7 +338,11 @@
     if (layer.type === 'raster') {
       const image = layer.image;
       if (!image) return null;
-      return clampToDocument(rotatedBounds(image.x, image.y, image.width, image.height, image.rotation), canvas.canvasWidth, canvas.canvasHeight);
+      // Raster selections use the real Konva.Image below. Keep this fallback
+      // upright for callers which run before the asset node has been created;
+      // an axis-aligned proxy for a rotated image used to make the first resize
+      // jump as the proxy and the image disagreed about their origin.
+      return clampToDocument(identityBox(image.x, image.y, image.width, image.height), canvas.canvasWidth, canvas.canvasHeight);
     }
     const settings = layer.inpaintSettings ?? generation.inpaintSettings;
     const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
@@ -380,6 +392,10 @@
 
   function beginOnCanvasTransform() {
     const layer = canvas.activeLayer;
+    if (layer?.type === 'raster') {
+      transformBase = null;
+      return;
+    }
     const kLayer = layer ? konvaLayers.get(layer.id) : null;
     transformBase = layerBoxNode && kLayer
       ? { reference: boxGeometryOf(layerBoxNode), nodes: kLayer.getChildren().map((node) => ({ node, base: nodeGeometry(node) })) }
@@ -416,7 +432,7 @@
   /** Konva's transformer reports every step of a drag: project each shape from
    * the geometry it had when the drag started. */
   function applyOnCanvasTransform() {
-    if (canvas.activeTool !== 'move' || !layerBoxNode || !transformBase) return;
+    if (isTransformingRaster || canvas.activeTool !== 'move' || !layerBoxNode || !transformBase) return;
     const box = boxGeometryOf(layerBoxNode);
     const layer = canvas.activeLayer;
     const kLayer = layer ? konvaLayers.get(layer.id) : null;
@@ -436,6 +452,8 @@
       const height = Math.max(64, Math.round(canvasBoundsNode.height() * canvasBoundsNode.scaleY() / 8) * 8);
       canvasBoundsNode.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, width, height });
       canvas.resizeCanvas(width, height);
+      transformBase = null;
+      isTransformingRaster = false;
       refreshSelectionTransformer();
       return;
     }
@@ -459,6 +477,7 @@
         });
       }
     }
+    isTransformingRaster = false;
     transformBase = null;
     resetOverlayTransform();
     scheduleThumbRefresh(layer.id);
@@ -490,19 +509,28 @@
       // proportions, Alt scales from the centre, only upright angles snap.
       const layer = canvas.activeLayer;
       const onCanvas = canvas.selectedWorkspaceSection === 'layers';
-      const bounds = layer && onCanvas && layer.visible && !layer.locked ? layerContentBounds(layer) : null;
-      if (layerBoxNode && isTransformable(bounds)) {
-        layerBoxNode.setAttrs({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: 0, scaleX: 1, scaleY: 1 });
-        selectionTransformer.setAttrs({
-          rotateEnabled: true,
-          keepRatio: false,
-          rotationSnaps: [0, 90, 180, 270, 360],
-          rotationSnapTolerance: 4,
-          enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
-        });
-        selectionTransformer.nodes([layerBoxNode]);
+      const canTransform = !!(layer && onCanvas && layer.visible && !layer.locked);
+      selectionTransformer.setAttrs({
+        rotateEnabled: true,
+        keepRatio: false,
+        rotationSnaps: [0, 90, 180, 270, 360],
+        rotationSnapTolerance: 4,
+        enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
+      });
+      if (canTransform && layer.type === 'raster' && layer.image) {
+        // Do not transform an axis-aligned stand-in for a raster. Konva's image
+        // node owns its actual rotation/flip pivot, which keeps its pixels and
+        // handles in the same coordinate system throughout a resize.
+        const asset = konvaLayers.get(layer.id)?.findOne('.raster-asset') as Konva.Image | undefined;
+        selectionTransformer.nodes(asset ? [asset] : []);
       } else {
-        selectionTransformer.nodes([]);
+        const bounds = canTransform && layer ? layerContentBounds(layer) : null;
+        if (layerBoxNode && isTransformable(bounds)) {
+        layerBoxNode.setAttrs({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: 0, scaleX: 1, scaleY: 1 });
+          selectionTransformer.nodes([layerBoxNode]);
+        } else {
+          selectionTransformer.nodes([]);
+        }
       }
     } else {
       selectionTransformer.nodes([]);
@@ -947,7 +975,12 @@
             scheduleThumbRefresh(layer.id);
           }
         }
-        node.setAttrs({ image: node.image(), x: asset.x + (asset.flipX ? asset.width : 0), y: asset.y + (asset.flipY ? asset.height : 0), width: asset.width, height: asset.height, rotation: asset.rotation, scaleX: asset.flipX ? -1 : 1, scaleY: asset.flipY ? -1 : 1 });
+        const hasLiveRasterGeometry =
+          (isTransformingRaster && layer.id === canvas.activeLayerId) ||
+          (isMovingLayer && layer.id === movingLayerId);
+        if (!hasLiveRasterGeometry) {
+          node.setAttrs({ image: node.image(), x: asset.x + (asset.flipX ? asset.width : 0), y: asset.y + (asset.flipY ? asset.height : 0), width: asset.width, height: asset.height, rotation: asset.rotation, scaleX: asset.flipX ? -1 : 1, scaleY: asset.flipY ? -1 : 1 });
+        }
       }
       repaintOverlayNodes(konvaLayers.get(layer.id)!, layer);
     }
@@ -1366,6 +1399,7 @@
       canvas.beginMove(layer.id, pos.x, pos.y);
 
       isMovingLayer = true;
+      movingLayerId = layer.id;
       moveStartPos = pos;
       moveNodeStarts = kLayer.getChildren().map((node) => ({
         node,
@@ -1464,7 +1498,7 @@
         entry.node.x(entry.x + dx);
         entry.node.y(entry.y + dy);
       }
-      getActiveKonvaLayer()?.batchDraw();
+      (movingLayerId ? konvaLayers.get(movingLayerId) : null)?.batchDraw();
       // The dashed guides move with the layer: the outline the user is dragging
       // is the outline the run will read.
       liveOverlayOffset(dx, dy);
@@ -1585,25 +1619,7 @@
       }
     }
 
-    if (isMovingLayer) {
-      const layer = canvas.activeLayer;
-      if (layer?.image) {
-        const node = getActiveKonvaLayer()?.findOne('.raster-asset');
-        if (node) canvas.updateLayerImage(layer.id, { x: node.x() - (layer.image.flipX ? layer.image.width : 0), y: node.y() - (layer.image.flipY ? layer.image.height : 0) });
-      }
-      isMovingLayer = false;
-      moveStartPos = null;
-      moveNodeStarts = [];
-      canvas.endMove();
-      resetOverlayTransform();
-      selectionTransformer?.forceUpdate();
-      // The handles and the guides must sit on the moved content, and a moved
-      // mask is a changed mask: the run reads the pixels, not the position.
-      refreshSelectionTransformer();
-      void updateContextOverlay();
-      if (layer) scheduleThumbRefresh(layer.id);
-      if (isMaskLayer(layer)) void autoCommitMaskIfNeeded();
-    }
+    finishLayerMove();
 
     if (shouldAutoCommitMask) {
       // Pixels went down: the picture changed even though the layer records did
@@ -1658,15 +1674,41 @@
       }
     }
 
-    if (isMovingLayer) {
-      isMovingLayer = false;
-      moveStartPos = null;
-      moveNodeStarts = [];
-      canvas.endMove();
-      resetOverlayTransform();
-      refreshSelectionTransformer();
-      void updateContextOverlay();
+    finishLayerMove();
+  }
+
+  /** Commit direct moves from both pointer-up and pointer-leave. A native
+   * pointerup is not guaranteed after the cursor leaves the canvas, and losing
+   * that final write was what made raster images spring back on the next
+   * reactive sync. */
+  function finishLayerMove() {
+    if (!isMovingLayer) return;
+    const layerId = movingLayerId;
+    const layer = layerId ? canvas.layers.find((candidate) => candidate.id === layerId) : undefined;
+    const node = layerId
+      ? konvaLayers.get(layerId)?.findOne('.raster-asset') as Konva.Image | undefined
+      : undefined;
+    if (layer?.image && node) {
+      const flipX = node.scaleX() < 0;
+      const flipY = node.scaleY() < 0;
+      canvas.updateLayerImage(layer.id, {
+        x: node.x() - (flipX ? node.width() : 0),
+        y: node.y() - (flipY ? node.height() : 0),
+      });
     }
+    isMovingLayer = false;
+    movingLayerId = null;
+    moveStartPos = null;
+    moveNodeStarts = [];
+    canvas.endMove();
+    resetOverlayTransform();
+    selectionTransformer?.forceUpdate();
+    // The handles and the guides must sit on the moved content, and a moved
+    // mask is a changed mask: the run reads the pixels, not the position.
+    refreshSelectionTransformer();
+    void updateContextOverlay();
+    if (layer) scheduleThumbRefresh(layer.id);
+    if (isMaskLayer(layer)) void autoCommitMaskIfNeeded();
   }
 
   function handlePointerEnter() {

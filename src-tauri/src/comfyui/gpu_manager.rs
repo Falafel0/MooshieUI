@@ -386,10 +386,7 @@ impl GpuManager {
         workflow: serde_json::Value,
         client_id: &str,
     ) -> Result<(u32, crate::comfyui::types::PromptResponse), AppError> {
-        let body = serde_json::json!({
-            "prompt": workflow,
-            "client_id": client_id,
-        });
+        let body = crate::comfyui::client::prompt_request_body(workflow, client_id);
 
         let url = format!("{}/prompt", worker.base_url());
         let resp = self
@@ -434,10 +431,7 @@ impl GpuManager {
             *status = WorkerStatus::Running;
         }
 
-        let body = serde_json::json!({
-            "prompt": workflow,
-            "client_id": client_id,
-        });
+        let body = crate::comfyui::client::prompt_request_body(workflow, client_id);
 
         let url = format!("{}/prompt", worker.base_url());
         let resp = self
@@ -669,6 +663,9 @@ pub struct WorkerStatusInfo {
 
 /// Detect available NVIDIA GPUs via nvidia-smi.
 /// Returns Vec<(index, name, vram_mb)>.
+///
+/// Blocking: waits on an `nvidia-smi` subprocess. Call it from
+/// `spawn_blocking`, never directly on the async runtime.
 pub fn detect_gpus() -> Vec<(u32, String, u64)> {
     let output = crate::comfyui::process::std_command_no_window("nvidia-smi")
         .args([
@@ -704,6 +701,9 @@ pub fn detect_gpus() -> Vec<(u32, String, u64)> {
 /// Mirrors `detect_gpus`' use of the biggest card. Returns `None` when
 /// nvidia-smi is unavailable (non-NVIDIA hosts) so callers can fall back to
 /// total-VRAM heuristics rather than wrongly assuming the GPU is full.
+///
+/// Blocking: waits on an `nvidia-smi` subprocess. Call it from
+/// `spawn_blocking`, never directly on the async runtime.
 pub fn detect_free_vram_mb() -> Option<u64> {
     let output = crate::comfyui::process::std_command_no_window("nvidia-smi")
         .args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"])
@@ -720,6 +720,8 @@ pub fn detect_free_vram_mb() -> Option<u64> {
 
 /// Auto-generate worker configs from detected GPUs.
 /// Each GPU gets its own worker with sequential ports starting from base_port.
+///
+/// Blocking (runs `detect_gpus`); call it from `spawn_blocking`.
 pub fn auto_configure_workers(base_port: u16) -> Vec<GpuWorkerConfig> {
     let gpus = detect_gpus();
     if gpus.is_empty() {

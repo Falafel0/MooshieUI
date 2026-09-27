@@ -12,6 +12,7 @@ const code = ts.transpileModule(read('src/lib/utils/canvasTransform.ts'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 }).outputText;
 const geometry = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const stageSource = read('src/lib/components/canvas/CanvasStage.svelte');
 
 const { identityBox, projectNode, rotatedBounds, unionBounds, clampToDocument, isTransformable } = geometry;
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-9, `${message}: ${actual} != ${expected}`);
@@ -88,4 +89,18 @@ test('a box is kept inside the document and an empty one is not transformable', 
   const barely = clampToDocument(identityBox(499, 499, 100, 100), 500, 500);
   assert.equal(isTransformable(barely), false, 'a box clamped to a sliver must not offer handles');
   assert.equal(isTransformable(identityBox(10, 10, 40, 40)), true);
+});
+
+test('raster transforms use the image node and moves survive a pointer leaving the stage', () => {
+  const selectionStart = stageSource.indexOf('function refreshSelectionTransformer');
+  const selectionEnd = stageSource.indexOf('function updateLivePreview', selectionStart);
+  const selection = stageSource.slice(selectionStart, selectionEnd);
+  assert.match(selection, /layer\.type === 'raster' && layer\.image/);
+  assert.match(selection, /selectionTransformer\.nodes\(asset \? \[asset\] : \[\]\)/);
+  assert.doesNotMatch(selection, /rotatedBounds\(/, 'a rotated raster must not be resized through an axis-aligned proxy');
+
+  const leaveStart = stageSource.indexOf('function handlePointerLeave');
+  const leaveEnd = stageSource.indexOf('function finishLayerMove', leaveStart);
+  const leave = stageSource.slice(leaveStart, leaveEnd);
+  assert.match(leave, /finishLayerMove\(\)/, 'releasing outside the stage must persist the raster move');
 });

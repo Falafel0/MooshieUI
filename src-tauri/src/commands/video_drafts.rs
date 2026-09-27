@@ -94,6 +94,18 @@ pub(crate) fn move_record(from: &Path, to: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Whether a ComfyUI output `subfolder` is a relative path whose every piece is
+/// one plain component (the same rule `is_single_safe_filename` applies to a
+/// filename). It may nest (`video/a`, with backslashes on Windows) or be empty,
+/// but never start at a root and never hold `..`, a drive prefix or NUL.
+fn is_safe_output_subfolder(subfolder: &str) -> bool {
+    !subfolder.starts_with(['/', '\\'])
+        && subfolder
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .all(crate::commands::api::is_single_safe_filename)
+}
+
 /// Fetch remote outputs via ComfyUI's view API; never interpret remote absolute
 /// paths as files on the machine running MooshieUI.
 pub(crate) async fn fetch_output(
@@ -109,7 +121,7 @@ pub(crate) async fn fetch_output(
         "filename"
     }]
     .as_str()
-    .filter(|name| !name.is_empty() && !name.contains(['/', '\\', ':']) && !name.contains(".."))
+    .filter(|name| crate::commands::api::is_single_safe_filename(name))
     .ok_or_else(|| {
         AppError::Other("Remote video output requires updated MooshieUI nodes".into())
     })?;
@@ -119,7 +131,7 @@ pub(crate) async fn fetch_output(
         None => state.base_url().await,
     };
     let subfolder = payload["subfolder"].as_str().unwrap_or("");
-    if subfolder.contains("..") || subfolder.contains(':') || subfolder.starts_with(['/', '\\']) {
+    if !is_safe_output_subfolder(subfolder) {
         return Err(AppError::Other("Invalid remote output folder".into()));
     }
     let mut response = state
@@ -282,7 +294,7 @@ pub(crate) async fn draft_status(
         let mut meta = fetch_json(state, &format!("{server}/mooshie/h3/drafts/{}", record.id)).await?;
         meta.as_object_mut().map(|object| object.remove("params"));
         let cap = fetch_json(state, &format!("{server}/mooshie/h3/capabilities")).await?;
-        Ok::<_, AppError>(json!({"retained": true, "available": true, "draft": meta, "upscaler_ready": cap["upscaler_ready"]}))
+        Ok::<_, AppError>(json!({"retained": true, "available": true, "draft": meta, "upscaler_ready": cap["upscaler_ready"], "retake_ready": cap["retake"] == true}))
     }.await;
     Ok(result.unwrap_or_else(
         |error| json!({"retained": true, "available": false, "error": error.to_string()}),
@@ -380,6 +392,77 @@ pub(crate) async fn refine_draft(
     Ok(json!({"prompt_id": response.prompt_id}))
 }
 
+/// Retake steps for the full-denoise pass over the chosen range.
+pub const RETAKE_STEPS: std::ops::RangeInclusive<u32> = 8..=40;
+
+/// Validate a retake range against the draft's pixel frame count.
+fn check_retake_range(start: u32, end: u32, frames: u64) -> Result<(), AppError> {
+    if frames == 0 || frames > 3600 {
+        return Err(AppError::Other("Draft frame count is invalid".into()));
+    }
+    if start >= end || u64::from(end) > frames {
+        return Err(AppError::Other(format!(
+            "Choose a retake range inside the clip's {frames} frames"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) async fn retake_draft(
+    state: &AppState,
+    dir: &Path,
+    filename: &str,
+    start_frame: u32,
+    end_frame: u32,
+    steps: u32,
+    owner: Option<String>,
+) -> Result<Value, AppError> {
+    let _guard = DRAFT_LOCK.lock().await;
+    if !RETAKE_STEPS.contains(&steps) {
+        return Err(AppError::Other(format!(
+            "A retake takes {}–{} steps",
+            RETAKE_STEPS.start(),
+            RETAKE_STEPS.end()
+        )));
+    }
+    let video = super::video_interpolate::resolve_gallery_video(dir, filename)?;
+    let record = read_record(&video)?
+        .ok_or_else(|| AppError::Other("This clip has no retained draft".into()))?;
+    let server = record_server(state, &record).await?;
+    let meta = fetch_json(state, &format!("{server}/mooshie/h3/drafts/{}", record.id)).await?;
+    check_retake_range(start_frame, end_frame, meta["frames"].as_u64().unwrap_or(0))?;
+    let params: crate::comfyui::types::GenerationParams =
+        serde_json::from_value(meta["params"].clone())
+            .map_err(|_| AppError::Other("Draft generation settings are invalid".into()))?;
+    let cap = fetch_json(state, &format!("{server}/mooshie/h3/capabilities")).await?;
+    if cap["retake"] != true {
+        return Err(AppError::Other(
+            "Update the MooshieUI custom nodes on this ComfyUI server to retake clips.".into(),
+        ));
+    }
+    // A new seed: the draft's own seed would re-create the same frames.
+    let seed = i64::from(rand::random::<u32>());
+    let workflow = crate::templates::video_retake::build(
+        &params,
+        &record.id,
+        filename,
+        start_frame,
+        end_frame,
+        steps,
+        seed,
+    );
+    crate::comfyui::process::mark_legacy_worker_idle(state).await;
+    state.free_llm_vram_for_generation().await;
+    let (worker, response) = state
+        .gpu_manager
+        .submit_prompt_to_worker(record.worker, workflow, &state.client_id)
+        .await?;
+    state.prompt_queue.insert(&response.prompt_id, owner);
+    state.prompt_queue.set_worker(&response.prompt_id, worker);
+    state.broadcast_queue_positions();
+    Ok(json!({"prompt_id": response.prompt_id}))
+}
+
 #[cfg(feature = "desktop")]
 mod desktop {
     use super::*;
@@ -421,6 +504,25 @@ mod desktop {
     ) -> Result<Value, AppError> {
         refine_draft(state.inner(), &gallery()?, &filename, steps, sigma, None).await
     }
+    #[tauri::command]
+    pub async fn retake_video_draft(
+        state: State<'_, Arc<AppState>>,
+        filename: String,
+        start_frame: u32,
+        end_frame: u32,
+        steps: u32,
+    ) -> Result<Value, AppError> {
+        retake_draft(
+            state.inner(),
+            &gallery()?,
+            &filename,
+            start_frame,
+            end_frame,
+            steps,
+            None,
+        )
+        .await
+    }
 }
 #[cfg(feature = "desktop")]
 pub use desktop::*;
@@ -459,6 +561,17 @@ mod tests {
     }
 
     #[test]
+    fn retake_ranges_must_sit_inside_the_clip() {
+        assert!(check_retake_range(0, 124, 124).is_ok());
+        assert!(check_retake_range(24, 72, 124).is_ok());
+        for (start, end) in [(72, 24), (30, 30), (100, 125)] {
+            assert!(check_retake_range(start, end, 124).is_err());
+        }
+        assert!(check_retake_range(0, 10, 0).is_err());
+        assert!(RETAKE_STEPS.contains(&20) && !RETAKE_STEPS.contains(&4));
+    }
+
+    #[test]
     fn only_opaque_lowercase_draft_ids_are_accepted() {
         assert!(valid_id(&"0123456789abcdef".repeat(2)));
         for id in ["../other", "", "ABCDEF", "c:\\private"] {
@@ -466,5 +579,25 @@ mod tests {
         }
         assert!(!valid_id(&"a".repeat(33)));
         assert!(!valid_id(&"z".repeat(32)));
+    }
+
+    #[test]
+    fn output_subfolders_nest_but_never_escape() {
+        for ok in ["", "video", "video/a", "video\\a", "a//b", "a/"] {
+            assert!(is_safe_output_subfolder(ok), "{ok:?}");
+        }
+        for bad in [
+            "/abs",
+            "\\abs",
+            "..",
+            "a/../b",
+            "a\\..\\b",
+            "D:x",
+            "video/C:evil",
+            "a/./b",
+            "nul\0byte",
+        ] {
+            assert!(!is_safe_output_subfolder(bad), "{bad:?}");
+        }
     }
 }

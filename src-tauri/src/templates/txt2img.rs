@@ -1,9 +1,8 @@
 use serde_json::json;
 
 use super::{
-    build_regional_context_prompt, build_scheduled_conditioning, insert_vae_decode,
-    load_model_nodes, merge_regional_encode_text, needs_flux2_latent, needs_sd3_latent,
-    WorkflowResult,
+    build_scheduled_conditioning, insert_vae_decode, is_sdxl_like_family, load_model_nodes,
+    needs_flux2_latent, needs_sd3_latent, strip_lora_tags, WorkflowResult,
 };
 use crate::comfyui::types::GenerationParams;
 
@@ -40,14 +39,18 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     //   tuples do not match the sampler's spatial dimensions. Use a standard
     //   ConditioningSetMask instead; it scales the region mask to the latent
     //   shape and conditions only within that area (not an inpaint pass).
-    let area_regions = matches!(params.model_architecture.as_str(), "sdxl" | "illustrious");
+    // Keep this in lockstep with the frontend family gate. Pony and Mugen use
+    // the same SDXL area-conditioning shape; accepting a region in the UI and
+    // silently omitting it here was a fork-first merge regression.
+    let area_regions = is_sdxl_like_family(&params.model_architecture);
     let masked_regions = params.model_architecture == "anima";
     if params.mode == "txt2img" && (area_regions || masked_regions) {
-        let regional_context = build_regional_context_prompt(params);
         for region in &params.positive_regions {
-            let text = merge_regional_encode_text(&regional_context, &region.text)
-                .trim()
-                .to_string();
+            // The frontend sends each region already merged with the prompt
+            // context (without scheduled segments, which must stay inside
+            // their timestep window), so it is encoded as is. Only the LoRA
+            // tags that context carries are removed.
+            let text = strip_lora_tags(&region.text).trim().to_string();
             if text.is_empty() {
                 continue;
             }

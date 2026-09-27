@@ -66,6 +66,17 @@ impl ProcessedOutputImage {
 /// tags there is no header of ours to read the size from. IHDR is the first
 /// chunk by spec and its width and height are the first two fields, so this is
 /// a fixed-offset read once the signature checks out.
+/// `(format, extension)` for a PREVIEW_IMAGE frame's image-type code. ComfyUI
+/// sends 1 for JPEG and 2 for PNG; MooshieUI's H3 live preview node sends 3
+/// for an animated WebP. Unknown codes keep ComfyUI's JPEG default.
+fn preview_image_format(code: u32) -> (&'static str, &'static str) {
+    match code {
+        2 => ("png", "png"),
+        3 => ("webp", "webp"),
+        _ => ("jpeg", "jpg"),
+    }
+}
+
 fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
     if bytes.len() < 24 || bytes[..8] != SIGNATURE || &bytes[12..16] != b"IHDR" {
@@ -515,18 +526,20 @@ pub async fn connect_websocket(
     state: Arc<AppState>,
     event_tx: tokio::sync::broadcast::Sender<crate::state::BroadcastEvent>,
 ) -> Result<(), AppError> {
-    {
-        let mut handle = state.ws_handle.lock().await;
-        if handle.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
-            log::debug!("ComfyUI WebSocket already connected; skipping reconnect");
-            return Ok(());
-        }
-        if let Some(h) = handle.take() {
-            h.abort();
-        }
+    let base_url = state.base_url().await;
+    // Hold the handle lock from the "already connected" check until the new
+    // task is stored (nothing below awaits). Otherwise two concurrent callers
+    // both spawn a task and the second store overwrites the first without
+    // aborting it, leaving an orphan socket with the same clientId.
+    let mut ws_slot = state.ws_handle.lock().await;
+    if ws_slot.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
+        log::debug!("ComfyUI WebSocket already connected; skipping reconnect");
+        return Ok(());
+    }
+    if let Some(h) = ws_slot.take() {
+        h.abort();
     }
 
-    let base_url = state.base_url().await;
     let client_id = state.client_id.clone();
     let ws_url = base_url
         .replace("http://", "ws://")
@@ -768,8 +781,7 @@ pub async fn connect_websocket(
                                 }
                                 let format_type =
                                     u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-                                let format = if format_type == 2 { "png" } else { "jpeg" };
-                                let ext = if format_type == 2 { "png" } else { "jpg" };
+                                let (format, ext) = preview_image_format(format_type);
                                 let image_data = &data[8..];
                                 let prompt_id_str = current_prompt_id.as_deref().unwrap();
 
@@ -974,7 +986,7 @@ pub async fn connect_websocket(
         }
     });
 
-    *state.ws_handle.lock().await = Some(task);
+    *ws_slot = Some(task);
     Ok(())
 }
 
@@ -985,18 +997,17 @@ pub async fn connect_websocket_headless(
     state: &Arc<AppState>,
     event_tx: tokio::sync::broadcast::Sender<crate::state::BroadcastEvent>,
 ) -> Result<(), AppError> {
-    {
-        let mut handle = state.ws_handle.lock().await;
-        if handle.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
-            log::debug!("ComfyUI WebSocket (headless) already connected; skipping reconnect");
-            return Ok(());
-        }
-        if let Some(h) = handle.take() {
-            h.abort();
-        }
+    let base_url = state.base_url().await;
+    // Held from the check until the new task is stored (see connect_websocket).
+    let mut ws_slot = state.ws_handle.lock().await;
+    if ws_slot.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
+        log::debug!("ComfyUI WebSocket (headless) already connected; skipping reconnect");
+        return Ok(());
+    }
+    if let Some(h) = ws_slot.take() {
+        h.abort();
     }
 
-    let base_url = state.base_url().await;
     let client_id = state.client_id.clone();
     let ws_url = base_url
         .replace("http://", "ws://")
@@ -1114,8 +1125,7 @@ pub async fn connect_websocket_headless(
                                 }
                                 let format_type =
                                     u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-                                let format = if format_type == 2 { "png" } else { "jpeg" };
-                                let ext = if format_type == 2 { "png" } else { "jpg" };
+                                let (format, ext) = preview_image_format(format_type);
                                 let image_data = &data[8..];
                                 let prompt_id_str = current_prompt_id.as_deref().unwrap();
 
@@ -1200,7 +1210,7 @@ pub async fn connect_websocket_headless(
         }
     });
 
-    *state.ws_handle.lock().await = Some(task);
+    *ws_slot = Some(task);
     Ok(())
 }
 
@@ -1247,18 +1257,17 @@ async fn connect_websocket_for_worker_inner(
     worker: &std::sync::Arc<super::gpu_manager::GpuWorker>,
     event_tx: tokio::sync::broadcast::Sender<crate::state::BroadcastEvent>,
 ) -> Result<(), AppError> {
-    {
-        let mut handle = worker.ws_handle.lock().await;
-        if handle.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
-            log::debug!(
-                "Worker {} WebSocket already connected; skipping reconnect",
-                worker.id
-            );
-            return Ok(());
-        }
-        if let Some(h) = handle.take() {
-            h.abort();
-        }
+    // Held from the check until the new task is stored (see connect_websocket).
+    let mut ws_slot = worker.ws_handle.lock().await;
+    if ws_slot.as_ref().map(|h| !h.is_finished()).unwrap_or(false) {
+        log::debug!(
+            "Worker {} WebSocket already connected; skipping reconnect",
+            worker.id
+        );
+        return Ok(());
+    }
+    if let Some(h) = ws_slot.take() {
+        h.abort();
     }
 
     let ws_url = worker
@@ -1300,7 +1309,14 @@ async fn connect_websocket_for_worker_inner(
                 tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
 
                 if let Some(pid) = current_prompt_id.clone() {
-                    match ws_state.get_history_for(&pid).await {
+                    // Ask this socket's own worker: the prompt ran here, and the
+                    // first ready worker (`get_history_for`) may be another GPU
+                    // whose history has never heard of it.
+                    match ws_state
+                        .gpu_manager
+                        .get_history_from_worker(worker_id, &pid)
+                        .await
+                    {
                         Ok(history) => {
                             let completed =
                                 history.get(&pid).map(|v| !v.is_null()).unwrap_or(false);
@@ -1392,8 +1408,7 @@ async fn connect_websocket_for_worker_inner(
                                 }
                                 let format_type =
                                     u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-                                let format = if format_type == 2 { "png" } else { "jpeg" };
-                                let ext = if format_type == 2 { "png" } else { "jpg" };
+                                let (format, ext) = preview_image_format(format_type);
                                 let image_data = &data[8..];
                                 let prompt_id_str = current_prompt_id.as_deref().unwrap();
 
@@ -1481,13 +1496,21 @@ async fn connect_websocket_for_worker_inner(
         }
     });
 
-    *worker.ws_handle.lock().await = Some(task);
+    *ws_slot = Some(task);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::png_dimensions;
+    use super::{png_dimensions, preview_image_format};
+
+    #[test]
+    fn preview_image_format_maps_comfyui_codes_and_animated_webp() {
+        assert_eq!(preview_image_format(1), ("jpeg", "jpg"));
+        assert_eq!(preview_image_format(2), ("png", "png"));
+        assert_eq!(preview_image_format(3), ("webp", "webp"));
+        assert_eq!(preview_image_format(99), ("jpeg", "jpg"));
+    }
 
     /// A PNG header only: signature, the IHDR length and tag, then the size.
     /// Nothing here decodes the image, so the pixel data is beside the point.
@@ -1529,5 +1552,54 @@ mod tests {
         // A zero side is not a size; treat it as absent rather than record it.
         assert_eq!(png_dimensions(&png_header(0, 64)), None);
         assert_eq!(png_dimensions(&png_header(64, 0)), None);
+    }
+}
+
+#[cfg(test)]
+mod connect_race_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Two callers that reach the "already connected" check together must end
+    /// up with one WebSocket task, not two (the second used to overwrite the
+    /// first handle without aborting it, orphaning a socket with the same
+    /// clientId). The config write guard parks both callers on `base_url()`,
+    /// which is where the old code awaited between its check and its store.
+    #[tokio::test]
+    async fn concurrent_headless_connects_spawn_one_task() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let config = crate::config::AppConfig {
+            server_port: port,
+            server_url: format!("http://127.0.0.1:{port}"),
+            ..crate::config::AppConfig::default()
+        };
+        let state = Arc::new(crate::state::AppState::new(config));
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+
+        let config_guard = state.config.write().await;
+        let callers: Vec<_> = (0..2)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let tx = tx.clone();
+                tokio::spawn(async move { super::connect_websocket_headless(&state, tx).await })
+            })
+            .collect();
+        tokio::task::yield_now().await;
+        drop(config_guard);
+        for caller in callers {
+            caller.await.unwrap().unwrap();
+        }
+
+        // Each task opens one socket and then waits forever for a handshake
+        // reply that this listener never sends.
+        let mut sockets = Vec::new();
+        while let Ok(Ok((socket, _))) =
+            tokio::time::timeout(Duration::from_millis(1000), listener.accept()).await
+        {
+            sockets.push(socket);
+        }
+        assert_eq!(sockets.len(), 1, "expected exactly one WebSocket task");
+        super::disconnect_websocket(&state).await.unwrap();
     }
 }

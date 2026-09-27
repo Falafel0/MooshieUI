@@ -1,5 +1,5 @@
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
-import { ipcStore } from "../utils/ipc.js";
+import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
 import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js";
 import {
@@ -259,6 +259,13 @@ export interface GenerationToParamsOptions {
    * without touching the user's setting.
    */
   seed?: string;
+  /**
+   * Build params for a job that is not part of the pause/resume flow (Refine,
+   * the regional inpaint chain): no pause step or resume stages are sent, the
+   * seed resolves from `seed`/the store rather than from the paused run, and
+   * style transfer and Anima TeaCache are not switched off on a pause's account.
+   */
+  outsidePausedRun?: boolean;
   overrides?: Partial<
     Pick<
       GenerationParams,
@@ -1010,6 +1017,9 @@ class GenerationStore {
    *  input delta stays under threshold. Only ever true once the lazy install
    *  has put the node pack on disk. */
   videoTeacacheEnabled = $state(false);
+  /** Animated live previews while H3 samples, decoded with taeh3. Only ever
+   *  true once the 23 MB taeh3 file is in models/vae_approx. */
+  videoLivePreview = $state(false);
   /** Active H3 tier id, including "custom" for user-supplied model files. */
   videoModelTier = $state("int8");
   /** Turbo LoRA filename inside `models/loras/`. Defaults to the recommended
@@ -1877,7 +1887,7 @@ class GenerationStore {
 
   private loadPromptHistory() {
     try {
-      const raw = localStorage.getItem(PROMPT_HISTORY_KEY);
+      const raw = localStorage.getItem(userScopedKey(PROMPT_HISTORY_KEY));
       if (!raw) return;
       const parsed = JSON.parse(raw) as PromptHistoryEntry[];
       if (!Array.isArray(parsed)) return;
@@ -1891,7 +1901,7 @@ class GenerationStore {
 
   private savePromptHistory() {
     try {
-      localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(this.promptHistory.slice(0, MAX_PROMPT_HISTORY)));
+      localStorage.setItem(userScopedKey(PROMPT_HISTORY_KEY), JSON.stringify(this.promptHistory.slice(0, MAX_PROMPT_HISTORY)));
       triggerSync();
     } catch (e) {
       console.error("Failed to save prompt history:", e);
@@ -2788,6 +2798,8 @@ class GenerationStore {
         this.videoSaveDraft = saved.videoSaveDraft === true;
         if (saved.videoTeacacheEnabled !== undefined)
           this.videoTeacacheEnabled = saved.videoTeacacheEnabled;
+        if (saved.videoLivePreview !== undefined)
+          this.videoLivePreview = saved.videoLivePreview;
         if (saved.videoTurboSteps !== undefined)
           this.videoTurboSteps = Math.min(
             H3_TURBO_MAX_STEPS,
@@ -3095,6 +3107,7 @@ class GenerationStore {
       videoTurboEnabled: this.videoTurboEnabled,
         videoTurboSteps: this.videoTurboSteps,
         videoTeacacheEnabled: this.videoTeacacheEnabled,
+        videoLivePreview: this.videoLivePreview,
         videoModelTier: this.videoModelTier,
         videoTurboLora: this.videoTurboLora,
         videoSampler: this.videoSampler,
@@ -3261,6 +3274,7 @@ class GenerationStore {
       videoTurboEnabled: this.videoTurboEnabled,
       videoTurboSteps: this.videoTurboSteps,
       videoTeacacheEnabled: this.videoTeacacheEnabled,
+      videoLivePreview: this.videoLivePreview,
       videoModelTier: this.videoModelTier,
       videoTurboLora: this.videoTurboLora,
       videoSampler: this.videoSampler,
@@ -3306,7 +3320,7 @@ class GenerationStore {
       const valid = entries
         .filter((e) => !!e?.id)
         .slice(0, MAX_PROMPT_HISTORY) as PromptHistoryEntry[];
-      localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(valid));
+      localStorage.setItem(userScopedKey(PROMPT_HISTORY_KEY), JSON.stringify(valid));
       this.promptHistory = valid;
     } catch (e) {
       console.error("generation: applyPromptHistory failed", e);
@@ -3521,7 +3535,9 @@ class GenerationStore {
     // stores the resolved (expanded) prompt so regenerating always reproduces.
     const hasPositiveRandom = hasRandomSyntax(inlinePositiveRaw);
     const hasNegativeRandom = hasRandomSyntax(inlineNegativeRaw);
-    const seedSource = this.resumeAppliesToMode && this.isPaused
+    // Whether this request pauses or continues the paused run.
+    const inPauseFlow = this.resumeAppliesToMode && !options.outsidePausedRun;
+    const seedSource = inPauseFlow && this.isPaused
       ? this.pausedStages[0].seed
       : options.seed ?? this.seed;
     const numericSeed = parseInt(seedSource, 10);
@@ -3892,6 +3908,7 @@ class GenerationStore {
       video_turbo_steps: this.effectiveVideoTurboPreset.steps ?? this.videoTurboSteps,
       video_turbo_lora: this.videoTurboEnabled ? (this.effectiveVideoTurboPreset.id === "larryvrh" ? this.videoTurboLora : (this.videoPresetLora ?? this.effectiveVideoTurboPreset.file.filename)) : null,
       video_teacache_enabled: this.videoTeacacheEnabled,
+      video_live_preview: this.videoLivePreview,
       video_model_tier: this.videoModelTier,
       video_sampler: this.videoSampler || null,
       video_scheduler: this.videoScheduler || null,
@@ -3906,10 +3923,10 @@ class GenerationStore {
       // Null for every local generation, so the backend's NovelAI branch is
       // never reachable from one.
       novelai: this.novelAiParams(novelAiCharacters.characters),
-      pause_at_step: this.resumeAppliesToMode && this.effectivePauseAtStep > 0
+      pause_at_step: inPauseFlow && this.effectivePauseAtStep > 0
         ? this.effectivePauseAtStep
         : null,
-      resume_stages: this.resumeAppliesToMode && this.isPaused
+      resume_stages: inPauseFlow && this.isPaused
         ? this.pausedStages.map(
             (stage): ResumeStage => ({
               params: stage.params,

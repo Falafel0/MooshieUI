@@ -1543,15 +1543,21 @@ class CanvasStore {
   }
 
   resizeCanvas(width: number, height: number) {
-    if (width === this.canvasWidth && height === this.canvasHeight) return;
+    // Every caller eventually reaches this method (the transformer, a base
+    // import, undo and image load). Normalize once here so a fractional or
+    // non-finite intermediate value cannot leave node geometry and document
+    // metadata in different coordinate systems.
+    const nextWidth = Math.max(1, Math.round(Number.isFinite(width) ? width : this.canvasWidth));
+    const nextHeight = Math.max(1, Math.round(Number.isFinite(height) ? height : this.canvasHeight));
+    if (nextWidth === this.canvasWidth && nextHeight === this.canvasHeight) return;
     // A completed preview belongs to the exact document geometry captured at
     // submission time. Keeping it after a manual resize would let Apply restore
     // stale dimensions and misalign the saved mask.
     this.clearPendingInpaintResult();
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
-    const scaleX = this.canvasWidth > 0 ? width / this.canvasWidth : 1;
-    const scaleY = this.canvasHeight > 0 ? height / this.canvasHeight : 1;
+    const scaleX = this.canvasWidth > 0 ? nextWidth / this.canvasWidth : 1;
+    const scaleY = this.canvasHeight > 0 ? nextHeight / this.canvasHeight : 1;
     const scaleLayerContents = (node: any) => {
       for (const child of node?.getChildren?.() ?? []) {
         // Raster assets are driven by their serializable layer metadata below.
@@ -1582,12 +1588,12 @@ class CanvasStore {
     this.layerThumbnails = {};
     const centerX = this.viewport.panX + this.canvasWidth * this.viewport.zoom / 2;
     const centerY = this.viewport.panY + this.canvasHeight * this.viewport.zoom / 2;
-    this.canvasWidth = width;
-    this.canvasHeight = height;
+    this.canvasWidth = nextWidth;
+    this.canvasHeight = nextHeight;
     this.viewport = {
       ...this.viewport,
-      panX: centerX - width * this.viewport.zoom / 2,
-      panY: centerY - height * this.viewport.zoom / 2,
+      panX: centerX - nextWidth * this.viewport.zoom / 2,
+      panY: centerY - nextHeight * this.viewport.zoom / 2,
     };
     this.boundingBox = {
       ...this.boundingBox,
@@ -1600,8 +1606,8 @@ class CanvasStore {
     // fields in lockstep so the dimensions panel, saved settings and backend
     // request cannot retain the previous size after an on-canvas resize.
     if (generation.mode === "inpainting") {
-      generation.width = width;
-      generation.height = height;
+      generation.width = nextWidth;
+      generation.height = nextHeight;
       void generation.saveSettings();
     }
   }

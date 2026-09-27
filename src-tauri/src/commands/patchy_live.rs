@@ -195,8 +195,9 @@ pub struct PatchyLiveRead {
 }
 
 /// Patchy's documented user-script directory is under Qt's RTsoft/Patchy
-/// AppDataLocation. Install only our own new file; preserve a customized copy.
-pub(super) fn install_return_script(path: &Path) -> Result<(), AppError> {
+/// AppDataLocation. Install our self-contained connector under a visible
+/// product folder, while leaving any existing user-created script untouched.
+pub(super) fn install_connector_script(path: &Path) -> Result<(), AppError> {
     use std::io::Write;
     let handoff = handoff_path(&path.to_string_lossy())?;
     let dir = dirs::data_dir()
@@ -206,21 +207,24 @@ pub(super) fn install_return_script(path: &Path) -> Result<(), AppError> {
         .join("scripts")
         .join("MooshieUI");
     std::fs::create_dir_all(&dir)?;
-    let script = dir.join("Return to MooshieUI.js");
+    // Patchy's `@name` header turns this into the clear "MooshieUI Connector"
+    // entry in File > Scripts. Use a new filename rather than replacing the
+    // previous lightweight return script: a user may have customized it.
+    let script = dir.join("MooshieUI Connector.js");
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&script)
     {
-        Ok(mut file) => {
-            file.write_all(include_bytes!("../../resources/patchy/mooshieui-return.js"))?
-        }
+        Ok(mut file) => file.write_all(include_bytes!(
+            "../../resources/patchy/mooshieui-connector.js"
+        ))?,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
     std::fs::write(
         handoff.with_extension("mooshie-link.json"),
-        b"{\"version\":1}",
+        b"{\"version\":2,\"connector\":\"MooshieUI Connector\"}",
     )?;
     Ok(())
 }

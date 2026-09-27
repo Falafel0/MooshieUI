@@ -498,6 +498,8 @@ export interface GenerationParams {
   video_turbo_lora?: string | null;
   /** MiniMax-H3 TeaCache: reuses the previous step's model output when little changed. */
   video_teacache_enabled?: boolean;
+  /** Animated taeh3 live previews during H3 sampling. */
+  video_live_preview?: boolean;
   /** Active H3 tier id, including "custom" for user-supplied model files. */
   video_model_tier?: string;
   /** Custom sampler name for KSamplerSelect; null/absent means preset default (res_multistep). */
@@ -646,7 +648,10 @@ export interface AppConfig {
   prompt_assistant_idle_timeout_secs: number;
   prompt_assistant_setup_done: boolean;
   civitai_api_key: string | null;
-  /** Present in browser mode for non-admin users when a server-side key is configured. */
+  /**
+   * Present for every non-admin browser client (moderators included), whose
+   * `civitai_api_key` is always null; true when a server-side key is stored.
+   */
   civitai_api_key_configured?: boolean;
   /** Never populated for clients: the key is redacted to null on the way out. */
   novelai_api_key: string | null;
@@ -658,6 +663,8 @@ export interface AppConfig {
   browser_mode: boolean;
   ui_server_port: number;
   lan_enabled: boolean;
+  /** Requests from this computer are the admin without signing in (browser mode). */
+  trust_localhost: boolean;
   /** Shut the backend down when the browser tab stops sending heartbeats (browser mode). */
   browser_auto_shutdown: boolean;
   attention_backend: string;
@@ -687,9 +694,12 @@ export interface AppConfig {
   llm_provider: string;
   /** External LLM API root, e.g. http://localhost:1234/v1 or https://api.openai.com/v1. */
   llm_external_base_url: string;
-  /** External LLM API key (Bearer token; empty for keyless local servers). */
+  /**
+   * Always empty: the external LLM credential never leaves Rust, and a
+   * full-config save cannot change it (use `setLlmApiKey`).
+   */
   llm_external_api_key: string;
-  /** Blanked for non-admin browser clients; true when a key is stored server-side. */
+  /** True when a key is stored server-side. */
   llm_external_api_key_configured?: boolean;
   /** External LLM model name (e.g. gpt-4o-mini). */
   llm_external_model: string;

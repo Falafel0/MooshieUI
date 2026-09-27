@@ -162,7 +162,14 @@
       return;
     }
 
-    if (generation.styleTransferEnabled && !generation.pauseResumeActive) {
+    // Check style transfer only when it will actually be sent: an armed or
+    // paused run clears it in toParams(), except the regional inpaint chain,
+    // which builds its params outside the paused run and keeps it on the base
+    // pass (a paused run is continued instead, so the chain never runs then).
+    const styleTransferWillRun =
+      generation.styleTransferEnabled &&
+      (!generation.pauseResumeActive || (!generation.isPaused && usesSequentialEditMasks()));
+    if (styleTransferWillRun) {
       if (!generation.styleReferenceImage?.trim()) {
         errorMsg = locale.t("generation.style_transfer.no_reference");
         gallery.showToast(locale.t("generation.style_transfer.no_reference"), "error");

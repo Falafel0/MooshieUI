@@ -1,5 +1,24 @@
 # Changelog
 
+## What's New in v2.3.8-fork.1
+
+### Stable canvas transforms
+- Raster images now keep a stable visual origin while they are moved or resized. Pointer updates are applied directly to the selected image node, so the picture no longer jumps while the transform box is being dragged.
+- Transform completion uses the same geometry that was shown during the gesture. Canvas dimensions are normalized before they reach the renderer, which also stabilizes document resizing and fit-to-view behavior.
+- Mask and brush-stroke transforms keep their existing behavior; the raster-specific path no longer interferes with painted layers.
+
+### Patchy connector
+- The Patchy hand-off dialog keeps a fixed layout while its status changes, preventing the modal from jumping during preparation, launch, preview and import.
+- MooshieUI now installs a visible **File → Scripts → MooshieUI → MooshieUI Connector** script in Patchy. The connector follows Patchy's documented script API and offers explicit destinations for the base image, a new raster layer, the active mask, the active region or the gallery.
+- The connector can return the open Patchy document without an extra save, rejects unrelated documents and supports unattended destination selection for automated hand-offs.
+
+### Upstream v2.3.8
+- Includes the upstream security and privacy hardening for browser/LAN mode, account isolation, roles, sign-in, untrusted files and verified downloads.
+- Adds H3 animated live preview, PDD 8-step Turbo presets, mid-timeline guide stills and range retakes that preserve the rest of a retained clip and its soundtrack.
+- Managed installations move to ComfyUI v0.37.0, LoRA strengths span -10 to 10 with typed entry, and generation, gallery, connection and shutdown reliability fixes are included.
+
+---
+
 ## What's New in v2.3.7-fork.10
 
 ### Managed ComfyUI on Windows
