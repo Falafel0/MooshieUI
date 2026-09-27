@@ -168,7 +168,7 @@
     // pass (a paused run is continued instead, so the chain never runs then).
     const styleTransferWillRun =
       generation.styleTransferEnabled &&
-      (!generation.pauseResumeActive || (!generation.isPaused && willRunRegionalInpaintChain()));
+      (!generation.pauseResumeActive || (!generation.isPaused && usesSequentialEditMasks()));
     if (styleTransferWillRun) {
       if (!generation.styleReferenceImage?.trim()) {
         errorMsg = locale.t("generation.style_transfer.no_reference");
