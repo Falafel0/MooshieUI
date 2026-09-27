@@ -1,5 +1,14 @@
 # Changelog
 
+## What's New in v2.3.7-fork.10
+
+### Managed ComfyUI on Windows
+- Wait for an owned ComfyUI process to finish terminating before restarting it. This prevents a still-closing instance from holding its port and reporting a false shutdown failure.
+- Treat an already exited child as stopped while its parent still holds a process handle. Keep the exact creation-time and executable checks so unrelated processes are never terminated.
+- Show the underlying Windows termination error in the application log when stopping an owned process fails.
+
+---
+
 ## What's New in v2.3.7-fork.9
 
 ### Patchy hand-off
