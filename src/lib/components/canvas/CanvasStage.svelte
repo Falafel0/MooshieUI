@@ -834,10 +834,17 @@
     const rect = containerEl.getBoundingClientRect();
     const deltaWidth = rect.width - containerW;
     const deltaHeight = rect.height - containerH;
+    // If the document was fitted before the layout changed, keep it fitted.
+    // This covers the first ResizeObserver correction after mount as well as
+    // async banners and side panels appearing. A deliberate zoom or pan no
+    // longer matches Fit, so it keeps the user's chosen viewport instead.
+    const keepFitted = canvas.viewportIsFitted(containerW, containerH);
     containerW = rect.width;
     containerH = rect.height;
     canvas.setViewportSize(containerW, containerH);
-    if (canvas.viewportInitialized && (deltaWidth || deltaHeight)) {
+    if (keepFitted && (deltaWidth || deltaHeight)) {
+      canvas.zoomToFit(containerW, containerH);
+    } else if (canvas.viewportInitialized && (deltaWidth || deltaHeight)) {
       canvas.viewport = { ...canvas.viewport, panX: canvas.viewport.panX + deltaWidth / 2, panY: canvas.viewport.panY + deltaHeight / 2 };
     }
     stage.width(containerW);
