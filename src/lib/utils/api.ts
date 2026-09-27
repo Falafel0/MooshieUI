@@ -1,4 +1,4 @@
-import { ipcInvoke, ipcListen, isBrowserMode, isTauri } from "./ipc.js";
+import { getAuthToken, ipcInvoke, ipcListen, isBrowserMode, isTauri } from "./ipc.js";
 import { getLogSnapshot } from "./log-buffer.js";
 import type { ExportFormat } from "./videoExport.js";
 import { locale } from "../stores/locale.svelte.js";
@@ -954,6 +954,11 @@ export async function copyGalleryImageToClipboard(
   return ipcInvoke("copy_gallery_image_to_clipboard", { filename, metadata, metadataMode });
 }
 
+/**
+ * Absolute host path of a gallery file, for desktop-only native actions. In
+ * browser mode the server refuses it to regular accounts; use the gallery URL
+ * or filename-based commands there instead.
+ */
 export async function getGalleryImagePath(filename: string): Promise<string> {
   return ipcInvoke("get_gallery_image_path", { filename });
 }
@@ -1470,10 +1475,14 @@ export async function copyFileTo(srcPath: string, destPath: string): Promise<voi
 /**
  * Browser-mode download URL for an export. The encode ran on the server, so the
  * browser fetches the produced file by basename out of the export temp dir.
+ * A plain link cannot send an Authorization header, so the token rides along
+ * as a query param, exactly like the gallery image URLs.
  */
 export function exportDownloadUrl(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? "";
-  return `/internal-api/_export/${encodeURIComponent(name)}`;
+  const base = `/internal-api/_export/${encodeURIComponent(name)}`;
+  const token = getAuthToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
 export async function interrogateGalleryImage(filename: string): Promise<InterrogationResult> {
@@ -1796,6 +1805,8 @@ export interface VideoDraftStatus {
   retained: boolean;
   available?: boolean;
   upscaler_ready?: boolean;
+  /** The server's MooshieUI nodes can mask a frame range (MooshieH3RetakeMask). */
+  retake_ready?: boolean;
   error?: string;
   draft?: { width: number; height: number; frames: number; bytes: number };
 }
@@ -1805,5 +1816,6 @@ export const getVideoDraftStatus = (filename: string) => ipcInvoke<VideoDraftSta
 export const deleteVideoDraft = (filename: string) => ipcInvoke<void>("delete_video_draft", { filename });
 export const refineVideoDraft = (filename: string, steps: number, sigma: number) =>
   ipcInvoke<{ prompt_id: string }>("refine_video_draft", { filename, steps, sigma });
-
-// ---------------------------------------------------------------------------
+/** Regenerate pixel frames [startFrame, endFrame) of a retained draft, keeping its audio. */
+export const retakeVideoDraft = (filename: string, startFrame: number, endFrame: number, steps: number) =>
+  ipcInvoke<{ prompt_id: string }>("retake_video_draft", { filename, startFrame, endFrame, steps });

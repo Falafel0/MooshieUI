@@ -8,11 +8,20 @@ workspace folder, same drag-and-drop handling. Route paths are namespaced under
 
 The upload workspace stays `input/whatdreamscost` on purpose — assets dropped into
 either Director are then visible to both.
+
+Modified for MooshieUI, 2026: the compile-prompt preview no longer reports middle
+timeline images as ignored with refs off, because the Director now anchors them with
+MiniMaxH3AddGuide when ComfyUI provides it.
 """
 
 # Vendored into MooshieUI from ComfyUI-MiniMaxH3-Director v0.1.5 (GPL-3.0).
 # Upstream: https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director
-# See LICENSE in this directory for the full GPL-3.0 text. Unmodified.
+# See LICENSE in this directory for the full GPL-3.0 text.
+#
+# Modified by MooshieUI (2026-09), security fixes only: file references from requests
+# and timelines are confined to ComfyUI's input/output directories (`confine_path`),
+# the upload containment check is separator-aware, and
+# /minimax_director_open_folder only answers POST, so a drive-by GET cannot open it.
 #
 # The aiohttp routes below serve the upstream js/ timeline editor, which MooshieUI does
 # not vendor. They are left in place rather than stripped: they register inertly at
@@ -49,8 +58,31 @@ AUDIO_SR = 44100
 # path helpers
 # --------------------------------------------------------------------------------------
 
+def _is_inside(path, root):
+    """True when `path` lies strictly beneath `root` (both already resolved).
+
+    Separator-aware, so `/comfy/input_old` is not inside `/comfy/input`.
+    """
+    path, root = os.path.normcase(path), os.path.normcase(root)
+    return path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def confine_path(path):
+    """Return `path` if it really lies inside ComfyUI's input or output directory.
+
+    Resolves `..` segments and symlinks first, so absolute paths, traversal and links
+    pointing elsewhere all yield None.
+    """
+    real = os.path.realpath(path)
+    for root in (folder_paths.get_input_directory(), folder_paths.get_output_directory()):
+        if _is_inside(real, os.path.realpath(root)):
+            return path
+    return None
+
+
 def resolve_input_path(rel_name: str):
-    """Resolve a timeline file reference to an absolute path inside ComfyUI/input."""
+    """Resolve a timeline file reference to an absolute path inside ComfyUI/input
+    (or ComfyUI/output); anything outside those directories resolves to None."""
     if not rel_name:
         return None
     input_dir = folder_paths.get_input_directory()
@@ -60,7 +92,7 @@ def resolve_input_path(rel_name: str):
         os.path.join(input_dir, os.path.basename(rel_name)),
     ]
     for path in candidates:
-        if os.path.exists(path) and os.path.isfile(path):
+        if confine_path(path) and os.path.exists(path) and os.path.isfile(path):
             return path
     return None
 
@@ -170,7 +202,9 @@ async def minimax_director_check_file(request):
     temp_dir = os.path.join(upload_dir, WORKSPACE_SUBDIR)
 
     def _matches(path):
-        if not (os.path.exists(path) and os.path.isfile(path)):
+        # Confine first: this answers "does it exist", so it must not probe paths
+        # outside ComfyUI's input/output directories.
+        if not (confine_path(path) and os.path.exists(path) and os.path.isfile(path)):
             return False
         if not file_size:
             return True
@@ -211,6 +245,7 @@ async def compile_prompt_endpoint(request):
     no matter how much is on the timeline.
     """
     from . import minimax_plan as plan
+    from .minimax_core import core
     try:
         data = await request.json()
         fps = float(data.get("frame_rate") or 24.0) or 24.0
@@ -239,9 +274,10 @@ async def compile_prompt_endpoint(request):
                             "looping — shorten the window." % p["actual_seconds"])
         if not p["ref_mode_on"]:
             middles = sum(1 for e in p["events"] if e["role"] == plan.ROLE_MIDDLE)
-            if middles:
-                warnings.append("%d image(s) in the middle are ignored — H3 only anchors the "
-                                "first and last frame. Switch to 'Refs ON (ref2va)'." % middles)
+            if middles and not hasattr(core(), "MiniMaxH3AddGuide"):
+                warnings.append("%d image(s) in the middle are ignored: this ComfyUI has no "
+                                "MiniMaxH3AddGuide. Update ComfyUI or switch to "
+                                "'Refs ON (ref2va)'." % middles)
         if p["ref_mode_on"] and len(p["ref_image_slots"]) >= plan.MAX_REF_IMAGES:
             warnings.append("Reference images are capped at %d." % plan.MAX_REF_IMAGES)
         warnings.extend(p.get("ref_warnings") or [])
@@ -293,7 +329,9 @@ async def minimax_director_get_audio(request):
     return web.json_response({"audio_file": audio_file, "peaks": peaks})
 
 
-@PromptServer.instance.routes.get("/minimax_director_open_folder")
+# POST only: it has a side effect (opens the file manager on the server machine), and
+# any page can make a browser send a GET, e.g. through an <img> tag.
+@PromptServer.instance.routes.post("/minimax_director_open_folder")
 async def minimax_director_open_folder(request):
     upload_dir = os.path.join(folder_paths.get_input_directory(), WORKSPACE_SUBDIR)
     os.makedirs(upload_dir, exist_ok=True)
@@ -329,7 +367,7 @@ async def minimax_director_upload_chunk(request):
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, filename)
 
-    if not os.path.realpath(file_path).startswith(os.path.realpath(upload_dir)):
+    if not _is_inside(os.path.realpath(file_path), os.path.realpath(upload_dir)):
         return web.json_response({"error": "Invalid filename"}, status=400)
 
     loop = asyncio.get_event_loop()

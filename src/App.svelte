@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
-  import { ipcInvoke, ipcListen, isTauri, isBrowserMode, startHeartbeat, getAuthToken, setAuthToken, setAuthUser, authHeaders, wasRememberMe } from "./lib/utils/ipc.js";
+  import { ipcInvoke, ipcListen, isTauri, isBrowserMode, startHeartbeat, getAuthToken, setAuthToken, setAuthUser, authHeaders, wasRememberMe, userScopedKey } from "./lib/utils/ipc.js";
   import { useMobileLayout } from "./lib/utils/device.js";
   import SetupWizard from "./lib/components/setup/SetupWizard.svelte";
   import MobileApp from "./lib/components/mobile/MobileApp.svelte";
@@ -764,6 +764,20 @@
     }
   }
 
+  /**
+   * Finish a sign-in with a page reload rather than starting the app in place.
+   * The stores read their per-account storage (`userScopedKey`) once, when
+   * first imported, which was before this login, so continuing in place would
+   * show the previous occupant of this browser's prompt history, presets and
+   * notes, and then save them into the new account. The token survives the
+   * reload in whichever storage "Remember me" picked.
+   */
+  function reloadForSignedInAccount() {
+    mustChangePassword = false;
+    authRequired = false; // loading spinner until the reload lands
+    window.location.reload();
+  }
+
   async function handleLogin() {
     loginBusy = true;
     loginError = null;
@@ -794,12 +808,7 @@
         return;
       }
 
-      authRequired = false;
-      // Now continue the normal startup flow
-      // LAN users skip setup check — setup is only for the host.
-      // If the host hasn't finished setup yet, the server wouldn't be working anyway.
-      setupComplete = true;
-      await initApp();
+      reloadForSignedInAccount();
     } catch (e) {
       loginError = String(e);
     } finally {
@@ -833,14 +842,10 @@
         return;
       }
       // Password changed — proceed normally
-      mustChangePassword = false;
-      authRequired = false;
       loginPass = "";
       newPass1 = "";
       newPass2 = "";
-      // LAN users skip setup check — setup is only for the host.
-      setupComplete = true;
-      await initApp();
+      reloadForSignedInAccount();
     } catch (e) {
       changePassError = String(e);
     } finally {
@@ -1179,6 +1184,8 @@
   let metadataPanelCollapsed = $state(false);
   const METADATA_MIN_WIDTH = 260;
   const METADATA_MAX_WIDTH = 600;
+  // Per LAN account (`userScopedKey`): `boardFilter` names one of the
+  // account's own boards.
   const GALLERY_PREFS_KEY = "mooshieui.gallery.prefs.v1";
 
   /** Dir picker shown when manualSaveMode is on and 2+ dirs are configured. */
@@ -2177,7 +2184,7 @@
 
   function loadGalleryPrefs() {
     try {
-      const raw = localStorage.getItem(GALLERY_PREFS_KEY);
+      const raw = localStorage.getItem(userScopedKey(GALLERY_PREFS_KEY));
       if (!raw) return;
       const parsed = JSON.parse(raw) as {
         imagesPerRow?: number;
@@ -2231,7 +2238,7 @@
 
     try {
       localStorage.setItem(
-        GALLERY_PREFS_KEY,
+        userScopedKey(GALLERY_PREFS_KEY),
         JSON.stringify({
           imagesPerRow: galleryImagesPerRow,
           sortBy: gallerySortBy,
@@ -3054,7 +3061,8 @@
             let blob: Blob;
             if (isTauri) {
               const rawBytes = await readTempImage(data.temp_filename);
-              const mime = data.format === "png" ? "image/png" : "image/jpeg";
+              // "webp" is the H3 live preview's animated clip; an <img> plays it.
+              const mime = data.format === "png" || data.format === "webp" ? `image/${data.format}` : "image/jpeg";
               blob = new Blob([new Uint8Array(rawBytes)], { type: mime });
             } else {
               // SSE/browser path: fetch image from temp endpoint

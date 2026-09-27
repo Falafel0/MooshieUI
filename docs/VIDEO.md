@@ -28,6 +28,20 @@ The presets use the pruned conversions from [Kijai's repository](https://hugging
 
 TeaCache is skipped while a PDD preset is active, because it reuses the previous step's output and that output came from different heads. The TeaCache setting is kept and applies again with other methods. Upstream testing covered the pruned int8, fp8 and NVFP4 checkpoints. MooshieUI graph tests cover the wiring, not visual quality.
 
+## Live preview
+
+Turn on **Live preview** below TeaCache to watch a rough animated preview of the whole clip while it samples. ComfyUI's own video previewer decodes only the first latent frame, which in first/last-frame mode is the start image you supplied. The `MooshieH3LivePreview` node instead decodes each step's denoised estimate with [madebyollin's taeh3](https://github.com/madebyollin/taehv/tree/62f7591f59dfbb4c3c02b7a621d180a9eeaba26c) tiny autoencoder and sends it as an animated WebP. Previews are capped at 384 px on the long side, 12 fps and 72 frames, and play for the clip's real length.
+
+The first time you turn it on, the managed installation downloads `taeh3.safetensors` (about 23 MB, revision-pinned and SHA-256 checked) into `models/vae_approx/`. No restart is needed. Remote servers need the same file in the same folder. Decoding runs on the sampling thread, and a step is skipped while the previous preview is still encoding, so a slow encode never holds up sampling. The final step is never previewed because the finished clip replaces it. Previews work with every generation method and with the Director timeline; they do not change the output.
+
+Graph and CPU tests cover the wiring, the taeh3 decode and the WebP encoding. The per-step cost on a GPU has not been measured yet.
+
+## Timeline stills in the middle of a clip
+
+With **Use timeline** on in the first/last-frame workflow, a shot whose still starts partway through the clip is pinned at that shot's start frame with ComfyUI's `MiniMaxH3AddGuide` (ComfyUI v0.34.0 or newer). Before, those stills were dropped. Stills at the start and end remain the first and last keyframes, and a clip segment contributes its first frame. The anchor lives in the latent only, so the prompt does not name it as a picture: the text encoder never sees it. In the reference workflow middle stills stay `<Picture>` references, and a retake ignores them as before. On an older ComfyUI they are skipped with a warning in the ComfyUI log.
+
+CPU tests cover the frame mapping and the conditioning with ComfyUI's own node. How closely H3 follows a mid-clip anchor has not been measured on a GPU.
+
 ## Concise motion prompts and Live2D
 
 The video prompt enhancer keeps simple single-shot descriptions concise, usually 60–120 words or fewer. It preserves the required H3 fields, reference labels, real endpoint duration and supplied dialogue. Complex requested scenes can still use longer descriptions; short reference prompts are not rejected for their word count.
@@ -48,13 +62,19 @@ The [15 September RTX 5070 comparison](research/video-benchmark-2026-09-15.md) f
 
 1. Enable **Keep draft for 2× refinement** before generating. Use about **0.5 MP or less**; the exact snapped dimensions must fit the 2.2 MP limit after doubling both axes. Updated MooshieUI nodes must be loaded on the connected ComfyUI server.
 2. Generate and save the clip to the gallery. Manual-save mode retains the draft reference when you save the clip.
-3. Open the clip's video player and select **Refine 2×**. The action appears only for clips with retained data. It shows the actual output dimensions and retained storage size.
+3. Open the clip's video player and select **Retake or refine**, then use the **2× refinement** section. The action appears only for clips with retained data. It shows the actual output dimensions and retained storage size.
 4. Install the **59 MB H3 latent upscaler** if needed, then queue refinement. Defaults are eight steps and strength 0.35; supported controls are 4–20 steps and strength 0.15–0.60.
 5. The result arrives as a new gallery clip. You can delete the retained data separately while keeping the original MP4.
 
 This is a second H3 generation pass. It enlarges the clean video latent, resizes visual reference/keyframe conditioning, rebuilds the guider, then adds noise once and refines using an unaccelerated base model with Euler and a linear raw-sigma schedule. Original generated audio, or the Director's supplied audio track, is preserved. Temporal length and any selected interpolation settings are retained. A Turbo draft, or a previously retained VDN draft, can be the source; the second pass does not reapply its acceleration adapter.
 
 The upscaler architecture is vendored from [Mamad8's MIT-licensed implementation](https://github.com/mamad8c/ComfyUI-H3-Latent-Upscaler-Mamad8/tree/e98237773011523528353a8beb4863e65b099a38). Its [pinned film checkpoint](https://huggingface.co/Tridae/H3LatentUpscaler/tree/5c87ab7cf8425a2cfbc3d21da1bffbd686ce67a6) installs to `models/h3_latent_upscalers/h3_clean_latent_upscaler_film_epoch200.safetensors` and is SHA-256 checked. Remote installations need this file and the bundled `mooshie-nodes` package, including `h3_drafts.py`, `h3_upscaler.py` and its license. No external stash/editor package is required.
+
+### Retake a range, keeping the soundtrack
+
+The same retained draft can be retaken: open the clip's player, choose **Retake or refine**, set **From** and **To** in seconds, and queue the retake. Only the video frames in that range are regenerated, with a new seed, 8–40 steps (default 20) and the unaccelerated base model. The rest of the clip and the entire soundtrack stay fixed: `MooshieH3RetakeMask` puts ComfyUI's per-token H3 noise mask on the draft's joint latent, masking the range's video frames and none of the audio, so the new frames are sampled against the original sound. The mask covers every latent frame that touches the range, which H3 packs as 1, 4, 4, 4, 4 pixel frames. The result is a new clip; the original and its draft are unchanged, and the new clip does not retain a draft of its own.
+
+A retake needs no upscaler. It needs updated MooshieUI nodes and ComfyUI v0.34.0 or newer on the server that holds the draft. CPU tests cover the mask against ComfyUI's own frame layout, its preparation in the sampler and H3's model-side reading of it. How well a retaken range blends with its neighbours has not been measured on a GPU.
 
 ### Storage and recovery
 

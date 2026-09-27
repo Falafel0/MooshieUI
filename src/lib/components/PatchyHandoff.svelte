@@ -765,12 +765,12 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-[230] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+    class="fixed inset-0 z-[230] flex items-start justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm"
     role="dialog"
     aria-modal="true"
     aria-label={locale.t("patchy.title")}
   >
-    <div class="w-full max-w-2xl rounded-xl border border-neutral-700 bg-neutral-950 p-4 shadow-2xl">
+    <div class="flex min-h-[30rem] max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 p-4 shadow-2xl">
       <div class="flex items-start gap-2">
         <h2 class="text-sm font-semibold text-neutral-100">{locale.t("patchy.title")}</h2>
         <button
@@ -781,7 +781,11 @@
         >×</button>
       </div>
 
-      <p class="mt-1 text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>
+      <!-- The shell has a stable top edge and fixed working height. Live
+           previews and import choices may change, but they now scroll inside
+           this body instead of re-centering the whole modal every few seconds. -->
+      <div class="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+        <p class="text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>
 
       {#if phase === "preparing"}
         <p class="mt-4 text-xs text-neutral-300" role="status">{locale.t("common.loading")}</p>
@@ -1084,6 +1088,7 @@
           </PatchyTransferPanel>
         </div>
       {/if}
+      </div>
     </div>
   </div>
 {/if}

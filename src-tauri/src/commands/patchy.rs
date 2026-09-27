@@ -681,7 +681,7 @@ pub async fn launch_patchy(
     let mut command = Command::new(&executable);
     // No document means "just open the editor", which is what auto-start does.
     if let Some(path) = document_path.as_deref() {
-        super::patchy_live::install_return_script(Path::new(path))?;
+        super::patchy_live::install_connector_script(Path::new(path))?;
         command.arg(path);
     }
     let child = command

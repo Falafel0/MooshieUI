@@ -15,6 +15,10 @@ use crate::comfyui::types::GenerationParams;
 /// filter dropdown lists.
 pub const H3_DIFFUSION_MARKERS: [&str; 2] = ["minimax", "h3"];
 
+/// taeh3 tiny autoencoder in `models/vae_approx`, decoded for live previews.
+/// `VAELoader` only lists video TAEs whose file stem is exactly the TAE name.
+pub const H3_PREVIEW_TAE_FILENAME: &str = "taeh3.safetensors";
+
 /// Sampling steps for the undistilled base model.
 pub const H3_DEFAULT_STEPS: u32 = 20;
 
@@ -184,9 +188,10 @@ pub(crate) fn video_metadata_params(
     let (width, height) =
         compute_h3_dimensions(&params.video_aspect_ratio, params.video_megapixels);
     let steps = sampling_steps(params);
-    // RIFE doubles H3's native 24 fps without changing the clip's duration.
+    // Interpolation multiplies H3's native 24 fps (2x-4x) without changing the
+    // clip's duration; the same rate the graph hands `CreateVideo`.
     let fps = if params.video_rife_enabled {
-        48.0
+        crate::templates::rife::RifeSettings::from_params(params).output_fps(24.0)
     } else {
         24.0
     };
@@ -719,6 +724,39 @@ pub fn build(params: &GenerationParams, seed: i64, include_metadata: bool) -> Va
             model_link
         };
 
+    // Live preview wraps the sampler's step callback, so it sits on the model
+    // both the scheduler and guider receive. It changes no sampling math.
+    let model_link = if params.video_live_preview {
+        let tae_id = next_id.to_string();
+        workflow.insert(
+            tae_id.clone(),
+            json!({
+                "class_type": "VAELoader",
+                "inputs": { "vae_name": H3_PREVIEW_TAE_FILENAME }
+            }),
+        );
+        next_id += 1;
+        let preview_id = next_id.to_string();
+        workflow.insert(
+            preview_id.clone(),
+            json!({
+                "class_type": "MooshieH3LivePreview",
+                "inputs": {
+                    "model": model_link,
+                    "vae": [tae_id.as_str(), 0],
+                    "max_side": 384,
+                    "fps": 12,
+                    "max_frames": 72,
+                    "quality": 60
+                }
+            }),
+        );
+        next_id += 1;
+        json!([preview_id.as_str(), 0])
+    } else {
+        model_link
+    };
+
     // Custom scheduler override (e.g. "beta" for the custom tier). Only active
     // when Turbo is off; fall back to the H3 preset "simple".
     let scheduler_name = scheduler_name(params);
@@ -990,6 +1028,36 @@ mod tests {
         params.video_turbo_preset = "pdd_fl2va_8".into();
         assert!(!is_pdd_preset(&params));
         assert!(lora_preset(&params).is_none());
+    }
+
+    #[test]
+    fn live_preview_wraps_the_sampled_model_for_both_paths() {
+        let plain = build(&video_params("fl2va"), 1, false);
+        assert!(nodes_of_class(&plain, "MooshieH3LivePreview").is_empty());
+
+        for timeline in [false, true] {
+            let mut params = video_params("fl2va");
+            params.video_live_preview = true;
+            params.video_teacache_enabled = true;
+            if timeline {
+                params.video_timeline_data = Some(TIMELINE_JSON.to_string());
+            }
+            let workflow = build(&params, 1, false);
+            let preview_id = node_id_of_class(&workflow, "MooshieH3LivePreview");
+            let preview = nodes_of_class(&workflow, "MooshieH3LivePreview")[0];
+            let teacache_id = node_id_of_class(&workflow, "MiniMaxH3TeaCache");
+            // Preview sits after TeaCache and feeds both MODEL consumers.
+            assert_eq!(preview["inputs"]["model"], json!([teacache_id, 0]));
+            let scheduler = nodes_of_class(&workflow, "BasicScheduler")[0];
+            let guider = nodes_of_class(&workflow, "BasicGuider")[0];
+            assert_eq!(scheduler["inputs"]["model"], json!([preview_id, 0]));
+            assert_eq!(guider["inputs"]["model"], json!([preview_id, 0]));
+            let tae_id = preview["inputs"]["vae"][0].as_str().unwrap();
+            assert_eq!(
+                workflow[tae_id]["inputs"]["vae_name"],
+                json!(H3_PREVIEW_TAE_FILENAME)
+            );
+        }
     }
 
     #[test]
@@ -1348,7 +1416,18 @@ mod tests {
             assert_eq!(rife["inputs"]["multiplier"], json!(multiplier));
             let create_video = nodes_of_class(&workflow, "CreateVideo")[0];
             assert_eq!(create_video["inputs"]["fps"], json!(expected_fps));
+            // The embedded metadata reports the rate the clip was saved at.
+            assert_eq!(
+                video_metadata_params(&params, 1)["mooshie_video_fps"],
+                format!("{expected_fps}")
+            );
         }
+        let mut params = video_params("fl2va");
+        params.video_rife_enabled = true;
+        params.video_rife_multiplier = 2;
+        assert_eq!(video_metadata_params(&params, 1)["mooshie_video_fps"], "48");
+        params.video_rife_enabled = false;
+        assert_eq!(video_metadata_params(&params, 1)["mooshie_video_fps"], "24");
     }
 
     #[test]

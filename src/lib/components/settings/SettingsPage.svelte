@@ -588,6 +588,11 @@
       lanAuthError = locale.t("settings.lan.account_validation");
       return;
     }
+    // Mirrors is_valid_new_username in src-tauri/src/auth.rs.
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(lanNewUser.trim())) {
+      lanAuthError = locale.t("settings.lan.username_invalid", { max: 32 });
+      return;
+    }
     lanAuthBusy = true;
     lanAuthError = null;
     try {
@@ -1141,7 +1146,7 @@
   });
 
   const sections = [
-    { key: "appMode", labelKey: "settings.sections.app_mode", keywords: "browser app mode desktop native window web switch ui" },
+    { key: "appMode", labelKey: "settings.sections.app_mode", keywords: "browser app mode desktop native window web switch ui trust localhost proxy sign in" },
     { key: "connection", labelKey: "settings.sections.connection", keywords: "server mode url port remote autolaunch" },
     { key: "appearance", labelKey: "settings.sections.appearance", keywords: "theme dark light font scale palette custom create logo background branding import export color" },
     { key: "performance", labelKey: "settings.sections.performance", keywords: "vram mode high low normal keep alive close attention backend sage flash" },
@@ -1181,6 +1186,9 @@
       case "paths": return isAdmin;
       case "models":
       case "modelRequests":
+      // Installing, deleting and unloading the shared local LLM is server
+      // management (the backend refuses it to regular accounts).
+      case "prompt_assistant":
       case "civitai": return canManageServer;
       // NovelAI is per-account now: every user manages their own key.
       case "novelai": return true;
@@ -1262,8 +1270,10 @@
     ) {
       config.theme_profile_id = null;
     }
-    // Migrate CivitAI API key from ModelHub localStorage if not already in config
-    if (!config.civitai_api_key) {
+    // Migrate CivitAI API key from ModelHub localStorage if not already in config.
+    // A non-admin sees a stored key only as `civitai_api_key_configured`, and
+    // must not overwrite it with a stale local copy.
+    if (!config.civitai_api_key && !config.civitai_api_key_configured) {
       try {
         const lsKey = localStorage.getItem("mooshieui.civitai.apiKey.v1");
         if (lsKey) {
@@ -1474,7 +1484,8 @@
     // in the image), so only probe the installed version off-browser.
     if (!isBrowserMode) void refreshComfyuiVersion();
     loadInstallPath();
-    getGalleryPath().then(p => { galleryPathDisplay = p; }).catch(() => {});
+    // Host path, shown (and served) to the admin only.
+    if (isAdmin) getGalleryPath().then(p => { galleryPathDisplay = p; }).catch(() => {});
     void loadCacheCount();
     if (isBrowserMode) {
       loadLanAccounts();
@@ -1534,9 +1545,10 @@
    * Mirror an LLM provider mutation back into the cached config.
    *
    * The provider commands write Rust config directly, so this snapshot goes
-   * stale the moment one runs and a later unrelated `autoSave()` would revert
-   * provider, base URL and model. (The API key needs no mirroring — Rust's
-   * `preserve_secrets` carries a stored key across any full-config save.)
+   * stale the moment one runs. Rust's `preserve_secrets` keeps the whole
+   * provider row (key, sign-in session, provider, base URL, model, xAI client)
+   * as the server has it on every full-config save, so this only keeps the
+   * local copy honest, and `enabled` is the one field autoSave() does carry.
    */
   function onProviderState(next: LlmProviderState) {
     if (!config) return;
@@ -2136,6 +2148,24 @@
                   <input
                     type="checkbox"
                     bind:checked={config.browser_auto_shutdown}
+                    onchange={() => autoSave()}
+                    class="sr-only peer"
+                  />
+                  <div class="w-9 h-5 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between pt-2 border-t border-neutral-800">
+                <div>
+                  <label for="settings-trust-localhost" class="text-xs text-neutral-300 font-medium">{locale.t('settings.trust_localhost.enable')}</label>
+                  <p class="text-xs text-neutral-500 mt-0.5">
+                    {locale.t('settings.trust_localhost.enable_desc')}
+                  </p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input
+                    id="settings-trust-localhost"
+                    type="checkbox"
+                    bind:checked={config.trust_localhost}
                     onchange={() => autoSave()}
                     class="sr-only peer"
                   />
@@ -4085,7 +4115,7 @@
         {/if}
 
         <!-- Prompt Assistant -->
-        {#if activeCategory === "prompt_assistant"}
+        {#if canManageServer && activeCategory === "prompt_assistant"}
         <section class="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden mb-4">
           <div class="w-full flex items-center justify-between p-5 text-sm font-medium text-neutral-200">
             <span class="flex items-center gap-2">
@@ -4182,7 +4212,9 @@
                   }
                 }}
                 onchange={() => { autoSave(); }}
-                placeholder={locale.t('settings.civitai.api_key_placeholder')}
+                placeholder={config.civitai_api_key_configured && !config.civitai_api_key
+                  ? locale.t('settings.civitai.api_key_saved_placeholder')
+                  : locale.t('settings.civitai.api_key_placeholder')}
                 class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
               />
               <p class="text-[10px] text-neutral-500 mt-1">{locale.t('settings.civitai.api_key_link')}</p>

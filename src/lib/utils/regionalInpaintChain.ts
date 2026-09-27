@@ -67,12 +67,17 @@ export async function runRegionalInpaintChain(
   const baseParams = generation.toParams({
     includeConditioningRegions: usesSpatialConditioning,
     regionalSelectionsOverride: usesSpatialConditioning ? callbacks.conditioningRegions : undefined,
+    outsidePausedRun: true,
   });
   const facefixOnFinal = baseParams.facefix_enabled;
+  // Upscale runs once, on the final image. Running it on every step would
+  // compound the scale and hand the next inpaint an image larger than its mask.
   const upscaleOnFinal = baseParams.upscale_enabled;
+  const savePreUpscaleOnFinal = baseParams.save_pre_upscale_image;
   const segmentsOnFinal = baseParams.detail_segments;
   baseParams.facefix_enabled = false;
   baseParams.upscale_enabled = false;
+  baseParams.save_pre_upscale_image = false;
   baseParams.detail_segments = [];
   const differentialDiffusion = generation.isAnima || generation.differentialDiffusion;
   const regionalContext = buildRegionalContextPrompt(baseParams.positive_prompt, generation.loras.filter((l) => l.enabled && l.name));
@@ -97,7 +102,6 @@ export async function runRegionalInpaintChain(
     resolvedBaseSeed = result.seed;
     checkCancelled();
   }
-
   for (let i = 0; i < prepared.length; i++) {
     const region = prepared[i].region;
     const isFinalOutput = i === prepared.length - 1;
@@ -130,9 +134,13 @@ export async function runRegionalInpaintChain(
       inpaint_target_height: region.inpaintHeight ?? baseParams.height,
       grow_mask_by: region.maskGrow ?? baseParams.grow_mask_by,
       differential_diffusion: differentialDiffusion || !!region.densityDenoise,
+      // Style transfer is txt2img-only: it shapes the base pass, and the
+      // inpaints would fail validation carrying it.
+      style_transfer_enabled: false,
       facefix_enabled: isFinalOutput && facefixOnFinal,
       upscale_enabled: isFinalOutput && upscaleOnFinal,
       detail_segments: isFinalOutput ? segmentsOnFinal : [],
+      save_pre_upscale_image: isFinalOutput && savePreUpscaleOnFinal,
     };
     const result = await callbacks.submit(params, { phase: "region", index, total, isFinalOutput });
     if (fromInput && i === 0) resolvedBaseSeed = result.seed;
