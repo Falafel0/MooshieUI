@@ -16,6 +16,7 @@
 const STORAGE_KEY = "mooshieui.styles.v1";
 const ACTIVE_KEY = "mooshieui.styles.active.v1";
 const EXPORT_VERSION = 1;
+export const ANIMA_STYLE_WEIGHT_MAX = 4;
 
 import { stripArtistSigil } from "../utils/artistTag.js";
 import { triggerSync } from "../utils/syncTrigger.js";
@@ -66,7 +67,7 @@ function genId(): string {
 function clampWeight(w: unknown, fallback = 1.0): number {
   const n = typeof w === "number" ? w : Number(w);
   if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.min(3, n));
+  return Math.max(0, Math.min(ANIMA_STYLE_WEIGHT_MAX, n));
 }
 
 function sanitizeArtist(raw: any): StyleArtist | null {
@@ -118,7 +119,38 @@ function round2(n: number): number {
  * Creator can key a saved style the same way it keys a drawn combination.
  */
 export function bakedArtistWeight(artist: StyleArtist, overallWeight: number): number {
-  return round2(clampWeight(artist.weight) * clampWeight(overallWeight));
+  return round2(
+    Math.min(
+      ANIMA_STYLE_WEIGHT_MAX,
+      clampWeight(artist.weight) * clampWeight(overallWeight),
+    ),
+  );
+}
+
+/**
+ * Build the artist chain consumed by Anima-Artist-Mixer. The extension accepts
+ * either `weight::artist` or `artist::weight`; MooshieUI emits the former so a
+ * chain remains easy to scan and stable in metadata. Duplicate artists keep
+ * the first active style's value, matching `fragmentForStyles()`.
+ */
+export function artistMixerChainForStyles(
+  styleList: Array<{ artists: StyleArtist[]; overallWeight: number }>,
+): string {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const style of styleList) {
+    for (const artist of style.artists) {
+      const tag = stripArtistSigil(artist.tag.trim());
+      if (!tag) continue;
+      const key = tag.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const weight = bakedArtistWeight(artist, style.overallWeight);
+      if (weight <= 0) continue;
+      parts.push(weight === 1 ? tag : `${weight}::${tag}`);
+    }
+  }
+  return parts.join(", ");
 }
 
 /**
@@ -276,6 +308,10 @@ class StylesStore {
    */
   buildPromptFragment(stripSigil = false): string {
     return fragmentForStyles(this.activeStyles, stripSigil);
+  }
+
+  buildArtistMixerChain(): string {
+    return artistMixerChainForStyles(this.activeStyles);
   }
 
   // ---------------------------------------------------------------------------

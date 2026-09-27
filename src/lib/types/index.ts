@@ -457,6 +457,10 @@ export interface GenerationParams {
   style_ref_clip_vision?: string | null;
   /** Anima TeaCache: reuses the previous step's DiT output when little changed. */
   anima_teacache_enabled?: boolean;
+  /** Native integration with An1X3R/Anima-Artist-Mixer. */
+  anima_artist_mixer?: AnimaArtistMixerParams | null;
+  /** Native integration with nregret/Comfyui-Anima-Tools. */
+  anima_tools?: AnimaToolsParams | null;
   /** Image Edit mode reference images (ComfyUI input filenames); slot 0 primary. */
   edit_reference_images?: string[];
   /** Anima ReStyler reference adherence: 1.0 full, lower restyles harder. */
@@ -538,6 +542,84 @@ export interface GenerationParams {
   resume_edit_image?: string | null;
   /** Mask for `resume_edit_image` (white = take the edit). */
   resume_edit_mask?: string | null;
+}
+
+export interface AnimaArtistMixerParams {
+  enabled: boolean;
+  artist_chain: string;
+  method: "adapter" | "cross_attention";
+  strength: number;
+  normalize_weights: boolean;
+  alignment_mode: "base_anchored" | "shared_base_ids";
+  combine_mode: "concat" | "output_avg" | "lowrank_avg";
+  fusion_mode: "interpolate" | "concat_with_base" | "base_preserve";
+  apply_to_uncond: boolean;
+  uncond_strength: number;
+  start_block: number;
+  end_block: number;
+  start_percent: number;
+  end_percent: number;
+  artist_ema_alpha: number;
+  lowrank_k: number;
+  artist_static_capture: boolean;
+  static_capture_k: number;
+  artist_anchor_q: boolean;
+  anchor_seed_list: string;
+  anchor_seeds_count: number;
+  anchor_user_blend: number;
+  anchor_deep_layer_threshold: number;
+  stabilizer_end_percent: number;
+  anchor_refresh_mode: "once" | "warm_cache";
+  anchor_cache_points: number;
+  anchor_keyframe_mode: "uniform_sigma" | "adaptive_q";
+  layer_filter: string;
+  structure_preserve: number;
+  delta_norm_cap: number;
+  style_balance: number;
+}
+
+export interface AnimaToolsParams {
+  enabled: boolean;
+  quality_prompt: string;
+  artist_tags: string;
+  character_tags: string;
+  clothing_tags: string;
+  pose_tags: string;
+  background_tags: string;
+  separator: string;
+  composer_enabled: boolean;
+  enable_artist: boolean;
+  enable_character: boolean;
+  enable_clothing: boolean;
+  enable_background: boolean;
+  enable_pose: boolean;
+  character_detail: "trigger" | "trigger_tags" | "trigger_random_tags";
+  seed: number;
+  artist_count: number;
+  character_seed: number;
+  character_tag_count: number;
+  character_keep_features: boolean;
+  clothing_seed: number;
+  clothing_source: "author" | "danbooru" | "character_tags" | "random";
+  multi_lora_enabled: boolean;
+}
+
+export interface DanbooruPost {
+  id: number;
+  created_at?: string;
+  rating?: string;
+  tag_string?: string;
+  tag_string_artist?: string;
+  tag_string_character?: string;
+  tag_string_copyright?: string;
+  tag_string_general?: string;
+  tag_string_meta?: string;
+  preview_file_url?: string | null;
+  large_file_url?: string | null;
+  file_url?: string | null;
+  source?: string;
+  image_width?: number;
+  image_height?: number;
 }
 
 /** One completed stage of a paused txt2img run, as sent back on resume. */

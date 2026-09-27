@@ -760,31 +760,70 @@ pub fn load_model_nodes(
     let base_model = model_source.clone();
     let base_clip = clip_source.clone();
 
-    // LoRA chain
-    for lora in &params.loras {
-        if lora.name.trim().is_empty() {
-            log::warn!(
-                "Skipping LoRA with empty name — this should have been filtered by the frontend"
-            );
-            continue;
-        }
+    let anima_multi_lora = params.model_architecture == "anima"
+        && params
+            .anima_tools
+            .as_ref()
+            .is_some_and(|settings| settings.enabled && settings.multi_lora_enabled)
+        && !params.loras.is_empty();
+
+    // Comfyui-Anima-Tools' model-only multi-LoRA loader is an explicit mode:
+    // never run it after the regular model+CLIP chain or every LoRA is applied
+    // twice. The clip intentionally remains at the loader output because the
+    // extension's node only patches MODEL.
+    if anima_multi_lora {
         let lora_id = next_id.to_string();
+        let lora_list = params
+            .loras
+            .iter()
+            .filter(|lora| !lora.name.trim().is_empty())
+            .map(|lora| {
+                json!({
+                    "name": lora.name,
+                    "strength_model": lora.strength_model,
+                    "enabled": true
+                })
+            })
+            .collect::<Vec<_>>();
         workflow.insert(
             lora_id.clone(),
             json!({
-                "class_type": "LoraLoader",
+                "class_type": "AnimaMultiLoraLoader",
                 "inputs": {
                     "model": [model_source.0, model_source.1],
-                    "clip": [clip_source.0, clip_source.1],
-                    "lora_name": lora.name,
-                    "strength_model": lora.strength_model,
-                    "strength_clip": lora.strength_clip
+                    "lora_list_json": serde_json::to_string(&lora_list).unwrap_or_else(|_| "[]".into())
                 }
             }),
         );
-        model_source = (lora_id.clone(), 0);
-        clip_source = (lora_id, 1);
+        model_source = (lora_id, 0);
         next_id += 1;
+    } else {
+        // Standard LoRA chain: patches model and CLIP.
+        for lora in &params.loras {
+            if lora.name.trim().is_empty() {
+                log::warn!(
+                    "Skipping LoRA with empty name — this should have been filtered by the frontend"
+                );
+                continue;
+            }
+            let lora_id = next_id.to_string();
+            workflow.insert(
+                lora_id.clone(),
+                json!({
+                    "class_type": "LoraLoader",
+                    "inputs": {
+                        "model": [model_source.0, model_source.1],
+                        "clip": [clip_source.0, clip_source.1],
+                        "lora_name": lora.name,
+                        "strength_model": lora.strength_model,
+                        "strength_clip": lora.strength_clip
+                    }
+                }),
+            );
+            model_source = (lora_id.clone(), 0);
+            clip_source = (lora_id, 1);
+            next_id += 1;
+        }
     }
 
     // Optional separate VAE override (only for non-split models, split already has its own VAE).
@@ -865,7 +904,8 @@ pub fn build_workflow(
     }
 
     if params.style_transfer_enabled && params.model_architecture == "anima" {
-        let result = style_transfer::build(params, seed);
+        let mut result = style_transfer::build(params, seed);
+        inject_anima_prompting(&mut result, params, seed);
         return finish_workflow(result, params, seed);
     }
 
@@ -992,6 +1032,12 @@ fn build_image_stage(params: &GenerationParams, seed: i64) -> WorkflowResult {
         _ => txt2img::build(params, seed),
     };
 
+    // Structured Anima prompting is injected before model samplers and
+    // ControlNet patches so every downstream consumer sees the same MODEL and
+    // base CONDITIONING. Direct links to the original base encode are replaced
+    // in-place, preserving scheduled segments and regional conditioning.
+    inject_anima_prompting(&mut result, params, seed);
+
     // Apply rectified flow scheduling for SD3/Flux/AuraFlow (patches model before sampling)
     inject_rectified_flow(&mut result, params);
 
@@ -1082,6 +1128,323 @@ fn build_image_stage(params: &GenerationParams, seed: i64) -> WorkflowResult {
     inject_resume_stage(&mut result, params, seed);
 
     result
+}
+
+fn same_link(value: &Value, source: &(String, u32)) -> bool {
+    value.as_array().is_some_and(|items| {
+        items.len() == 2
+            && items[0].as_str() == Some(source.0.as_str())
+            && items[1].as_u64() == Some(source.1 as u64)
+    })
+}
+
+fn replace_link(value: &mut Value, from: &(String, u32), to: &(String, u32)) {
+    if same_link(value, from) {
+        *value = json!([to.0.clone(), to.1]);
+        return;
+    }
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                replace_link(item, from, to);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                replace_link(item, from, to);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn original_positive_encode(
+    result: &WorkflowResult,
+    params: &GenerationParams,
+) -> Option<(String, u32)> {
+    let expected_text = strip_lora_tags(&params.positive_prompt);
+    let expected_clip = json!([result.clip_source.0.clone(), result.clip_source.1]);
+    let mut candidates = result
+        .workflow
+        .iter()
+        .filter(|(_, node)| {
+            node["class_type"] == "CLIPTextEncode"
+                && node["inputs"]["text"].as_str() == Some(expected_text.as_str())
+                && node["inputs"]["clip"] == expected_clip
+        })
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|id| id.parse::<u32>().unwrap_or(u32::MAX));
+    candidates.into_iter().next().map(|id| (id, 0))
+}
+
+fn anima_prompt_inputs(
+    settings: &crate::comfyui::types::AnimaToolsParams,
+    params: &GenerationParams,
+    quality_source: Option<&(String, u32)>,
+) -> Value {
+    let extra_prompt = if settings.composer_enabled && !settings.quality_prompt.trim().is_empty() {
+        format!(
+            "{}, {}",
+            settings.quality_prompt.trim(),
+            strip_lora_tags(&params.positive_prompt).trim()
+        )
+    } else {
+        strip_lora_tags(&params.positive_prompt)
+    };
+    json!({
+        "quality_prompt": quality_source
+            .map(|source| json!([source.0.clone(), source.1]))
+            .unwrap_or_else(|| json!(settings.quality_prompt)),
+        "artist_tags": settings.artist_tags,
+        "character_tags": settings.character_tags,
+        "clothing_tags": settings.clothing_tags,
+        "pose_tags": settings.pose_tags,
+        "background_tags": settings.background_tags,
+        "extra_prompt": extra_prompt,
+        "separator": settings.separator
+    })
+}
+
+fn insert_anima_composer(
+    result: &mut WorkflowResult,
+    settings: &crate::comfyui::types::AnimaToolsParams,
+    seed: i64,
+) -> Option<(String, u32)> {
+    if !settings.composer_enabled {
+        return None;
+    }
+    let id = result.next_id.to_string();
+    result.next_id += 1;
+    result.workflow.insert(
+        id.clone(),
+        json!({
+            "class_type": "AnimaPromptComposer",
+            "inputs": {
+                "enable_artist": settings.enable_artist,
+                "enable_character": settings.enable_character,
+                "enable_clothing": settings.enable_clothing,
+                "enable_background": settings.enable_background,
+                "enable_pose": settings.enable_pose,
+                "character_detail": settings.character_detail,
+                "seed": if settings.seed < 0 { seed.rem_euclid(i32::MAX as i64 + 1) } else { settings.seed.min(i32::MAX as i64) },
+                "artist_count": settings.artist_count.clamp(0, 20),
+                "preview_collapsed": false,
+                "resolved_prompt": "",
+                "character_seed": settings.character_seed.clamp(-1, i32::MAX as i64),
+                "character_tag_count": settings.character_tag_count.clamp(0, 30),
+                "character_keep_features": settings.character_keep_features,
+                "clothing_seed": settings.clothing_seed.clamp(-1, i32::MAX as i64),
+                "clothing_source": settings.clothing_source
+            }
+        }),
+    );
+    Some((id, 0))
+}
+
+fn insert_anima_advanced_options(
+    result: &mut WorkflowResult,
+    settings: &crate::comfyui::types::AnimaArtistMixerParams,
+    seed: i64,
+) -> (String, u32) {
+    let options_id = result.next_id.to_string();
+    result.next_id += 1;
+    result.workflow.insert(
+        options_id.clone(),
+        json!({
+            "class_type": "AnimaArtistOptions",
+            "inputs": {
+                "start_block": settings.start_block.clamp(0, 63),
+                "end_block": settings.end_block.clamp(-1, 63),
+                "start_percent": settings.start_percent.clamp(0.0, 1.0),
+                "end_percent": settings.end_percent.clamp(0.0, 1.0),
+                "normalize_weights": settings.normalize_weights,
+                "artist_ema_alpha": settings.artist_ema_alpha.clamp(0.0, 0.95),
+                "lowrank_k": settings.lowrank_k.clamp(1, 32),
+                "artist_static_capture": settings.artist_static_capture,
+                "static_capture_k": settings.static_capture_k.clamp(1, 12),
+                "artist_anchor_q": settings.artist_anchor_q,
+                "anchor_seed_list": if settings.artist_anchor_q && settings.anchor_seed_list.trim().is_empty() {
+                    (0..settings.anchor_seeds_count.clamp(1, 4)).map(|i| (seed as u64).wrapping_add(i as u64).to_string()).collect::<Vec<_>>().join(",")
+                } else { settings.anchor_seed_list.clone() },
+                "anchor_seeds_count": settings.anchor_seeds_count.clamp(1, 4),
+                "anchor_user_blend": settings.anchor_user_blend,
+                "anchor_deep_layer_threshold": settings.anchor_deep_layer_threshold.clamp(-1, 64),
+                "stabilizer_end_percent": settings.stabilizer_end_percent.clamp(0.0, 1.0),
+                "anchor_refresh_mode": settings.anchor_refresh_mode,
+                "anchor_cache_points": settings.anchor_cache_points.clamp(2, 12),
+                "anchor_keyframe_mode": settings.anchor_keyframe_mode,
+                "layer_filter": settings.layer_filter
+            }
+        }),
+    );
+
+    let structure_id = result.next_id.to_string();
+    result.next_id += 1;
+    result.workflow.insert(
+        structure_id.clone(),
+        json!({
+            "class_type": "AnimaArtistStructureOptions",
+            "inputs": {
+                "structure_preserve": settings.structure_preserve.clamp(0.0, 1.0),
+                "delta_norm_cap": settings.delta_norm_cap.clamp(0.0, 4.0),
+                "advanced_options": [options_id, 0]
+            }
+        }),
+    );
+
+    let balance_id = result.next_id.to_string();
+    result.next_id += 1;
+    result.workflow.insert(
+        balance_id.clone(),
+        json!({
+            "class_type": "AnimaArtistStyleBalance",
+            "inputs": {
+                "style_balance": settings.style_balance.clamp(0.0, 1.0),
+                "advanced_options": [structure_id, 0]
+            }
+        }),
+    );
+    (balance_id, 0)
+}
+
+/// Add Comfyui-Anima-Tools and Anima-Artist-Mixer nodes without flattening the
+/// rest of MooshieUI's conditioning graph. This is deliberately mode-agnostic:
+/// txt2img, img2img, inpainting and Anima image-edit all receive the same patch.
+fn inject_anima_prompting(result: &mut WorkflowResult, params: &GenerationParams, seed: i64) {
+    if params.model_architecture != "anima" {
+        return;
+    }
+    let tools = params
+        .anima_tools
+        .as_ref()
+        .filter(|settings| settings.enabled);
+    let mixer = params
+        .anima_artist_mixer
+        .as_ref()
+        .filter(|settings| settings.enabled && !settings.artist_chain.trim().is_empty());
+    if tools.is_none() && mixer.is_none() {
+        return;
+    }
+
+    let original_nodes = result.workflow.keys().cloned().collect::<Vec<_>>();
+    let original_base = original_positive_encode(result, params);
+    let composer_source = tools.and_then(|settings| insert_anima_composer(result, settings, seed));
+
+    // When Artist Mixer is active, AnimaPromptPlus produces its base-prompt
+    // string. Without Mixer, ClipEncode returns the replacement conditioning.
+    let prompt_string_source = if let Some(settings) = tools {
+        if mixer.is_some() {
+            let id = result.next_id.to_string();
+            result.next_id += 1;
+            result.workflow.insert(
+                id.clone(),
+                json!({
+                    "class_type": "AnimaPromptPlus",
+                    "inputs": anima_prompt_inputs(settings, params, composer_source.as_ref())
+                }),
+            );
+            Some((id, 0))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let replacement_conditioning = if let Some(settings) = mixer {
+        let pack_id = result.next_id.to_string();
+        result.next_id += 1;
+        let base_prompt = prompt_string_source
+            .as_ref()
+            .map(|source| json!([source.0.clone(), source.1]))
+            .unwrap_or_else(|| json!(strip_lora_tags(&params.positive_prompt)));
+        result.workflow.insert(
+            pack_id.clone(),
+            json!({
+                "class_type": "AnimaArtistPack",
+                "inputs": {
+                    "clip": [result.clip_source.0.clone(), result.clip_source.1],
+                    "artist_chain": settings.artist_chain,
+                    "base_prompt": base_prompt
+                }
+            }),
+        );
+        let advanced_source = insert_anima_advanced_options(result, settings, seed);
+        let mixer_id = result.next_id.to_string();
+        result.next_id += 1;
+        let mixer_node = if settings.method == "cross_attention" {
+            json!({
+                "class_type": "AnimaArtistCrossAttn",
+                "inputs": {
+                    "model": [result.model_source.0.clone(), result.model_source.1],
+                    "artist_pack": [pack_id, 0],
+                    "combine_mode": settings.combine_mode,
+                    "fusion_mode": settings.fusion_mode,
+                    "strength": settings.strength.clamp(0.0, 4.0),
+                    "enabled": true,
+                    "apply_to_uncond": settings.apply_to_uncond,
+                    "uncond_strength": settings.uncond_strength.clamp(0.0, 1.0),
+                    "advanced_options": [advanced_source.0, advanced_source.1]
+                }
+            })
+        } else {
+            json!({
+                "class_type": "AnimaArtistAdapterMixer",
+                "inputs": {
+                    "model": [result.model_source.0.clone(), result.model_source.1],
+                    "artist_pack": [pack_id, 0],
+                    "strength": settings.strength.clamp(0.0, 4.0),
+                    "normalize_weights": settings.normalize_weights,
+                    "alignment_mode": settings.alignment_mode,
+                    "enabled": true,
+                    "apply_to_uncond": settings.apply_to_uncond,
+                    "uncond_strength": settings.uncond_strength.clamp(0.0, 1.0),
+                    "advanced_options": [advanced_source.0, advanced_source.1]
+                }
+            })
+        };
+        result.workflow.insert(mixer_id.clone(), mixer_node);
+        result.model_source = (mixer_id.clone(), 0);
+        if let Some(sampler) = result.workflow.get_mut(&result.sampler_id) {
+            sampler["inputs"]["model"] = json!([mixer_id.clone(), 0]);
+        }
+        Some((mixer_id, 1))
+    } else if let Some(settings) = tools {
+        let id = result.next_id.to_string();
+        result.next_id += 1;
+        let mut inputs = anima_prompt_inputs(settings, params, composer_source.as_ref());
+        inputs["clip"] = json!([result.clip_source.0.clone(), result.clip_source.1]);
+        result.workflow.insert(
+            id.clone(),
+            json!({
+                "class_type": "AnimaPromptPlusClipEncode",
+                "inputs": inputs
+            }),
+        );
+        Some((id, 0))
+    } else {
+        None
+    };
+
+    let Some(replacement) = replacement_conditioning else {
+        return;
+    };
+    if let Some(original) = original_base {
+        for id in original_nodes {
+            if let Some(node) = result.workflow.get_mut(&id) {
+                replace_link(node, &original, &replacement);
+            }
+        }
+        if result.positive_source == original {
+            result.positive_source = replacement;
+        }
+    } else {
+        result.positive_source = replacement.clone();
+        if let Some(sampler) = result.workflow.get_mut(&result.sampler_id) {
+            sampler["inputs"]["positive"] = json!([replacement.0, replacement.1]);
+        }
+    }
 }
 
 /// Wire up what a resumed stage needs beyond KSamplerAdvanced's step range.
@@ -1686,6 +2049,127 @@ mod regional_prompt_tests {
         let detailer = nodes(&workflow, "MooshieSegmentDetailer")[0].1;
         let encode = &workflow[detailer["inputs"]["positive"][0].as_str().unwrap()];
         assert_eq!(encode["inputs"]["text"], "1girl, smiling, blue eyes");
+    }
+}
+
+#[cfg(test)]
+mod anima_prompting_tests {
+    use super::graph_test_util::{build, nodes, params, single};
+    use crate::comfyui::types::{
+        AnimaArtistMixerParams, AnimaToolsParams, LoraParam, PositiveRegion,
+    };
+    use serde_json::json;
+
+    fn tools() -> AnimaToolsParams {
+        AnimaToolsParams {
+            enabled: true,
+            quality_prompt: "masterpiece".into(),
+            character_tags: "1girl".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn composer_random_seed_is_stable_when_a_stage_is_rebuilt() {
+        let mut p = params("txt2img", "anima");
+        p.anima_tools = Some(AnimaToolsParams {
+            composer_enabled: true,
+            ..tools()
+        });
+        let first = super::build_workflow(&p, 123, false);
+        let repeated = super::build_workflow(&p, 123, false);
+        let other = super::build_workflow(&p, 124, false);
+        assert_eq!(first, repeated);
+        assert_eq!(single(&first, "AnimaPromptComposer")["inputs"]["seed"], 123);
+        assert_eq!(single(&other, "AnimaPromptComposer")["inputs"]["seed"], 124);
+    }
+
+    #[test]
+    fn prompt_tools_replace_the_base_conditioning_in_txt2img() {
+        let mut p = params("txt2img", "anima");
+        p.anima_tools = Some(tools());
+        let workflow = build(&p);
+
+        let prompt = single(&workflow, "AnimaPromptPlusClipEncode");
+        assert_eq!(prompt["inputs"]["quality_prompt"], "masterpiece");
+        assert_eq!(prompt["inputs"]["character_tags"], "1girl");
+        let prompt_id = nodes(&workflow, "AnimaPromptPlusClipEncode")[0].0;
+        assert_eq!(
+            single(&workflow, "KSampler")["inputs"]["positive"],
+            json!([prompt_id, 0])
+        );
+    }
+
+    #[test]
+    fn prompt_tools_feed_the_base_of_regional_inpainting() {
+        let mut p = params("inpainting", "anima");
+        p.anima_tools = Some(tools());
+        p.positive_regions = vec![PositiveRegion {
+            text: "red hair".into(),
+            negative_text: None,
+            mask_image: Some("region.png".into()),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            strength: 1.0,
+        }];
+        let workflow = build(&p);
+        let prompt_id = nodes(&workflow, "AnimaPromptPlusClipEncode")[0].0;
+
+        assert_eq!(nodes(&workflow, "MooshieInpaintConditionMask").len(), 1);
+        assert_eq!(nodes(&workflow, "ConditioningSetMask").len(), 1);
+        assert!(nodes(&workflow, "ConditioningCombine")
+            .iter()
+            .any(|(_, node)| { node["inputs"]["conditioning_1"] == json!([prompt_id, 0]) }));
+    }
+
+    #[test]
+    fn artist_mixer_patches_model_and_conditioning_with_all_options() {
+        let mut p = params("inpainting", "anima");
+        p.anima_tools = Some(tools());
+        p.anima_artist_mixer = Some(AnimaArtistMixerParams {
+            enabled: true,
+            artist_chain: "1.5::wlop, 0.7::ciloranko".into(),
+            artist_anchor_q: true,
+            layer_filter: "0,3,5-10,-1".into(),
+            ..Default::default()
+        });
+        let workflow = build(&p);
+
+        let mixer_id = nodes(&workflow, "AnimaArtistAdapterMixer")[0].0;
+        let sampler = single(&workflow, "KSampler");
+        assert_eq!(sampler["inputs"]["model"], json!([mixer_id, 0]));
+        assert_eq!(sampler["inputs"]["positive"], json!([mixer_id, 1]));
+        assert_eq!(
+            single(&workflow, "AnimaArtistPack")["inputs"]["artist_chain"],
+            "1.5::wlop, 0.7::ciloranko"
+        );
+        let options = single(&workflow, "AnimaArtistOptions");
+        assert_eq!(options["inputs"]["artist_anchor_q"], true);
+        assert_eq!(options["inputs"]["layer_filter"], "0,3,5-10,-1");
+    }
+
+    #[test]
+    fn anima_multi_lora_replaces_the_regular_loader_chain() {
+        let mut p = params("txt2img", "anima");
+        let mut settings = tools();
+        settings.multi_lora_enabled = true;
+        p.anima_tools = Some(settings);
+        p.loras = vec![LoraParam {
+            name: "artists/wlop.safetensors".into(),
+            strength_model: 1.25,
+            strength_clip: 0.8,
+        }];
+        let workflow = build(&p);
+
+        assert!(nodes(&workflow, "LoraLoader").is_empty());
+        let loader = single(&workflow, "AnimaMultiLoraLoader");
+        let payload: serde_json::Value =
+            serde_json::from_str(loader["inputs"]["lora_list_json"].as_str().unwrap()).unwrap();
+        assert_eq!(payload[0]["name"], "artists/wlop.safetensors");
+        assert_eq!(payload[0]["strength_model"], 1.25);
+        assert_eq!(payload[0]["enabled"], true);
     }
 }
 

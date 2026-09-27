@@ -322,7 +322,7 @@
               id="sty-overall"
               type="range"
               min="0"
-              max="2"
+              max={generation.isAnima ? 4 : 2}
               step="0.05"
               value={style.overallWeight}
               oninput={(e) => setOverallWeight(parseFloat((e.currentTarget as HTMLInputElement).value))}
@@ -351,7 +351,7 @@
                 <input
                   type="range"
                   min="0"
-                  max="2"
+                  max={generation.isAnima ? 4 : 2}
                   step="0.05"
                   value={artist.weight}
                   oninput={(e) => updateArtistWeight(i, parseFloat((e.currentTarget as HTMLInputElement).value))}

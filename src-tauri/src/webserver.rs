@@ -5065,6 +5065,36 @@ async fn dispatch_command(
         }
 
         // --- ComfyUI node checks ---
+        "anima_catalog" => {
+            let catalog = args["catalog"].as_str().ok_or("Missing catalog")?;
+            commands::api::anima_catalog_impl(state.as_ref(), catalog)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "anima_source_image" => {
+            let url = args["url"].as_str().ok_or("Missing url")?;
+            commands::api::anima_source_image_impl(state.as_ref(), url)
+                .await
+                .map(|bytes| serde_json::json!(bytes))
+                .map_err(|e| e.to_string())
+        }
+        "danbooru_search" => {
+            let tags = args["tags"].as_str().unwrap_or("").to_string();
+            let page = args["page"].as_u64().unwrap_or(1).clamp(1, u32::MAX as u64) as u32;
+            let limit = args["limit"].as_u64().unwrap_or(24).clamp(1, 40) as u32;
+            let safe_mode = args["safeMode"].as_bool().unwrap_or(true);
+            let source = args["source"].as_str().map(str::to_string);
+            commands::api::danbooru_search_impl(
+                state.as_ref(),
+                tags,
+                page,
+                limit,
+                safe_mode,
+                source,
+            )
+            .await
+            .map_err(|e| e.to_string())
+        }
         "check_node_available" => {
             let node_class = args["nodeClass"]
                 .as_str()

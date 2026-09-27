@@ -1321,6 +1321,179 @@ pub async fn animadex_proxy_fetch(
     Ok(body)
 }
 
+/// Read-only Danbooru post search for the Anima Prompt Studio. The origin is
+/// fixed and only a compact allow-list of post fields is returned, so this is
+/// neither an open proxy nor a way to relay arbitrary response bodies.
+pub async fn danbooru_search_impl(
+    state: &AppState,
+    tags: String,
+    page: u32,
+    limit: u32,
+    safe_mode: bool,
+    source: Option<String>,
+) -> Result<serde_json::Value, AppError> {
+    let mut query = tags.trim().to_string();
+    if safe_mode {
+        if !query.is_empty() {
+            query.push(' ');
+        }
+        query.push_str("rating:general");
+    }
+    let endpoint = match source.as_deref().unwrap_or("danbooru") {
+        "danbooru" => "https://danbooru.donmai.us/posts.json",
+        "safebooru" => "https://safebooru.donmai.us/posts.json",
+        _ => return Err(AppError::Other("Unknown booru source".into())),
+    };
+    let mut url = reqwest::Url::parse(endpoint)
+        .map_err(|e| AppError::Other(format!("Invalid Danbooru URL: {e}")))?;
+    url.query_pairs_mut()
+        .append_pair("tags", &query)
+        .append_pair("page", &page.max(1).to_string())
+        .append_pair("limit", &limit.clamp(1, 40).to_string());
+    let response = state
+        .http_client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "MooshieUI/AnimaPromptStudio")
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("Danbooru search failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::ApiError {
+            status: response.status().as_u16(),
+            message: format!("Danbooru returned {}", response.status()),
+        });
+    }
+    let posts: Vec<serde_json::Value> = response.json().await?;
+    let fields = [
+        "id",
+        "created_at",
+        "rating",
+        "tag_string",
+        "tag_string_artist",
+        "tag_string_character",
+        "tag_string_copyright",
+        "tag_string_general",
+        "tag_string_meta",
+        "preview_file_url",
+        "large_file_url",
+        "file_url",
+        "source",
+        "image_width",
+        "image_height",
+    ];
+    let compact = posts
+        .into_iter()
+        .filter_map(|post| post.as_object().cloned())
+        .map(|post| {
+            let mut selected = serde_json::Map::new();
+            for field in fields {
+                if let Some(value) = post.get(field) {
+                    selected.insert(field.to_string(), value.clone());
+                }
+            }
+            serde_json::Value::Object(selected)
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::Value::Array(compact))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn danbooru_search(
+    state: State<'_, Arc<AppState>>,
+    tags: String,
+    page: u32,
+    limit: u32,
+    safe_mode: bool,
+    source: Option<String>,
+) -> Result<serde_json::Value, AppError> {
+    danbooru_search_impl(state.as_ref(), tags, page, limit, safe_mode, source).await
+}
+
+/// Read upstream catalog data as JSON; never execute the JavaScript wrapper.
+pub async fn anima_catalog_impl(
+    state: &AppState,
+    catalog: &str,
+) -> Result<serde_json::Value, AppError> {
+    let file = match catalog {
+        "artists" => "data.js",
+        "characters" => "character_data.js",
+        "clothing" => "clothing_data.js",
+        "backgrounds" => "background_data.js",
+        "poses" => "pose_data.js",
+        "character_details" => "character_official_data.json",
+        "attire" => "danbooru_attire_data.json",
+        _ => return Err(AppError::Other("Unknown Anima catalog".into())),
+    };
+    let response = state
+        .http_client
+        .get(format!(
+            "https://raw.githubusercontent.com/nregret/Comfyui-Anima-Tools/main/js/{file}"
+        ))
+        .send()
+        .await?
+        .error_for_status()?;
+    let text = response.text().await?;
+    let payload = if file.ends_with(".js") {
+        let start = text
+            .find('[')
+            .ok_or_else(|| AppError::Other("Invalid catalog array".into()))?;
+        let end = text
+            .rfind(']')
+            .ok_or_else(|| AppError::Other("Invalid catalog array".into()))?;
+        text.get(start..=end)
+            .ok_or_else(|| AppError::Other("Invalid catalog bounds".into()))?
+    } else {
+        text.as_str()
+    };
+    Ok(serde_json::from_str(payload)?)
+}
+
+pub async fn anima_source_image_impl(state: &AppState, url: &str) -> Result<Vec<u8>, AppError> {
+    let url = reqwest::Url::parse(url).map_err(|e| AppError::Other(e.to_string()))?;
+    let host = url.host_str().unwrap_or("");
+    if url.scheme() != "https"
+        || !(host == "cdn.jsdelivr.net" || host == "donmai.us" || host.ends_with(".donmai.us"))
+    {
+        return Err(AppError::Other("Unsupported source image host".into()));
+    }
+    let mut response = state
+        .http_client_no_redirect
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?;
+    if response.status().is_redirection() {
+        return Err(AppError::Other("Image redirect is not supported".into()));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len() + chunk.len() > 32 * 1024 * 1024 {
+            return Err(AppError::Other("Image exceeds 32 MB".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn anima_source_image(
+    state: State<'_, Arc<AppState>>,
+    url: String,
+) -> Result<Vec<u8>, AppError> {
+    anima_source_image_impl(state.as_ref(), &url).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn anima_catalog(
+    state: State<'_, Arc<AppState>>,
+    catalog: String,
+) -> Result<serde_json::Value, AppError> {
+    anima_catalog_impl(state.as_ref(), &catalog).await
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn download_model(

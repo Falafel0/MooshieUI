@@ -1,3 +1,23 @@
+## What's New in v2.3.8-fork.2
+
+### Anima Prompt Studio
+- Adds a dedicated prompting workspace with quality, artist, character, clothing, pose and background tag groups, local tag search and Comfyui-Anima-Tools integration.
+- Supports Prompt Composer, structured CLIP encoding and the model-only Multi-LoRA loader. Composer randomness follows the generation seed so rebuilding a paused stage keeps the same prompt.
+- Adds Anima Artist Mixer Adapter and Cross Attention modes, advanced anchor/cache controls, structure preservation and layer filtering. Anima artist weights support 0–4.
+- Preserves regional and scheduled conditioning when the new nodes are used with inpainting.
+
+### Art sources and prompt imports
+- Browse seven upstream Anima Tools catalogs and search art with the Danbooru/Safebooru API. Open cards to inspect art, append tags, add tag groups, import to img2img or insert a raster canvas layer.
+- Imports Telegram Desktop JSON and HTML exports, including formatted messages and positive/negative prompt sections. Telegram folder invite links alone do not provide message access.
+- Danbooru can reject API requests with HTTP 403/Cloudflare checks; the interface reports this limitation. Anima Tools catalogs remain independently available.
+
+### Canvas and validation
+- Includes the fit-to-view correction for canvas layout changes merged after the previous release.
+- Importing source images into img2img clears stale masks and updates the image aspect ratio.
+- Adds regression coverage for Anima workflow connections, regional inpainting, deterministic Composer seeds and Telegram exports.
+
+---
+
 ## What's New in v2.3.8-fork.1
 
 ### Stable canvas transforms
