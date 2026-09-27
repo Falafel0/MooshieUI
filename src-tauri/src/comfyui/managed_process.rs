@@ -277,13 +277,10 @@ impl ManagedProcess {
             {
                 if !identity.terminate(process) {
                     let recheck = process_snapshot(ProcessesToUpdate::Some(&[pid]));
-                    if recheck
-                        .process(pid)
-                        .is_some_and(|process| {
-                            identity.matches(process)
-                                && !matches!(process.status(), sysinfo::ProcessStatus::Zombie)
-                        })
-                    {
+                    if recheck.process(pid).is_some_and(|process| {
+                        identity.matches(process)
+                            && !matches!(process.status(), sysinfo::ProcessStatus::Zombie)
+                    }) {
                         return Err(AppError::Other(format!(
                             "Could not stop managed ComfyUI process {}",
                             identity.pid
