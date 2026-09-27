@@ -514,7 +514,7 @@
     // (tag)N; wrap plain text. Returns null for recognized-but-non-numeric
     // forms (emphasis marks, brace wrap) — the buttons grey out for those, but
     // guard here too in case Ctrl+Up/Down reaches it.
-    const newText = adjustWeightText(selected, delta);
+    const newText = adjustWeightText(selected, delta, generation.isAnima ? 4 : 2);
     if (newText === null) return;
 
     value = value.substring(0, start) + newText + value.substring(end);

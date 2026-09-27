@@ -22,9 +22,9 @@ const INVOKEAI_TRAILING_RE = /^\((.+)\)(\d+\.?\d*)$/;
 const INVOKEAI_EMPHASIS_RE = /^\(.+\)(?:\++|-+)$/;
 const BRACE_WRAP_RE = /^(?:\{.+\}|\[.+\])$/;
 
-function clampWeight(weight: number): number {
+function clampWeight(weight: number, maxWeight = 2): number {
   const rounded = Math.round(weight * 100) / 100;
-  return Math.max(0, Math.min(2, rounded));
+  return Math.max(0, Math.min(maxWeight, rounded));
 }
 
 const isNeutral = (weight: number): boolean => Math.abs(weight - 1.0) < 0.001;
@@ -44,28 +44,32 @@ export function isNonNumericWeightSelection(selected: string): boolean {
  * recognized-but-non-numeric weighted form (caller should no-op). Plain text is
  * wrapped in A1111 syntax, matching the existing button behavior.
  */
-export function adjustWeightText(selected: string, delta: number): string | null {
+export function adjustWeightText(
+  selected: string,
+  delta: number,
+  maxWeight = 2,
+): string | null {
   if (isNonNumericWeightSelection(selected)) return null;
 
   const a1111 = selected.match(A1111_RE);
   if (a1111) {
-    const weight = clampWeight(parseFloat(a1111[2]) + delta);
+    const weight = clampWeight(parseFloat(a1111[2]) + delta, maxWeight);
     return isNeutral(weight) ? a1111[1] : `(${a1111[1]}:${weight.toFixed(2)})`;
   }
 
   const nai = selected.match(NAI_NUMERIC_RE);
   if (nai) {
-    const weight = clampWeight(parseFloat(nai[1]) + delta);
+    const weight = clampWeight(parseFloat(nai[1]) + delta, maxWeight);
     return isNeutral(weight) ? nai[2] : `${weight.toFixed(2)}::${nai[2]}::`;
   }
 
   const invokeai = selected.match(INVOKEAI_TRAILING_RE);
   if (invokeai) {
-    const weight = clampWeight(parseFloat(invokeai[2]) + delta);
+    const weight = clampWeight(parseFloat(invokeai[2]) + delta, maxWeight);
     return isNeutral(weight) ? invokeai[1] : `(${invokeai[1]})${weight.toFixed(2)}`;
   }
 
   // Plain text: wrap in A1111 syntax.
-  const weight = clampWeight(1.0 + delta);
+  const weight = clampWeight(1.0 + delta, maxWeight);
   return `(${selected}:${weight.toFixed(2)})`;
 }

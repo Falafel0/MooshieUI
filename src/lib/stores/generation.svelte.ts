@@ -62,6 +62,8 @@ import {
 } from "../utils/novelaiEnhance.js";
 import type { ModelFamily, TurboModelVariant } from "../utils/modelFamily.js";
 import type {
+  AnimaArtistMixerParams,
+  AnimaToolsParams,
   ExtraPromptBox,
   GenerationMode,
   GenerationParams,
@@ -80,6 +82,12 @@ import type {
   VideoTurboPreset,
   VideoVdnPrecision,
 } from "../types/index.js";
+import {
+  defaultAnimaArtistMixer,
+  defaultAnimaTools,
+  normalizeAnimaArtistMixer,
+  normalizeAnimaTools,
+} from "../utils/animaIntegration.js";
 import { models } from "./models.svelte.js";
 import { styles } from "./styles.svelte.js";
 import { promptPresets } from "./promptPresets.svelte.js";
@@ -905,6 +913,10 @@ class GenerationStore {
    *  accumulated input delta stays under threshold. MooshieUI-authored node,
    *  always available (no lazy install, unlike video's H3 TeaCache). */
   animaTeacacheEnabled = $state(false);
+  /** Anima-Artist-Mixer graph settings. Artist chain is resolved from active styles at send time. */
+  animaArtistMixer = $state<AnimaArtistMixerParams>(defaultAnimaArtistMixer());
+  /** Separate Anima Tools prompting mode and its structured tag groups. */
+  animaTools = $state<AnimaToolsParams>(defaultAnimaTools());
   // --- Style Reference (IP-Adapter / Flux Redux) ---
   styleRefEnabled = $state(false);
   styleRefImage = $state<string | null>(null);
@@ -2863,6 +2875,10 @@ class GenerationStore {
         if (saved.styleTransferBlocks !== undefined) this.styleTransferBlocks = saved.styleTransferBlocks;
         if (saved.animaTeacacheEnabled !== undefined)
           this.animaTeacacheEnabled = saved.animaTeacacheEnabled;
+        if (saved.animaArtistMixer !== undefined)
+          this.animaArtistMixer = normalizeAnimaArtistMixer(saved.animaArtistMixer);
+        if (saved.animaTools !== undefined)
+          this.animaTools = normalizeAnimaTools(saved.animaTools);
         if (saved.styleRefEnabled !== undefined) this.styleRefEnabled = saved.styleRefEnabled;
         if (saved.styleRefImage !== undefined) this.styleRefImage = saved.styleRefImage;
         if (saved.styleRefStrength !== undefined) this.styleRefStrength = saved.styleRefStrength;
@@ -3047,6 +3063,8 @@ class GenerationStore {
         styleTransferMegapixels: this.styleTransferMegapixels,
         styleTransferBlocks: this.styleTransferBlocks,
         animaTeacacheEnabled: this.animaTeacacheEnabled,
+        animaArtistMixer: { ...this.animaArtistMixer },
+        animaTools: { ...this.animaTools },
         styleRefEnabled: this.styleRefEnabled,
         styleRefImage: this.styleRefImage,
         styleRefStrength: this.styleRefStrength,
@@ -3214,6 +3232,8 @@ class GenerationStore {
       styleTransferMegapixels: this.styleTransferMegapixels,
       styleTransferBlocks: this.styleTransferBlocks,
       animaTeacacheEnabled: this.animaTeacacheEnabled,
+      animaArtistMixer: { ...this.animaArtistMixer },
+      animaTools: { ...this.animaTools },
       styleRefEnabled: this.styleRefEnabled,
       styleRefImage: this.styleRefImage,
       styleRefStrength: this.styleRefStrength,
@@ -3573,7 +3593,14 @@ class GenerationStore {
     // NovelAI mode strips the `@` a style may have stored: a style built
     // while an Anima checkpoint was selected holds `@artist`, and `@` is
     // the prompt-chunk sigil on NovelAI, not an artist marker.
-    const styleFragment = options.skipActiveStyles ? "" : styles.buildPromptFragment(this.isNovelAi);
+    const mixerArtistChain =
+      this.isAnima && this.animaArtistMixer.enabled && !options.skipActiveStyles
+        ? styles.buildArtistMixerChain()
+        : "";
+    const styleFragment =
+      options.skipActiveStyles || mixerArtistChain
+        ? ""
+        : styles.buildPromptFragment(this.isNovelAi);
     if (styleFragment) {
       positivePrompt = this.mergeIntoPrompt(positivePrompt, styleFragment, "after");
     }
@@ -3880,6 +3907,16 @@ class GenerationStore {
       style_ref_redux_model: this.styleRefReduxModel,
       style_ref_clip_vision: this.styleRefClipVision,
       anima_teacache_enabled: this.animaTeacacheEnabled,
+      anima_artist_mixer: this.isAnima
+        ? {
+            ...this.animaArtistMixer,
+            enabled: this.animaArtistMixer.enabled && !!mixerArtistChain,
+            artist_chain: mixerArtistChain,
+          }
+        : null,
+      anima_tools: this.isAnima
+        ? { ...this.animaTools }
+        : null,
       edit_reference_images: this.editReferenceImages.filter((v): v is string => !!v),
       edit_reference_strength: this.editReferenceStrength,
       edit_split_screen: this.editSplitScreen,

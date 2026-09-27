@@ -1,0 +1,128 @@
+<script lang="ts">
+  import { locale } from "../../stores/locale.svelte.js";
+  import { generation } from "../../stores/generation.svelte.js";
+  import { canvas } from "../../stores/canvas.svelte.js";
+  import { loadAnimaCatalog, loadAnimaSourceImage, searchDanbooru, uploadImageBytes } from "../../utils/api.js";
+  import { parseTagList, updateTagList, type AnimaPromptGroup } from "../../utils/animaIntegration.js";
+
+  type Entry = { id: string; name: string; tags: string; preview?: string; image?: string; group: AnimaPromptGroup; groups?: Partial<Record<AnimaPromptGroup, string>> };
+  const catalogs: Record<string, AnimaPromptGroup> = { artists: "artist_tags", characters: "character_tags", clothing: "clothing_tags", backgrounds: "background_tags", poses: "pose_tags", character_details: "character_tags", attire: "clothing_tags" };
+  let source = $state("danbooru");
+  let query = $state("");
+  let entries = $state<Entry[]>([]);
+  let selected = $state<Entry | null>(null);
+  let page = $state(1);
+  let busy = $state(false);
+  let error = $state("");
+  let imported = $state(false);
+  let generalOnly = $state(true);
+  let requestId = 0;
+  const cache = new Map<string, Entry[]>();
+  const online = $derived(source === "danbooru" || source === "safebooru");
+  const filtered = $derived(online ? entries : entries.filter(e => `${e.name} ${e.tags}`.toLowerCase().includes(query.toLowerCase())));
+  const visible = $derived(online ? filtered : filtered.slice((page - 1) * 48, page * 48));
+
+  function normalize(raw: unknown, catalog: string): Entry[] {
+    const group = catalogs[catalog];
+    const rows: Array<[string, any]> = Array.isArray(raw) ? raw.map((r, i) => [String(i), r]) : Object.entries(raw as Record<string, unknown>);
+    return rows.flatMap(([key, row]) => {
+      if (Array.isArray(row)) return row.filter(x => typeof x === "string").map((tag, i) => ({ id: `${key}:${i}`, name: `${key}: ${tag}`, tags: tag, group }));
+      if (!row || typeof row !== "object") return [];
+      const name = String(row.name ?? row.trigger ?? key);
+      const tags = Array.isArray(row.tags) ? [row.trigger, ...row.tags].filter(Boolean).join(", ") : String(row.tags ?? row.name ?? "");
+      const preview = typeof row.preview === "string" && row.preview.startsWith("https://") ? row.preview : undefined;
+      return [{ id: key, name, tags, preview, image: preview, group }];
+    });
+  }
+
+  async function search(nextPage = 1) {
+    const id = ++requestId;
+    const requestedSource = source;
+    busy = true; error = ""; selected = null;
+    try {
+      let result: Entry[];
+      if (requestedSource === "danbooru" || requestedSource === "safebooru") {
+        const posts = await searchDanbooru(query, nextPage, 40, generalOnly, requestedSource);
+        result = posts.map(post => ({ id: String(post.id), name: `#${post.id}`, tags: (post.tag_string ?? "").split(/\s+/).join(", "), preview: post.preview_file_url ?? undefined, image: post.large_file_url ?? post.file_url ?? undefined, group: "character_tags", groups: { artist_tags: (post.tag_string_artist ?? "").split(/\s+/).join(", "), character_tags: [post.tag_string_character, post.tag_string_general].filter(Boolean).join(" ").split(/\s+/).join(", ") } }));
+      } else {
+        if (!cache.has(requestedSource)) cache.set(requestedSource, normalize(await loadAnimaCatalog(requestedSource), requestedSource));
+        result = cache.get(requestedSource)!;
+      }
+      if (id !== requestId) return;
+      entries = result; page = nextPage;
+    } catch (e) { if (id === requestId) { entries = []; error = String(e).includes("403") ? locale.t("anima_sources.blocked") : String(e); } }
+    finally { if (id === requestId) busy = false; }
+  }
+
+  function useTags(entry: Entry, groups: boolean) {
+    if (groups) {
+      for (const [group, tags] of Object.entries(entry.groups ?? { [entry.group]: entry.tags })) {
+        const target = group as AnimaPromptGroup;
+        for (const tag of parseTagList(tags)) generation.animaTools[target] = updateTagList(generation.animaTools[target], tag);
+      }
+    } else generation.positivePrompt = [generation.positivePrompt.trim(), entry.tags].filter(Boolean).join(", ");
+    void generation.saveSettings();
+    imported = true;
+  }
+
+  async function importImage(entry: Entry, raster: boolean) {
+    if (!entry.image || busy) return;
+    busy = true; error = ""; imported = false;
+    try {
+      const bytes = await loadAnimaSourceImage(entry.image);
+      const blob = new Blob([new Uint8Array(bytes)]);
+      const bitmap = await createImageBitmap(blob);
+      const pixels = document.createElement("canvas");
+      pixels.width = bitmap.width; pixels.height = bitmap.height;
+      pixels.getContext("2d")!.drawImage(bitmap, 0, 0); bitmap.close();
+      const png = pixels.toDataURL("image/png");
+      if (raster) await canvas.addRasterImage(png, entry.name);
+      else {
+        const pngBytes = new Uint8Array(await (await fetch(png)).arrayBuffer());
+        const uploaded = await uploadImageBytes(Array.from(pngBytes), `source-${entry.id.replace(/[^\w-]/g, "_")}.png`);
+        generation.setModeInput("img2img", { input: uploaded.name, preview: png, mask: null, aspect: { w: pixels.width, h: pixels.height } });
+        generation.setMode("img2img");
+      }
+      imported = true;
+    } catch (e) { error = String(e); }
+    finally { busy = false; }
+  }
+</script>
+
+<div class="space-y-3">
+  <div class="flex flex-wrap gap-2">
+    <select class="rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-neutral-200" bind:value={source} onchange={() => { query = ""; entries = []; void search(); }}>
+      <option value="danbooru">Danbooru API</option><option value="safebooru">Safebooru (Danbooru API)</option>
+      {#each Object.keys(catalogs) as key}<option value={key}>{locale.t(`anima_sources.${key}`)}</option>{/each}
+    </select>
+    <input class="min-w-40 flex-1 rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-neutral-200" bind:value={query} oninput={() => { if (!online) page = 1; }} onkeydown={e => { if (e.key === "Enter") void search(); }} placeholder={locale.t("anima_studio.search")} />
+    <button class="rounded-lg bg-amber-400 px-4 py-2 text-black disabled:opacity-50" disabled={busy} onclick={() => search()}>{busy ? "…" : locale.t("anima_studio.search")}</button>
+    {#if online}<label class="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" bind:checked={generalOnly} />{locale.t("anima_studio.danbooru.safe")}</label>{/if}
+  </div>
+  <p class="text-xs text-neutral-500">{locale.t("anima_sources.description")}</p>
+  {#if error}<p class="text-sm text-red-300">{error}</p>{/if}
+  {#if imported}<p class="text-sm text-emerald-300">{locale.t("anima_sources.imported")}</p>{/if}
+  {#if selected}
+    <section class="grid gap-3 rounded-xl border border-neutral-700 bg-neutral-900 p-3 md:grid-cols-2">
+      {#if selected.image}<img src={selected.image} alt={selected.name} class="max-h-[55vh] w-full object-contain" referrerpolicy="no-referrer" />{/if}
+      <div class="space-y-3"><h3 class="text-neutral-200">{selected.name}</h3><p class="max-h-52 overflow-auto font-mono text-xs text-neutral-400">{selected.tags}</p>
+        <div class="flex flex-wrap gap-2">
+          {#if !online}<button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" onclick={() => { query = parseTagList(selected!.tags)[0]?.replace(/\\([()])/g, "$1").replace(/ /g, "_") ?? ""; source = "danbooru"; void search(); }}>{locale.t("anima_studio.search")} · Danbooru</button>{/if}
+          <button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" onclick={() => useTags(selected!, false)}>{locale.t("anima_sources.prompt")}</button>
+          <button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" onclick={() => useTags(selected!, true)}>{locale.t("anima_sources.group")}</button>
+          {#if selected.image}<button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" disabled={busy} onclick={() => importImage(selected!, false)}>img2img</button><button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" disabled={busy} onclick={() => importImage(selected!, true)}>{locale.t("canvas.import_raster")}</button>{/if}
+          <button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-400" onclick={() => selected = null}>{locale.t("common.close")}</button>
+        </div>
+      </div>
+    </section>
+  {/if}
+  <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
+    {#each visible as entry (entry.id)}
+      <button class="overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-left hover:border-amber-400" onclick={() => { selected = entry; imported = false; }}>
+        {#if entry.preview}<img src={entry.preview} alt={entry.name} class="aspect-square w-full object-cover" loading="lazy" referrerpolicy="no-referrer" />{/if}
+        <div class="p-2"><p class="truncate text-xs text-neutral-200">{entry.name}</p><p class="line-clamp-2 text-[10px] text-neutral-500">{entry.tags}</p></div>
+      </button>
+    {/each}
+  </div>
+  <div class="flex justify-center gap-4 text-neutral-300"><button disabled={page <= 1 || busy} onclick={() => online ? search(page - 1) : page--}>←</button><span>{page}</span><button disabled={busy || (online ? entries.length < 40 : page * 48 >= filtered.length)} onclick={() => online ? search(page + 1) : page++}>→</button></div>
+</div>

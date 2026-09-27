@@ -154,6 +154,189 @@ pub mod seed_string {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimaArtistMixerParams {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub artist_chain: String,
+    #[serde(default = "default_anima_mixer_method")]
+    pub method: String,
+    #[serde(default = "default_one_f64")]
+    pub strength: f64,
+    #[serde(default = "default_true")]
+    pub normalize_weights: bool,
+    #[serde(default = "default_anima_alignment_mode")]
+    pub alignment_mode: String,
+    #[serde(default = "default_anima_combine_mode")]
+    pub combine_mode: String,
+    #[serde(default = "default_anima_fusion_mode")]
+    pub fusion_mode: String,
+    #[serde(default)]
+    pub apply_to_uncond: bool,
+    #[serde(default)]
+    pub uncond_strength: f64,
+    #[serde(default)]
+    pub start_block: i32,
+    #[serde(default = "default_minus_one_i32")]
+    pub end_block: i32,
+    #[serde(default)]
+    pub start_percent: f64,
+    #[serde(default = "default_one_f64")]
+    pub end_percent: f64,
+    #[serde(default)]
+    pub artist_ema_alpha: f64,
+    #[serde(default = "default_lowrank_k")]
+    pub lowrank_k: u32,
+    #[serde(default)]
+    pub artist_static_capture: bool,
+    #[serde(default = "default_static_capture_k")]
+    pub static_capture_k: u32,
+    #[serde(default)]
+    pub artist_anchor_q: bool,
+    #[serde(default)]
+    pub anchor_seed_list: String,
+    #[serde(default = "default_one_u32")]
+    pub anchor_seeds_count: u32,
+    #[serde(default)]
+    pub anchor_user_blend: f64,
+    #[serde(default = "default_minus_one_i32")]
+    pub anchor_deep_layer_threshold: i32,
+    #[serde(default = "default_one_f64")]
+    pub stabilizer_end_percent: f64,
+    #[serde(default = "default_anima_anchor_refresh_mode")]
+    pub anchor_refresh_mode: String,
+    #[serde(default = "default_anchor_cache_points")]
+    pub anchor_cache_points: u32,
+    #[serde(default = "default_anima_anchor_keyframe_mode")]
+    pub anchor_keyframe_mode: String,
+    #[serde(default)]
+    pub layer_filter: String,
+    #[serde(default)]
+    pub structure_preserve: f64,
+    #[serde(default)]
+    pub delta_norm_cap: f64,
+    #[serde(default)]
+    pub style_balance: f64,
+}
+
+impl Default for AnimaArtistMixerParams {
+    fn default() -> Self {
+        serde_json::from_value(serde_json::json!({})).unwrap_or_else(|_| unreachable!())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimaToolsParams {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub quality_prompt: String,
+    #[serde(default)]
+    pub artist_tags: String,
+    #[serde(default)]
+    pub character_tags: String,
+    #[serde(default)]
+    pub clothing_tags: String,
+    #[serde(default)]
+    pub pose_tags: String,
+    #[serde(default)]
+    pub background_tags: String,
+    #[serde(default = "default_prompt_separator")]
+    pub separator: String,
+    #[serde(default)]
+    pub composer_enabled: bool,
+    #[serde(default = "default_true")]
+    pub enable_artist: bool,
+    #[serde(default = "default_true")]
+    pub enable_character: bool,
+    #[serde(default = "default_true")]
+    pub enable_clothing: bool,
+    #[serde(default = "default_true")]
+    pub enable_background: bool,
+    #[serde(default = "default_true")]
+    pub enable_pose: bool,
+    #[serde(default = "default_character_detail")]
+    pub character_detail: String,
+    #[serde(default = "default_minus_one_i64")]
+    pub seed: i64,
+    #[serde(default = "default_one_u32")]
+    pub artist_count: u32,
+    #[serde(default = "default_minus_one_i64")]
+    pub character_seed: i64,
+    #[serde(default = "default_character_tag_count")]
+    pub character_tag_count: u32,
+    #[serde(default = "default_true")]
+    pub character_keep_features: bool,
+    #[serde(default = "default_minus_one_i64")]
+    pub clothing_seed: i64,
+    #[serde(default = "default_clothing_source")]
+    pub clothing_source: String,
+    #[serde(default)]
+    pub multi_lora_enabled: bool,
+}
+
+impl Default for AnimaToolsParams {
+    fn default() -> Self {
+        serde_json::from_value(serde_json::json!({})).unwrap_or_else(|_| unreachable!())
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_one_f64() -> f64 {
+    1.0
+}
+fn default_one_u32() -> u32 {
+    1
+}
+fn default_minus_one_i32() -> i32 {
+    -1
+}
+fn default_minus_one_i64() -> i64 {
+    -1
+}
+fn default_lowrank_k() -> u32 {
+    1
+}
+fn default_static_capture_k() -> u32 {
+    6
+}
+fn default_anchor_cache_points() -> u32 {
+    8
+}
+fn default_character_tag_count() -> u32 {
+    3
+}
+fn default_anima_mixer_method() -> String {
+    "adapter".into()
+}
+fn default_anima_alignment_mode() -> String {
+    "base_anchored".into()
+}
+fn default_anima_combine_mode() -> String {
+    "output_avg".into()
+}
+fn default_anima_fusion_mode() -> String {
+    "interpolate".into()
+}
+fn default_anima_anchor_refresh_mode() -> String {
+    "once".into()
+}
+fn default_anima_anchor_keyframe_mode() -> String {
+    "uniform_sigma".into()
+}
+fn default_prompt_separator() -> String {
+    ", ".into()
+}
+fn default_character_detail() -> String {
+    "trigger".into()
+}
+fn default_clothing_source() -> String {
+    "author".into()
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerationParams {
     pub mode: String,
@@ -503,6 +686,12 @@ pub struct GenerationParams {
     /// pass. MooshieUI-authored node, always deployed (no lazy install).
     #[serde(default)]
     pub anima_teacache_enabled: bool,
+    /// An1X3R/Anima-Artist-Mixer settings. None keeps legacy workflows byte-identical.
+    #[serde(default)]
+    pub anima_artist_mixer: Option<AnimaArtistMixerParams>,
+    /// nregret/Comfyui-Anima-Tools prompting and multi-LoRA settings.
+    #[serde(default)]
+    pub anima_tools: Option<AnimaToolsParams>,
     /// Reference images for Image Edit mode (ComfyUI input filenames). Slot 0 is
     /// the primary edit source; slots 1-2 are Qwen Image Edit Plus extras.
     #[serde(default)]
