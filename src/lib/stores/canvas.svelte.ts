@@ -9,6 +9,7 @@ import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpa
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
+import { fittedCanvasViewport, viewportMatchesCanvasFit } from "../utils/canvasViewport.js";
 import {
   PROJECT_DOCUMENT_VERSION,
   emptyDocument,
@@ -1517,15 +1518,23 @@ class CanvasStore {
   }
 
   zoomToFit(containerWidth: number, containerHeight: number) {
-    const scaleX = containerWidth / this.canvasWidth;
-    const scaleY = containerHeight / this.canvasHeight;
-    const zoom = Math.min(scaleX, scaleY) * 0.9;
-    this.viewport = {
-      zoom,
-      panX: (containerWidth - this.canvasWidth * zoom) / 2,
-      panY: (containerHeight - this.canvasHeight * zoom) / 2,
-    };
+    this.viewport = fittedCanvasViewport(
+      containerWidth,
+      containerHeight,
+      this.canvasWidth,
+      this.canvasHeight,
+    );
     this.viewportInitialized = true;
+  }
+
+  viewportIsFitted(containerWidth = this.viewportWidth, containerHeight = this.viewportHeight) {
+    return this.viewportInitialized && viewportMatchesCanvasFit(
+      this.viewport,
+      containerWidth,
+      containerHeight,
+      this.canvasWidth,
+      this.canvasHeight,
+    );
   }
 
   resetZoom() {
@@ -1550,6 +1559,7 @@ class CanvasStore {
     const nextWidth = Math.max(1, Math.round(Number.isFinite(width) ? width : this.canvasWidth));
     const nextHeight = Math.max(1, Math.round(Number.isFinite(height) ? height : this.canvasHeight));
     if (nextWidth === this.canvasWidth && nextHeight === this.canvasHeight) return;
+    const keepFitted = this.viewportIsFitted();
     // A completed preview belongs to the exact document geometry captured at
     // submission time. Keeping it after a manual resize would let Apply restore
     // stale dimensions and misalign the saved mask.
@@ -1590,11 +1600,13 @@ class CanvasStore {
     const centerY = this.viewport.panY + this.canvasHeight * this.viewport.zoom / 2;
     this.canvasWidth = nextWidth;
     this.canvasHeight = nextHeight;
-    this.viewport = {
-      ...this.viewport,
-      panX: centerX - nextWidth * this.viewport.zoom / 2,
-      panY: centerY - nextHeight * this.viewport.zoom / 2,
-    };
+    this.viewport = keepFitted
+      ? fittedCanvasViewport(this.viewportWidth, this.viewportHeight, nextWidth, nextHeight)
+      : {
+          ...this.viewport,
+          panX: centerX - nextWidth * this.viewport.zoom / 2,
+          panY: centerY - nextHeight * this.viewport.zoom / 2,
+        };
     this.boundingBox = {
       ...this.boundingBox,
       x: Math.round(this.boundingBox.x * scaleX),
