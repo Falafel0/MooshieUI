@@ -49,7 +49,13 @@ impl ProcessIdentity {
         #[cfg(windows)]
         {
             let _ = process;
-            windows_process::terminate(self.pid, self.windows_created).unwrap_or(false)
+            match windows_process::terminate(self.pid, self.windows_created) {
+                Ok(stopped) => stopped,
+                Err(error) => {
+                    log::warn!("Could not terminate managed process {}: {error}", self.pid);
+                    false
+                }
+            }
         }
         #[cfg(not(windows))]
         process.kill()
@@ -62,15 +68,19 @@ impl ProcessIdentity {
 mod windows_process {
     use std::io;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::Foundation::{FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        PROCESS_TERMINATE,
+        GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
 
+    // Standard process access right required by WaitForSingleObject.
+    const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
+
     fn open(pid: u32, terminate: bool) -> io::Result<OwnedHandle> {
-        let access =
-            PROCESS_QUERY_LIMITED_INFORMATION | if terminate { PROCESS_TERMINATE } else { 0 };
+        let access = PROCESS_QUERY_LIMITED_INFORMATION
+            | SYNCHRONIZE_ACCESS
+            | if terminate { PROCESS_TERMINATE } else { 0 };
         // SAFETY: OpenProcess takes scalar arguments. The returned owned handle
         // is checked for null and closed by OwnedHandle on every return path.
         let handle = unsafe { OpenProcess(access, 0, pid) };
@@ -109,14 +119,36 @@ mod windows_process {
         creation_time(&open(pid, false)?)
     }
 
+    fn wait_for_exit(handle: &OwnedHandle, timeout_ms: u32) -> io::Result<bool> {
+        // SAFETY: the owned process handle has SYNCHRONIZE access and stays
+        // open for the duration of the wait.
+        match unsafe { WaitForSingleObject(handle.as_raw_handle(), timeout_ms) } {
+            WAIT_OBJECT_0 => Ok(true),
+            WAIT_TIMEOUT => Ok(false),
+            _ => Err(io::Error::last_os_error()),
+        }
+    }
+
     pub fn terminate(pid: u32, expected_creation: u64) -> io::Result<bool> {
         let handle = open(pid, true)?;
         if creation_time(&handle)? != expected_creation {
             return Ok(true); // PID was recycled: leave its new owner alone.
         }
+        if wait_for_exit(&handle, 0)? {
+            return Ok(true); // Already exited, even if the parent has not reaped it.
+        }
         // SAFETY: this is the same live handle whose exact creation time was
         // just checked, and it was opened with PROCESS_TERMINATE rights.
-        Ok(unsafe { TerminateProcess(handle.as_raw_handle(), 1) } != 0)
+        if unsafe { TerminateProcess(handle.as_raw_handle(), 1) } == 0 {
+            let error = io::Error::last_os_error();
+            if wait_for_exit(&handle, 0)? {
+                return Ok(true); // It exited between our check and termination.
+            }
+            return Err(error);
+        }
+        // TerminateProcess only initiates shutdown. Wait for the port and any
+        // child launcher's resources to be released before starting a new copy.
+        wait_for_exit(&handle, 5_000)
     }
 }
 
@@ -247,7 +279,10 @@ impl ManagedProcess {
                     let recheck = process_snapshot(ProcessesToUpdate::Some(&[pid]));
                     if recheck
                         .process(pid)
-                        .is_some_and(|process| identity.matches(process))
+                        .is_some_and(|process| {
+                            identity.matches(process)
+                                && !matches!(process.status(), sysinfo::ProcessStatus::Zombie)
+                        })
                     {
                         return Err(AppError::Other(format!(
                             "Could not stop managed ComfyUI process {}",
@@ -323,6 +358,16 @@ mod tests {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stop_accepts_a_child_terminating_before_its_parent_reaps_it() {
+        let mut child = TestChild::spawn();
+        let owned = ManagedProcess::from_child(child.0.id()).unwrap();
+        child.0.kill().unwrap();
+        owned.stop().unwrap();
+        child.0.wait().unwrap();
     }
 
     #[test]
