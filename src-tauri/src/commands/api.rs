@@ -1410,6 +1410,127 @@ pub async fn danbooru_search(
     danbooru_search_impl(state.as_ref(), tags, page, limit, safe_mode, source).await
 }
 
+/// Credentials for the booru tag sources, read out of the owner-only config.
+async fn booru_credentials(state: &AppState) -> crate::booru::Credentials {
+    let config = state.config.read().await;
+    crate::booru::Credentials::from_config(&config)
+}
+
+/// Live tag search across Danbooru, Gelbooru and e621 in one shape.
+pub async fn booru_tag_search_impl(
+    state: &AppState,
+    source: String,
+    query: String,
+    limit: u32,
+) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let tags = crate::booru::tag_search(&state.http_client, &credentials, &source, &query, limit)
+        .await
+        .map_err(AppError::Other)?;
+    serde_json::to_value(tags).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Danbooru's curated `tag_groups` tree (section → group).
+pub async fn booru_tag_groups_impl(state: &AppState) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let sections = crate::booru::group_index(&state.http_client, &credentials)
+        .await
+        .map_err(AppError::Other)?;
+    serde_json::to_value(sections).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// The tag list behind one curated group, e.g. `tag group:hair color`.
+pub async fn booru_tag_group_impl(
+    state: &AppState,
+    title: String,
+) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let page = crate::booru::group_page(&state.http_client, &credentials, &title)
+        .await
+        .map_err(AppError::Other)?;
+    serde_json::to_value(page).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Write-only settings path for booru credentials. The regular config response
+/// never needs to send these values back to the browser.
+pub async fn booru_credentials_update_impl(
+    state: &AppState,
+    mut credentials: crate::booru::Credentials,
+    clear: bool,
+) -> Result<(), AppError> {
+    credentials.normalize();
+    let mut config = state.config.write().await;
+    let mut updated = config.clone();
+    if clear {
+        updated.danbooru_login = None;
+        updated.danbooru_api_key = None;
+        updated.gelbooru_user_id = None;
+        updated.gelbooru_api_key = None;
+        updated.e621_login = None;
+        updated.e621_api_key = None;
+    } else {
+        if credentials.danbooru_login.is_some() {
+            updated.danbooru_login = credentials.danbooru_login;
+        }
+        if credentials.danbooru_api_key.is_some() {
+            updated.danbooru_api_key = credentials.danbooru_api_key;
+        }
+        if credentials.gelbooru_user_id.is_some() {
+            updated.gelbooru_user_id = credentials.gelbooru_user_id;
+        }
+        if credentials.gelbooru_api_key.is_some() {
+            updated.gelbooru_api_key = credentials.gelbooru_api_key;
+        }
+        if credentials.e621_login.is_some() {
+            updated.e621_login = credentials.e621_login;
+        }
+        if credentials.e621_api_key.is_some() {
+            updated.e621_api_key = credentials.e621_api_key;
+        }
+    }
+    crate::config::save_config(&updated).map_err(AppError::Other)?;
+    *config = updated;
+    Ok(())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_search(
+    state: State<'_, Arc<AppState>>,
+    source: String,
+    query: String,
+    limit: u32,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_search_impl(state.as_ref(), source, query, limit).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_groups(
+    state: State<'_, Arc<AppState>>,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_groups_impl(state.as_ref()).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_group(
+    state: State<'_, Arc<AppState>>,
+    title: String,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_group_impl(state.as_ref(), title).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_credentials_update(
+    state: State<'_, Arc<AppState>>,
+    credentials: crate::booru::Credentials,
+    clear: bool,
+) -> Result<(), AppError> {
+    booru_credentials_update_impl(state.as_ref(), credentials, clear).await
+}
+
 /// Read upstream catalog data as JSON; never execute the JavaScript wrapper.
 pub async fn anima_catalog_impl(
     state: &AppState,

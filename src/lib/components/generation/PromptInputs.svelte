@@ -21,6 +21,8 @@
   import PromptAssistantSetupModal from "./PromptAssistantSetupModal.svelte";
   import PromptComposeModal from "./PromptComposeModal.svelte";
   import AnimaPromptStudio from "./AnimaPromptStudio.svelte";
+  import PromptStudio from "../prompt-studio/PromptStudio.svelte";
+  import { studio } from "../../prompt-studio/studio.svelte.js";
   import H3PromptGuide from "../video/H3PromptGuide.svelte";
   import { buildH3Context } from "../../utils/h3Prompt.js";
   import { naiV5Variant } from "../../utils/novelaiModels.js";
@@ -84,6 +86,11 @@
   const negativeSegments = $derived(hasNegativeSchedule ? parseScheduledPrompt(generation.negativePrompt).segments : []);
   let schedulePanelOpen = $state(true);
   let animaStudioOpen = $state(false);
+  let promptStudioOpen = $state(false);
+
+  // The Prompt Studio keeps its own persisted store; loading it up front keeps
+  // the toolbar badge accurate before the studio has ever been opened.
+  $effect(() => { studio.load(); });
 
   // Random alternation syntax indicator
   const hasPositiveRandom = $derived(hasRandomSyntax(generation.positivePrompt));
@@ -456,18 +463,19 @@
       <div class="flex items-center gap-1.5">
         {#if !isVideoMode}
           <PromptChunkPicker />
-          {#if generation.isAnima}
-            <button
-              type="button"
-              onclick={() => (animaStudioOpen = true)}
-              class="rounded-lg border px-2 py-0.5 text-[10px] transition-colors {generation.animaTools.enabled
-                ? 'border-amber-500/70 bg-amber-500/10 text-amber-200'
-                : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-amber-500 hover:text-amber-200'}"
-              title={locale.t("anima_studio.subtitle")}
-            >
-              ◈ {locale.t("anima_studio.button")}
-            </button>
-          {/if}
+          <!-- Prompt Studio is model-agnostic: it writes the assembled positive
+               prompt straight into the generation field, and its Anima card is
+               only enabled for Anima checkpoints. -->
+          <button
+            type="button"
+            onclick={() => (promptStudioOpen = true)}
+            class="rounded-lg border px-2 py-0.5 text-[10px] transition-colors {studio.count
+              ? 'border-rose-400/70 bg-rose-400/10 text-rose-200'
+              : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-rose-400 hover:text-rose-200'}"
+            title={locale.t("prompt_studio.hub")}
+          >
+            ◈ {locale.t("anima_studio.button")}{#if studio.count}<span class="ml-1 text-neutral-400">{studio.count}</span>{/if}
+          </button>
         {/if}
         <!-- NovelAI has no regional conditioning at all, so the button is gone
              there rather than shown disabled with an "unsupported" toast. -->
@@ -713,6 +721,9 @@
   <PromptComposeModal onClose={() => (promptAssistant.composeModalOpen = false)} />
 {/if}
 
+{#if promptStudioOpen}
+  <PromptStudio onClose={() => (promptStudioOpen = false)} />
+{/if}
 {#if animaStudioOpen}
   <AnimaPromptStudio onClose={() => (animaStudioOpen = false)} />
 {/if}

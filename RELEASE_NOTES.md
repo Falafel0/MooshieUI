@@ -1,3 +1,12 @@
+## What's New in v2.3.8-fork.3
+
+### Native Prompt Studio
+- Adds a dedicated prompt-building workspace with local and live tag search, weighted tags, relation handling, conflict resolution, undo/redo, random artist tags and a ban list.
+- Adds live Danbooru, Gelbooru and e621 sources, Danbooru tag-group browsing, and Atelier-compatible preset import/export.
+- Adds admin-only booru credential settings. Credential values are write-only and never returned to the UI; clients receive configured flags only.
+
+---
+
 ## What's New in v2.3.8-fork.2
 
 ### Anima Prompt Studio

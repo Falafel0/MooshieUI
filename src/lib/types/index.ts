@@ -739,6 +739,23 @@ export interface AppConfig {
   novelai_api_key: string | null;
   /** True when a key is stored, so the UI can show "key set" without the value. */
   novelai_api_key_configured?: boolean;
+  /**
+   * Booru tag sources for Prompt Studio. Credentials are stored owner-only in
+   * `config.json`; a client only sees the value echoed back on save and, for
+   * everyone else, the `*_configured` flags below.
+   */
+  danbooru_login: string | null;
+  danbooru_api_key: string | null;
+  danbooru_login_configured?: boolean;
+  danbooru_api_key_configured?: boolean;
+  gelbooru_user_id: string | null;
+  gelbooru_api_key: string | null;
+  gelbooru_user_id_configured?: boolean;
+  gelbooru_api_key_configured?: boolean;
+  e621_login: string | null;
+  e621_api_key: string | null;
+  e621_login_configured?: boolean;
+  e621_api_key_configured?: boolean;
   /** When set, in-app error reports POST here (Sub-project B proxy) instead of opening a prefilled GitHub issue. */
   report_endpoint?: string | null;
   gallery_path: string | null;

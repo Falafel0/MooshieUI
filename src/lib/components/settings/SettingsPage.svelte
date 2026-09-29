@@ -11,6 +11,7 @@
   import { gallery } from "../../stores/gallery.svelte.js";
   import { promptAssistant } from "../../stores/promptAssistant.svelte.js";
   import { novelai } from "../../stores/novelai.svelte.js";
+  import { updateBooruCredentials } from "../../utils/booru.js";
   import PromptAssistantSetupModal from "../generation/PromptAssistantSetupModal.svelte";
   import OpenModelFolders from "./OpenModelFolders.svelte";
   import ModelManagerModal from "./ModelManagerModal.svelte";
@@ -139,6 +140,15 @@
   let showThemeCreatorModal = $state(false);
   let draftEditingProfileId = $state<string | null>(null);
   let settingsLoadError = $state<string | null>(null);
+  let booruDanbooruLogin = $state("");
+  let booruDanbooruApiKey = $state("");
+  let booruGelbooruUserId = $state("");
+  let booruGelbooruApiKey = $state("");
+  let booruE621Login = $state("");
+  let booruE621ApiKey = $state("");
+  let booruCredentialsSaving = $state(false);
+  let booruCredentialsSaved = $state(false);
+  let booruCredentialsError = $state<string | null>(null);
   let draftThemeName = $state("");
   let draftThemeDark = $state<ThemeTone>({ ...DEFAULT_THEME_TONE_DARK });
   let draftThemeLight = $state<ThemeTone>({ ...DEFAULT_THEME_TONE_LIGHT });
@@ -1161,6 +1171,7 @@
     { key: "interrogator", labelKey: "settings.sections.interrogator", keywords: "interrogate tags tagger threshold confidence onnx model wd eva02 vit swinv2 convnext download delete disk space" },
     { key: "prompt_assistant", labelKey: "settings.sections.prompt_assistant", keywords: "llm prompt enhance compose model gguf ai assistant" },
     { key: "civitai", labelKey: "settings.sections.civitai", keywords: "civitai api key metadata model hub image fetch download authentication" },
+    { key: "booru", labelKey: "settings.sections.booru", keywords: "booru danbooru gelbooru e621 tags api key credentials search groups" },
     { key: "projects", labelKey: "settings.sections.projects", keywords: "projects project workspace snapshot named save load switch local state presets history" },
     { key: "novelai", labelKey: "settings.sections.novelai", keywords: "novelai nai api key anlas opus subscription cloud remote generation persistent token allowance balance usage show" },
     { key: "queue", labelKey: "settings.sections.queue", keywords: "queue position pending running cancel clear jobs users order wait" },
@@ -1190,6 +1201,7 @@
       // management (the backend refuses it to regular accounts).
       case "prompt_assistant":
       case "civitai": return canManageServer;
+      case "booru": return isAdmin;
       // NovelAI is per-account now: every user manages their own key.
       case "novelai": return true;
       // Projects are snapshots on the machine running the app, and only the
@@ -1326,6 +1338,46 @@
       novelaiKeyError = e instanceof Error ? e.message : String(e);
     } finally {
       novelaiKeySaving = false;
+    }
+  }
+
+  async function saveBooruCredentials(clear = false) {
+    if (!isAdmin || booruCredentialsSaving) return;
+    booruCredentialsSaving = true;
+    booruCredentialsSaved = false;
+    booruCredentialsError = null;
+    const values = {
+      danbooru_login: booruDanbooruLogin.trim() || undefined,
+      danbooru_api_key: booruDanbooruApiKey.trim() || undefined,
+      gelbooru_user_id: booruGelbooruUserId.trim() || undefined,
+      gelbooru_api_key: booruGelbooruApiKey.trim() || undefined,
+      e621_login: booruE621Login.trim() || undefined,
+      e621_api_key: booruE621ApiKey.trim() || undefined,
+    };
+    try {
+      await updateBooruCredentials(values, clear);
+      if (config) {
+        for (const key of [
+          "danbooru_login", "danbooru_api_key", "gelbooru_user_id",
+          "gelbooru_api_key", "e621_login", "e621_api_key",
+        ] as const) {
+          const flag = `${key}_configured` as keyof AppConfig;
+          const wasConfigured = Boolean(config[flag] || config[key] || values[key]);
+          Reflect.set(config, key, null);
+          Reflect.set(config, flag, clear ? false : wasConfigured);
+        }
+      }
+      booruDanbooruLogin = "";
+      booruDanbooruApiKey = "";
+      booruGelbooruUserId = "";
+      booruGelbooruApiKey = "";
+      booruE621Login = "";
+      booruE621ApiKey = "";
+      booruCredentialsSaved = true;
+    } catch (e) {
+      booruCredentialsError = e instanceof Error ? e.message : String(e);
+    } finally {
+      booruCredentialsSaving = false;
     }
   }
 
@@ -4219,6 +4271,72 @@
               />
               <p class="text-[10px] text-neutral-500 mt-1">{locale.t('settings.civitai.api_key_link')}</p>
             </div>
+          </div>
+        </section>
+        {/if}
+
+        <!-- Booru API credentials are admin-only and write-only from browser mode. -->
+        {#if isAdmin && activeCategory === "booru" && config}
+        <section class="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden mb-4">
+          <div class="flex items-center justify-between p-5 text-sm font-medium text-neutral-200">
+            <span class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              {locale.t('settings.booru.title')}
+            </span>
+          </div>
+          <div class="px-5 pb-5 space-y-4">
+            <p class="text-xs text-neutral-500">{locale.t('settings.booru.desc')}</p>
+            {#each [
+              { id: 'danbooru-login', key: 'danbooru_login', label: 'settings.booru.danbooru_login', value: booruDanbooruLogin, configured: config.danbooru_login_configured || !!config.danbooru_login, type: 'text' },
+              { id: 'danbooru-api-key', key: 'danbooru_api_key', label: 'settings.booru.danbooru_api_key', value: booruDanbooruApiKey, configured: config.danbooru_api_key_configured || !!config.danbooru_api_key, type: 'password' },
+              { id: 'gelbooru-user-id', key: 'gelbooru_user_id', label: 'settings.booru.gelbooru_user_id', value: booruGelbooruUserId, configured: config.gelbooru_user_id_configured || !!config.gelbooru_user_id, type: 'text' },
+              { id: 'gelbooru-api-key', key: 'gelbooru_api_key', label: 'settings.booru.gelbooru_api_key', value: booruGelbooruApiKey, configured: config.gelbooru_api_key_configured || !!config.gelbooru_api_key, type: 'password' },
+              { id: 'e621-login', key: 'e621_login', label: 'settings.booru.e621_login', value: booruE621Login, configured: config.e621_login_configured || !!config.e621_login, type: 'text' },
+              { id: 'e621-api-key', key: 'e621_api_key', label: 'settings.booru.e621_api_key', value: booruE621ApiKey, configured: config.e621_api_key_configured || !!config.e621_api_key, type: 'password' },
+            ] as field}
+              <div>
+                <label class="text-xs text-neutral-400 block mb-1" for={field.id}>{locale.t(field.label)}</label>
+                <input
+                  id={field.id}
+                  type={field.type}
+                  autocomplete="off"
+                  value={field.value}
+                  oninput={(event) => {
+                    const value = (event.currentTarget as HTMLInputElement).value;
+                    switch (field.key) {
+                      case 'danbooru_login': booruDanbooruLogin = value; break;
+                      case 'danbooru_api_key': booruDanbooruApiKey = value; break;
+                      case 'gelbooru_user_id': booruGelbooruUserId = value; break;
+                      case 'gelbooru_api_key': booruGelbooruApiKey = value; break;
+                      case 'e621_login': booruE621Login = value; break;
+                      case 'e621_api_key': booruE621ApiKey = value; break;
+                    }
+                    booruCredentialsSaved = false;
+                  }}
+                  placeholder={field.configured ? locale.t('settings.booru.saved_placeholder') : locale.t('settings.booru.empty_placeholder')}
+                  class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                />
+              </div>
+            {/each}
+            <div class="flex flex-wrap gap-2">
+              <button
+                class="px-3 py-2 rounded-lg text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+                disabled={booruCredentialsSaving || !(booruDanbooruLogin.trim() || booruDanbooruApiKey.trim() || booruGelbooruUserId.trim() || booruGelbooruApiKey.trim() || booruE621Login.trim() || booruE621ApiKey.trim())}
+                onclick={() => { void saveBooruCredentials(); }}
+              >{locale.t('settings.booru.save')}</button>
+              {#if config.danbooru_login_configured || config.danbooru_api_key_configured || config.gelbooru_user_id_configured || config.gelbooru_api_key_configured || config.e621_login_configured || config.e621_api_key_configured || config.danbooru_login || config.danbooru_api_key || config.gelbooru_user_id || config.gelbooru_api_key || config.e621_login || config.e621_api_key}
+                <button
+                  class="px-3 py-2 rounded-lg text-sm bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-300 transition-colors"
+                  disabled={booruCredentialsSaving}
+                  onclick={() => { void saveBooruCredentials(true); }}
+                >{locale.t('settings.booru.clear')}</button>
+              {/if}
+            </div>
+            {#if booruCredentialsError}
+              <p class="text-xs text-red-400">{booruCredentialsError}</p>
+            {:else if booruCredentialsSaved}
+              <p class="text-xs text-emerald-400">{locale.t('settings.booru.saved')}</p>
+            {/if}
           </div>
         </section>
         {/if}

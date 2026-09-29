@@ -1,5 +1,6 @@
 pub mod attention;
 pub mod auth;
+pub mod booru;
 pub mod comfyui;
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub mod comfyui_version;
@@ -655,6 +656,10 @@ pub fn run() {
             commands::api::cdn_proxy_fetch_bytes,
             commands::api::animadex_proxy_fetch,
             commands::api::danbooru_search,
+            commands::api::booru_tag_search,
+            commands::api::booru_tag_groups,
+            commands::api::booru_tag_group,
+            commands::api::booru_credentials_update,
             commands::api::anima_catalog,
             commands::api::anima_source_image,
             commands::api::civitai_search_models,
