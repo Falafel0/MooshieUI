@@ -651,3 +651,36 @@ mod workspace_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::templates::graph_test_util::{build, linked, nodes, params, single};
+
+    #[test]
+    fn batch_size_repeats_the_masked_latent() {
+        let mut p = params("inpainting", "sdxl");
+        p.batch_size = 4;
+        let workflow = build(&p);
+
+        let sampler = single(&workflow, "KSampler");
+        let repeat = linked(&workflow, &sampler["inputs"]["latent_image"]);
+        assert_eq!(repeat["class_type"], "RepeatLatentBatch");
+        assert_eq!(repeat["inputs"]["amount"], 4);
+        // Repeated after the noise mask is set, so every copy keeps it.
+        assert_eq!(
+            linked(&workflow, &repeat["inputs"]["samples"])["class_type"],
+            "MooshieInpaintEncode"
+        );
+    }
+
+    #[test]
+    fn single_image_feeds_the_masked_latent_directly() {
+        let workflow = build(&params("inpainting", "sdxl"));
+        let sampler = single(&workflow, "KSampler");
+        assert_eq!(
+            linked(&workflow, &sampler["inputs"]["latent_image"])["class_type"],
+            "MooshieInpaintEncode"
+        );
+        assert!(nodes(&workflow, "RepeatLatentBatch").is_empty());
+    }
+}

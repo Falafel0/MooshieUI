@@ -14,7 +14,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 # Windows-only release. The fork ships a single NSIS installer built for
 # x86_64-pc-windows-msvc, so the updater manifest (latest.json) carries the
@@ -35,6 +35,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.release-version.outputs.tag }}
       release_ref: ${{ steps.release-version.outputs.ref }}
+          persist-credentials: false
 
     steps:
       - name: Resolve release version and commit
@@ -51,6 +52,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.release-version.outputs.ref }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -87,10 +89,7 @@ jobs:
         continue-on-error: true
 
       - name: Build Tauri app (Windows, NSIS only)
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis
+        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis --config .github/tauri-no-updater-artifacts.json
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -99,9 +98,56 @@ jobs:
           path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
           if-no-files-found: error
 
-  release:
+  sign-updaters:
     needs: [build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.release_ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      # Only the Tauri CLI is ever run from this install.
+      - name: Install Tauri CLI
+        run: npm ci --ignore-scripts
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: artifacts-*
+          merge-multiple: true
+
+      - name: Sign Windows updater installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mapfile -t installers < <(find artifacts -type f -name '*.exe')
+          test "${#installers[@]}" -eq 1
+          npx tauri signer sign "${installers[0]}"
+          test -s "${installers[0]}.sig"
+
+      - name: Upload updater signatures
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: artifacts-updater-signatures
+          path: artifacts/**/*.sig
+          if-no-files-found: error
+
+  release:
+    needs: [build, sign-updaters]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sign-updaters.result == 'success' }}
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
 
     steps:
@@ -109,6 +155,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.build.outputs.release_ref }}
+          persist-credentials: false
 
       - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

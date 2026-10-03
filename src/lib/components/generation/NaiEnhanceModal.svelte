@@ -20,6 +20,7 @@
   import { gallery } from "../../stores/gallery.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { promptAssistant } from "../../stores/promptAssistant.svelte.js";
+  import { enhancerSessions } from "../../stores/enhancerSessions.svelte.js";
   import { naiLanguageInfo, NAI_LANGUAGES, resolveNaiLanguage } from "../../utils/naiLanguage.js";
   import type { NaiLanguageChoice } from "../../utils/naiLanguage.js";
   import { NAI_VARIANT_BUDGET } from "../../utils/naiPrompt.js";
@@ -109,6 +110,13 @@
 
   const languageLabel = $derived(pending ? naiLanguageInfo(pending.language).label : "");
 
+  const sessionCount = $derived(enhancerSessions.count("nai"));
+
+  function newSession() {
+    if (!confirm(locale.t("prompt_assistant.session_clear_confirm", { count: sessionCount }))) return;
+    enhancerSessions.clear("nai");
+  }
+
   /**
    * The whole selection, counted the way NovelAI counts it.
    *
@@ -164,6 +172,12 @@
       if (!result.parsed.base.trim()) {
         gallery.showToast(locale.t("prompt_assistant.couldnt_enhance"), "error");
         return;
+      }
+      // Recorded once on screen, applied or not: the answer is part of the
+      // conversation either way. Not when it failed validation, and not when
+      // the modal was cancelled (the early return above).
+      if (result.problems.length === 0) {
+        enhancerSessions.record("nai", result.sessionUser, result.raw);
       }
       naiEnhance.showReview({
         variant: v,
@@ -337,19 +351,40 @@
               {locale.t("prompt_assistant.nai_input_subtitle")}
             {/if}
           </p>
+          {#if sessionCount > 0}
+            <p class="mt-0.5 text-[10px] text-neutral-500">
+              {locale.t("prompt_assistant.session_count", { count: sessionCount })}
+              {#if enhancerSessions.dropped.nai > 0}
+                · {locale.t("prompt_assistant.session_trimmed")}
+              {/if}
+            </p>
+          {/if}
         </div>
-        <button
-          class="rounded-lg border border-neutral-600 px-2 py-0.5 text-[10px] text-neutral-300 hover:bg-neutral-800"
-          onclick={close}
-        >
-          ✕
-        </button>
+        <div class="flex items-center gap-1.5">
+          {#if sessionCount > 0}
+            <button
+              class="rounded-lg border border-neutral-600 px-2 py-0.5 text-[10px] text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+              disabled={naiEnhance.busy}
+              onclick={newSession}
+            >
+              ⟲ {locale.t("prompt_assistant.session_new")}
+            </button>
+          {/if}
+          <button
+            class="rounded-lg border border-neutral-600 px-2 py-0.5 text-[10px] text-neutral-300 hover:bg-neutral-800"
+            onclick={close}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {#if naiEnhance.stage === "input"}
         <textarea
           class="min-h-[9rem] w-full flex-1 resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-100 placeholder:text-neutral-600 focus:border-indigo-500 focus:outline-none"
-          placeholder={locale.t("prompt_assistant.nai_input_placeholder")}
+          placeholder={sessionCount > 0
+            ? locale.t("prompt_assistant.session_continue_placeholder")
+            : locale.t("prompt_assistant.nai_input_placeholder")}
           aria-label={locale.t("prompt_assistant.nai_input_title")}
           disabled={naiEnhance.busy}
           bind:value={naiEnhance.input}

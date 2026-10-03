@@ -14,15 +14,15 @@ local-generation runtime targets Apple Silicon.
 
 ## Installation
 
-Use macOS 14 or later. Open a successful [macOS Native Validation run](https://github.com/Mooshieblob1/MooshieUI/actions/workflows/macos-native.yml)
-and download its `macos-candidate` artifact (GitHub sign-in required). Extract
-the `_aarch64.dmg` and compare its SHA-256 with the accompanying `SHA256SUMS` before installing:
+Use macOS 14 or later. Download `MooshieUI_<version>_aarch64.dmg` from the
+[latest release](https://github.com/Mooshieblob1/MooshieUI/releases/latest) and
+compare its SHA-256 with the release's `SHA256SUMS` before installing:
 
 ```sh
-shasum -a 256 MooshieUI_2.3.1_aarch64.dmg
+shasum -a 256 MooshieUI_2.3.9_aarch64.dmg
 ```
 
-The exact filename/version can differ for a candidate. Copy MooshieUI into
+Copy MooshieUI into
 Applications and open it from Finder. This build uses free ad-hoc signing and
 is **not notarized by Apple**. If macOS blocks it, try opening once, then use
 System Settings > Privacy & Security > Open Anyway. See
@@ -87,12 +87,12 @@ key on PRs, so the application-update test needs a controlled signed candidate.
 
 ## Publishing with a normal release
 
-`MACOS_RELEASE_ENABLED` is an opt-in repository Actions variable. Leave it unset
-until hardware acceptance evidence has been recorded and reviewed. Once enabled
-(`true`), the existing release workflow also runs the Mac build, requires its
-checks to pass, publishes the DMG and signed updater archive, and adds
-`darwin-aarch64` to `latest.json`. Other platforms can release while Mac hardware
-qualification is pending.
+`MACOS_RELEASE_ENABLED` is an opt-in repository Actions variable, set to `true`
+since v2.3.9: Mac builds ship as user-tested rather than waiting for the
+hardware acceptance list above. With it enabled, the release workflow also runs
+the Mac build, requires its checks to pass, publishes the DMG and signed updater
+archive, and adds `darwin-aarch64` to `latest.json`. Unset it to release other
+platforms without a Mac build.
 
 Apple signing is separate from Tauri updater signing: retain the existing
 `TAURI_SIGNING_PRIVATE_KEY` and password secrets. No Apple developer membership

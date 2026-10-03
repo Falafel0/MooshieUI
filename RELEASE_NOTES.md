@@ -1,3 +1,75 @@
+## What's New in v2.3.9-fork.1
+
+### Local Prompt Studio
+- Starts with an empty user catalog and keeps categories in the left vertical rail. Tags, subcategories, previews, aliases and contextual tags are authored locally.
+- Imports and exports portable JSON tag packs, including category structure and embedded previews. Reimporting packs is idempotent and older packs preserve existing metadata.
+- Removes the Danbooru API connection, remote reference browser, built-in constructor catalog and retired Tag groups / Anima prompt controls. Keeps the visible model-only Multi-LoRA switch independent of retired prompt groups.
+
+### Upstream v2.3.9 integration
+- Merges the exact upstream v2.3.9 tag, including persistent prompt-enhancer sessions, local-model context improvements, model/encoder recognition and config recovery guards.
+- Preserves the fork's inpainting workspace, asynchronous process cleanup, updater identity and Windows-only NSIS packaging.
+- Signs updater installers in a separate job, following upstream's separation of signing keys from build scripts.
+
+---
+
+## What's New in v2.3.9
+
+### macOS
+- **Native Apple Silicon build**: every release now includes `MooshieUI_<version>_aarch64.dmg` for macOS 14 or later, with automatic updates. It is ad-hoc signed and not notarized by Apple, so if macOS blocks it, open it once, then use **System Settings > Privacy & Security > Open Anyway**. It passes the automated Mac checks but has not been tested feature by feature on real Macs yet, so please report anything that breaks. See `docs/MACOS.md`.
+
+### Prompt enhancer
+- **Persistent sessions**: the prompt enhancer now remembers the conversation. **Enhance for V5**, **Enhance**, **Enhance for H3** and **Compose** each keep their own session, so a follow-up such as "make it night" builds on the previous answer. Sessions survive closing the window and restarting the app. Start over with **New session** in the V5 and Compose windows, or with the ⟲ chip next to the Enhance button. When a session grows too long for the model, the oldest exchanges are left out automatically.
+- **Local model context**: the bundled local model now runs with a 16k context so sessions fit, which takes roughly 0.7 to 1.7 GB more VRAM. When that no longer fits next to ComfyUI, the model runs on the CPU instead of slowing image generation down.
+- **Leaner V5 prompts**: the V5 rewrite no longer restates what a character's name already brings (Momo Velia Deviluke already has pink hair), and puts something in Undesired Content only when it would otherwise appear. No more `chibi, mitten hands` in the UC of an ordinary character.
+
+### Models
+- **Anima fine-tunes**: Anima models other than Anima base no longer fail with "Split model text encoder type is still loading", and a fine-tune's own text encoder (such as `pieModelsAnima_cottage_txt.safetensors` next to `pieModelsAnima_cottage.safetensors`) is picked automatically. Fixes #725.
+- **Anima Turbo and Aesthetic v1.1**: both are downloadable from the recommended models. Turbo keeps its CFG 1, 10-step settings, and Aesthetic no longer gets `score_*` quality tags.
+- **Anima Light Lavender**: the community fine-tune (BF16 and MXFP8) is detected once its file is on disk, with its recommended settings and no auto quality tags.
+- **Z-Image**: Comfy-Org filenames are recognised, the Qwen3-4B encoder and Flux VAE are paired correctly and downloaded automatically when missing, and an unrelated encoder or VAE is never substituted.
+- **Style Reference**: the CLIP-ViT-H download link works again, and the file no longer needs renaming.
+
+### Fixes
+- **Stopping ComfyUI on Windows**: stopping or updating ComfyUI no longer fails with "Could not stop managed ComfyUI process", and the diagnostic log no longer reports a ComfyUI that has exited as still running.
+- **Settings protection**: MooshieUI refuses to overwrite a finished setup with an empty configuration and keeps a last known good copy (`config.json.bak`). If the configuration is ever wiped anyway, it is restored on the next start instead of ComfyUI failing with "Python not found".
+
+### Under the hood
+- Tauri 2.12 and all of its plugins, updated together.
+- Dependency and CI updates.
+
+---
+
+## What's New in v2.3.8
+
+### Video
+- **Live preview**: turn on **Live preview** in the video settings to watch a rough animated preview of the whole clip while H3 samples. The first time, it downloads the 23 MB taeh3 autoencoder into `models/vae_approx` with no restart. On a remote ComfyUI server, put the file there yourself.
+- **PDD 8-step Turbo presets**: **PDD FL2VA · 8** and **PDD Ref2VA · 8** use Alibaba PAI's Parallel Decoding Distillation adapters for 8-step first/last-frame and reference video. The adapters are pinned and SHA-256 checked. TeaCache is skipped with these presets, and ComfyUI servers older than v0.35.0 get a clear message.
+- **ComfyUI v0.37.0**: managed installs now use ComfyUI v0.37.0, which includes YuE2 natively.
+- **Timeline stills mid-clip**: with **Use timeline** on in the first/last-frame workflow, a shot whose still starts partway through the clip is now pinned at that frame instead of dropped. This needs ComfyUI v0.34.0 or newer; how closely H3 follows a mid-clip anchor has not yet been measured on a GPU.
+- **Retake part of a clip**: on a clip with a retained draft, **Retake or refine** now has **Retake a range**, which regenerates only the chosen seconds with a new seed and creates a new clip. The rest of the video and the whole soundtrack stay exactly as they were. The ComfyUI server needs v0.34.0 or newer and the updated MooshieUI nodes.
+
+### Security and privacy
+- **Browser and LAN mode hardening**: websites you visit can no longer send commands to a MooshieUI server running on your computer, and the server no longer serves files from outside its web folder. Automatic owner access now needs the app opened at `localhost` or an IP address on the same computer.
+- **Per-account privacy**: in LAN mode each account sees only its own generated images, exports, model requests and browser settings. API keys and other secrets are sent only to the admin.
+- **Safer roles**: moderators can install only MooshieUI's own node packs, and can no longer change the settings that decide what the host runs, which folders it uses or how the server is exposed. Moving the installation, changing the gallery folder and saving to arbitrary paths are admin-only. Regular accounts can no longer manage the local LLM, see host file paths or reconnect the shared ComfyUI connection.
+- **Sign-in**: changing a password signs out your other sessions, and repeated failed logins from one address are slowed down.
+- **Untrusted files**: malformed or oversized images, videos, NovelAI imports and archives are refused instead of freezing or crashing the app.
+- **Verified downloads**: model downloads are checked for size, hash and format before use, and truncated files from earlier interrupted downloads are detected and downloaded again. Node packs, tools and Docker images are pinned to exact versions.
+
+### Fixes
+- **LoRA strength**: model and CLIP strength sliders now span -10 to 10, and you can click the value to type an exact number. Fixes #710.
+- **Generation**: remote-mode LoRA and model lookups, Flux Redux and IP-Adapter weights, img2img and inpaint batch size, upscale tile overlap, Face Fix and segment detail conditioning and regional prompts all work correctly, and seeds up to 2^64 are accepted. Refine works while a run is paused, and Refine and regional inpaint no longer fail with style transfer on.
+- **Video**: RIFE interpolation keeps the correct frame rate, and Anima TeaCache resets between runs.
+- **Gallery and files**: saving an image twice creates a `_1` copy instead of overwriting it, Move Installation keeps the default gallery, and the gallery index follows gallery moves.
+- **Connection and stability**: several races and deadlocks in the ComfyUI connection and queue are fixed, and the server binary stops cleanly when Docker or Kubernetes stops it.
+- **Error reports**: the report dialog says that reports become public GitHub issues, previews what is sent and lets you leave logs out.
+
+### Changes for self-hosters
+- **Docker and Kubernetes**: the image now runs as user 10001. Existing `/data` volumes and `./models` folders from older images need a one-time `chown -R 10001:10001`; the container explains this and exits if they are not writable. A placeholder admin password now stops the container.
+- **Tunnels and reverse proxies** on the same computer now need a login, and opening the server by machine name no longer grants admin automatically. Requests relayed with a forwarding header such as `X-Forwarded-For` are never treated as local. A proxy that rewrites the host name to `127.0.0.1` without adding one, as a bare nginx `proxy_pass` does, still looks local: add `proxy_set_header X-Forwarded-For $remote_addr;`, or turn off the new **Sign in automatically on this computer** setting in App Mode (`MOOSHIEUI_TRUST_LOCALHOST=false` on the headless server). It stays on until an admin account exists.
+- **Usernames**: new LAN accounts use letters, numbers, `_` and `-`, up to 32 characters.
+- **Custom LLM servers**: changing a custom server's host asks for its key again.
+- **Pinned versions**: node packs, uv, SageAttention wheels and Docker base images no longer update on their own. SageAttention installs only for supported CUDA and PyTorch builds.
 ## What's New in v2.3.8-fork.5
 
 ### Prompt Studio and constructors
