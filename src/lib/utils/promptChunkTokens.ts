@@ -61,7 +61,7 @@ export function looseSlug(slug: string): string {
  * on every keystroke, so they check this before allocating a regex match.
  */
 export function mayContainPresetToken(raw: string | null | undefined): boolean {
-  return !!raw && (raw.includes("@preset:") || raw.includes("@["));
+  return !!raw && (raw.toLowerCase().includes("@preset:") || raw.includes("@["));
 }
 
 /**
@@ -85,4 +85,9 @@ export function inlineChunkToken(name: string, id?: string): string {
   const trimmed = name.trim();
   if (!trimmed || /[\][\n]/.test(trimmed)) return `@preset:${presetSlug(name)}`;
   return `@[${trimmed}]`;
+}
+
+/** Exact name key for highlighting Unicode names without lossy ASCII slugs. */
+export function presetNameKey(name: string): string {
+  return `@[${name.trim().toLowerCase()}]`;
 }

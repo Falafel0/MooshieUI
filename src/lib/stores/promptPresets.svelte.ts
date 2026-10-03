@@ -25,6 +25,7 @@ import {
   looseSlug,
   mayContainPresetToken,
   presetSlug,
+  presetNameKey,
   presetTokenRegex,
   presetTokenSlug,
 } from "../utils/promptChunkTokens.js";
@@ -290,6 +291,8 @@ class PromptPresetsStore {
     if (name !== undefined) {
       const exact = this.presets.find(preset => preset.name.trim().toLowerCase() === name.trim().toLowerCase());
       if (exact) return exact;
+      // ASCII slugging must never turn an unknown Unicode name into another macro.
+      if (/[^\x00-\x7f]/.test(name)) return undefined;
     }
     if (slug) { const stable = this.getById(slug); if (stable) return stable; }
     return this.bySlug.get(presetTokenSlug(['', slug, name] as unknown as RegExpMatchArray));
@@ -402,9 +405,9 @@ class PromptPresetsStore {
     return map;
   }
 
-  /** Convenience getter: just the slug strings, for highlight rendering. */
+  /** Lookup keys used by the highlighter: stable IDs, ASCII slugs and exact names. */
   get slugs(): Set<string> {
-    return new Set(this.bySlug.keys());
+    return new Set([...this.bySlug.keys(), ...this.presets.map(preset => presetNameKey(preset.name))]);
   }
 
   /**

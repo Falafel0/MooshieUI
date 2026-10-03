@@ -12,6 +12,7 @@ import {
   mayContainPresetToken,
   presetTokenRegex,
   presetTokenSlug,
+  presetNameKey,
 } from "./promptChunkTokens.js";
 
 export {
@@ -338,8 +339,10 @@ function renderPlainPresetSegment(
     const slug = presetTokenSlug(match);
     // The known set carries the loose key too, so a name typed without its
     // spacing still reads as known and matches what generation will resolve.
-    const known =
-      knownPresetSlugs?.has(slug) || knownPresetSlugs?.has(looseSlug(slug)) || false;
+    const named = match[2];
+    const allowSlug = named === undefined || !/[^\x00-\x7f]/.test(named);
+    const known = (named !== undefined && knownPresetSlugs?.has(presetNameKey(named))) ||
+      (allowSlug && (knownPresetSlugs?.has(slug) || knownPresetSlugs?.has(looseSlug(slug)))) || false;
     const bg = known ? "rgba(99, 102, 241, 0.18)" : "rgba(239, 68, 68, 0.16)";
     const border = known ? "rgba(129, 140, 248, 0.55)" : "rgba(248, 113, 113, 0.55)";
     const glow = known

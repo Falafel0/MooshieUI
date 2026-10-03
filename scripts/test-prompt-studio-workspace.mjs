@@ -218,3 +218,10 @@ await assert.rejects(pager.loadNext(),/source unavailable/);
 booruRequest = async (_,args) => {assert.equal(args.page,1);return [{name:'retried',category:0,post_count:1}];};
 assert.equal((await pager.loadNext()).tags[0].name,'retried');
 console.log('Booru pagination rejects stale pages, stops on repeated pages and retries without skipping results.');
+
+assert.equal(promptPresets.resolveInline('@[Неизвестный макрос]'), '@[Неизвестный макрос]');
+assert.equal(promptPresets.resolveInline(token.toUpperCase()), 'black hair');
+const { renderHighlightedPrompt } = load('src/lib/utils/promptSchedule.ts');
+assert.match(renderHighlightedPrompt('@[Небо]', promptPresets.slugs), /rgba\(99, 102, 241, 0.18\)/);
+assert.match(renderHighlightedPrompt('@[Неизвестный макрос]', promptPresets.slugs), /rgba\(239, 68, 68, 0.16\)/);
+console.log('Unknown Unicode macros remain literal and highlighting agrees with macro resolution.');
