@@ -1,7 +1,6 @@
 <script lang="ts">
   import { customCatalog } from "../../prompt-studio/custom-catalog.svelte.js";
   import { studio } from "../../prompt-studio/studio.svelte.js";
-  import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { gallery } from "../../stores/gallery.svelte.js";
   import PromptStudioPromptArea from "./PromptStudioPromptArea.svelte";
@@ -10,9 +9,8 @@
   import PromptStudioRail from "./PromptStudioRail.svelte";
   import PromptStudioEditor from "./PromptStudioEditor.svelte";
   import PromptStudioAssembled from "./PromptStudioAssembled.svelte";
-  import PromptStudioAdvanced from "./PromptStudioAdvanced.svelte";
-  import { Dices, Redo2, RotateCcw, Undo2 } from "@lucide/svelte";
-  type View = "character" | "wardrobe" | "browser" | "advanced";
+  import { Dices, Redo2, RotateCcw, Sparkles, Undo2 } from "@lucide/svelte";
+  type View = "character" | "wardrobe" | "browser";
   let { onApply, onClose }: { onApply?: () => void; onClose?: () => void } = $props();
   let view = $state<View>("character");
   let browserVisited = $state(false);
@@ -22,7 +20,7 @@
   const body = $derived(view === "character" || view === "wardrobe");
   const titles: Record<View, string> = {
     character: "prompt_studio.character", wardrobe: "prompt_studio.wardrobe",
-    browser: "prompt_studio.browser", advanced: "prompt_studio.advanced",
+    browser: "prompt_studio.browser",
   };
   $effect(() => { studio.load(); void customCatalog.load(); });
   $effect(() => { if (body) studio.ensureActive(wardrobe); });
@@ -36,13 +34,13 @@
     catch (error) { gallery.showToast(String(error), "error"); }
   }
   function requestApply() { if (studio.prompt.trim()) sending = true; }
-  const tool = "touch-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-800 text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40";
+  const tool = "touch-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-neutral-950 text-neutral-100 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-500">
   <header class="flex shrink-0 flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
     <div class="flex min-w-0 flex-1 items-center gap-2.5">
-      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-xs font-semibold text-indigo-300">PS</span>
+      <Sparkles size={20} class="shrink-0 text-indigo-300" />
       <div class="min-w-0">
         <h2 class="truncate text-sm font-semibold">{locale.t("nav.prompt_studio")}</h2>
         <p class="text-xs text-neutral-400">{studio.count} {locale.t("prompt_studio.tags_word")} · {studio.selected.length} {locale.t("prompt_studio.picked_word")}</p>
@@ -60,7 +58,7 @@
   </header>
   <nav aria-label={locale.t("nav.prompt_studio")} class="flex shrink-0 gap-1 overflow-x-auto border-b border-neutral-800 px-3 py-2">
     {#each Object.entries(titles) as [id, title] (id)}
-      <button type="button" aria-current={view === id ? "page" : undefined} disabled={id === "advanced" && !generation.isAnima} class="touch-target shrink-0 rounded-lg border px-3 py-2 text-xs transition-colors {view === id ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-transparent text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40'}" onclick={() => navigate(id as View)}>{locale.t(title)}</button>
+      <button type="button" aria-current={view === id ? "page" : undefined} class="touch-target shrink-0 rounded-lg px-3 py-2 text-xs transition-colors {view === id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200'}" onclick={() => { mobilePanel = false; navigate(id as View); }}>{locale.t(title)}</button>
     {/each}
   </nav>
   {#if studio.storageError}
@@ -74,20 +72,18 @@
       <button type="button" class="touch-target rounded-lg border border-amber-600/40 px-3 py-2" onclick={() => studio.resolveConflict(false)}>{locale.t("common.cancel")}</button>
     </div>
   {/if}
-  <div class="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:overflow-hidden">
-    <div id="studio-assembled" class="min-h-0 min-w-0 border-b border-neutral-800 p-3 lg:overflow-y-auto lg:overscroll-contain lg:border-r lg:border-b-0 {mobilePanel ? '' : 'hidden lg:block'}">
+  <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
+    <div id="studio-assembled" class="min-h-0 min-w-0 overflow-y-auto border-neutral-800 p-3 lg:order-2 lg:border-l lg:overscroll-contain {mobilePanel ? '' : 'hidden lg:block'}">
       <PromptStudioAssembled />
     </div>
-    <section aria-label={locale.t(titles[view])} class="min-h-0 min-w-0 p-3 {view === 'browser' ? 'h-[60dvh] lg:h-full overflow-hidden' : 'lg:overflow-y-auto lg:overscroll-contain'}">
+    <section aria-label={locale.t(titles[view])} class="min-h-0 min-w-0 p-3 {mobilePanel ? 'hidden lg:block' : ''} {view === 'browser' ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'}">
       {#if body}
         <div class="grid min-w-0 gap-3 md:grid-cols-[112px_minmax(0,1fr)] md:items-start">
-          <PromptStudioRail categories={studio.scoped(wardrobe)} {wardrobe} />
+          <PromptStudioRail categories={studio.scoped(wardrobe)} />
           <PromptStudioEditor />
         </div>
-      {:else if view === "advanced"}
-        <PromptStudioAdvanced />
       {/if}
-      {#if browserVisited}<div hidden={view !== "browser"} class="h-full min-h-0"><PromptStudioBrowser /></div>{/if}
+      {#if browserVisited}<div hidden={view !== "browser"} class="h-full min-h-0"><PromptStudioBrowser onUseGeneration={() => (onApply ?? onClose)?.()} /></div>{/if}
     </section>
   </div>
   <PromptStudioPromptArea onApply={requestApply} onCopy={copy} />

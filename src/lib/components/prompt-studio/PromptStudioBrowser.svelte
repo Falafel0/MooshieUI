@@ -6,6 +6,8 @@
   import PromptStudioLive from './PromptStudioLive.svelte';
   import PromptStudioSources from './PromptStudioSources.svelte';
   import PromptStudioCatalog from './PromptStudioCatalog.svelte';
+  import ReferenceBrowser from '../generation/ReferenceBrowser.svelte';
+  let { onUseGeneration }: { onUseGeneration?: () => void } = $props();
   let source = $state('live');
   let booru = $state<BooruSource>('danbooru');
   let visitedBooru = $state<BooruSource[]>(['danbooru']);
@@ -20,8 +22,8 @@
     <p class="mt-1 text-xs leading-relaxed text-neutral-400">{locale.t('prompt_studio.browser_hint')}</p>
   </header>
   <nav class="flex flex-wrap gap-2" aria-label={locale.t('prompt_studio.sources')}>
-    {#each ['live', 'recipes', 'local', 'saved'] as id}
-      <button type="button" aria-pressed={source === id} class="touch-target rounded border px-3 py-2 text-xs {source === id ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-neutral-700 text-neutral-400'}" onclick={() => open(id)}>{locale.t(`prompt_studio.browser_${id}`)}</button>
+    {#each ['live', 'recipes', 'references', 'local', 'saved'] as id}
+      <button type="button" aria-pressed={source === id} class="touch-target rounded-lg px-3 py-2 text-xs {source === id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}" onclick={() => open(id)}>{locale.t(id === 'references' ? 'anima_studio.tab.sources' : `prompt_studio.browser_${id}`)}</button>
     {/each}
   </nav>
   {#if savedSources.storageError}<p role="alert" class="text-xs text-amber-300">{locale.t("prompt_studio.storage_error")}</p>{/if}
@@ -37,6 +39,7 @@
           {#each visitedBooru as provider (provider)}
             <div hidden={booru !== provider} class="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"><PromptStudioLive initialSource={provider} fixedSource /></div>
           {/each}
+        {:else if id === 'references'}<ReferenceBrowser {onUseGeneration} />
         {:else if id === 'recipes'}<PromptStudioSources />
         {:else if id === 'saved'}<PromptStudioSavedSources />
         {:else}<PromptStudioCatalog />{/if}

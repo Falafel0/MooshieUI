@@ -90,6 +90,34 @@ export const ANIMA_PROMPT_GROUPS = [
 
 export type AnimaPromptGroup = (typeof ANIMA_PROMPT_GROUPS)[number];
 
+export const ANIMA_GROUP_LABELS: Record<AnimaPromptGroup, string> = {
+  quality_prompt: "anima_studio.group.quality",
+  artist_tags: "anima_studio.group.artist",
+  character_tags: "anima_studio.group.character",
+  clothing_tags: "anima_studio.group.clothing",
+  pose_tags: "anima_studio.group.pose",
+  background_tags: "anima_studio.group.background",
+};
+
+/** Used by imports as well as the prompt editor; unknown tags remain character details. */
+export function groupAnimaTags(tags: string[], known: readonly { n: string; c: number }[] = []): Partial<Record<AnimaPromptGroup, string[]>> {
+  const index = new Map(known.map(entry => [entry.n.toLowerCase(), entry.c]));
+  const groups: Partial<Record<AnimaPromptGroup, string[]>> = {};
+  for (const raw of tags) {
+    const tag = raw.trim().replace(/^@/, '').replaceAll('_', ' ');
+    if (!tag) continue;
+    const category = index.get(raw.trim().replace(/^@/, '').toLowerCase().replaceAll(' ', '_'));
+    const value = tag.toLowerCase();
+    const group: AnimaPromptGroup = category === 1 ? 'artist_tags' : category === 4 ? 'character_tags'
+      : /background|indoors|outdoors|sky|room|street|forest|beach|city|night|day|sunset|scenery/.test(value) ? 'background_tags'
+      : /standing|sitting|lying|kneeling|looking|holding|walking|running|pose|from (above|below|side)|cowboy shot|full body|upper body/.test(value) ? 'pose_tags'
+      : /dress|shirt|skirt|pants|shorts|jacket|coat|uniform|swimsuit|bikini|shoes|boots|socks|gloves|hat|clothes|clothing/.test(value) ? 'clothing_tags'
+      : /quality|masterpiece|highres|absurdres|detailed|aesthetic|score/.test(value) ? 'quality_prompt' : 'character_tags';
+    groups[group] = [...(groups[group] ?? []), tag];
+  }
+  return groups;
+}
+
 export function parseTagList(value: string): string[] {
   return value
     .split(/[\n,]+/)

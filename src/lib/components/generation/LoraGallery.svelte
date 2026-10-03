@@ -1,5 +1,6 @@
 <script lang="ts">
   import { generation } from "../../stores/generation.svelte.js";
+  import AnimaNodeRequirement from "./AnimaNodeRequirement.svelte";
   import { models } from "../../stores/models.svelte.js";
   import {
     loraPresets,
@@ -517,6 +518,12 @@
 
 <!-- Search + LoRA grid -->
 <div class="flex flex-col h-full">
+  {#if generation.isAnima}
+    <div class="mx-2 shrink-0 border-b border-neutral-800 py-2">
+      <label class="touch-target flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={generation.animaTools.multi_lora_enabled} onchange={event => { generation.animaTools.multi_lora_enabled = event.currentTarget.checked; if (event.currentTarget.checked) generation.animaTools.enabled = true; void generation.saveSettings(); }} />{locale.t("anima_studio.multi_lora")}</label>
+      {#if generation.animaTools.multi_lora_enabled}<AnimaNodeRequirement kind="tools" />{/if}
+    </div>
+  {/if}
   <div class="mx-2 mt-1.5 rounded border border-neutral-800 bg-neutral-900/60 p-2 text-[11px] space-y-2">
     <p class="text-neutral-400">{locale.t("lora_presets.title")}</p>
     <div class="flex items-center gap-2">

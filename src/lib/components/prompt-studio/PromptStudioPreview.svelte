@@ -34,7 +34,7 @@
     finally { if (id === revision) loading = false; }
   }
   async function clear() {
-    revision++; loading = false; opened = false;
+    revision++; loading = false; opened = false; error = ''; cacheNote = '';
     if (url) URL.revokeObjectURL(url); url = '';
     try { await clearPreviewCache(); cacheNote = 'prompt_studio.preview_cache_cleared'; }
     catch { error = 'prompt_studio.preview_cache_clear_error'; }
@@ -54,6 +54,6 @@
   {#if postId}<a href={`https://danbooru.donmai.us/posts/${postId}`} target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs text-indigo-300 underline">Danbooru #{postId}</a>{/if}
   <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
     {#if cacheNote}<span role="status">{locale.t(cacheNote)}</span>{/if}
-    <button type="button" class="touch-target rounded px-2 py-1 hover:text-neutral-200" disabled={loading} onclick={() => void clear()}>{locale.t("prompt_studio.preview_cache_clear")}</button>
+    <details class="w-full"><summary class="cursor-pointer">{locale.t("prompt_studio.details")}</summary><button type="button" class="touch-target mt-2 rounded-lg border border-neutral-700 px-3 py-2 hover:text-neutral-200" disabled={loading} onclick={() => void clear()}>{locale.t("prompt_studio.preview_cache_clear")}</button></details>
   </div>
 </section>

@@ -5,6 +5,9 @@
   import PresetActivationModal from "./PresetActivationModal.svelte";
   import { styleEditors } from "../../stores/styleEditors.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { generation } from "../../stores/generation.svelte.js";
+  import AnimaArtistMixer from "./AnimaArtistMixer.svelte";
+  import TelegramPromptImport from "./TelegramPromptImport.svelte";
   import { progress } from "../../stores/progress.svelte.js";
   import { generateStyleThumbnail } from "../../utils/styleThumbnailGen.js";
   import { artistFavourites } from "../../artist-gallery/favourites.svelte.js";
@@ -249,6 +252,7 @@
     </div>
 
 {#if activeTab === "styles"}
+    {#if generation.isAnima}<AnimaArtistMixer />{/if}
     <!-- Create -->
     <section class="mb-5 flex items-end gap-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-2">
       <div class="flex-1">
@@ -509,6 +513,7 @@
         <p class="text-[11px] text-red-400">{importError}</p>
       {/if}
     </section>
+    {#if activeTab === "presets"}<TelegramPromptImport />{/if}
 </div>
 
 {#if activatingPresetId}

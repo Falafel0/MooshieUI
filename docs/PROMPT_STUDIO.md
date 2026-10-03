@@ -1,6 +1,8 @@
 # Native Prompt Studio
 
-Prompt Studio assembles prompts in four sections: **Character Forge**, **Wardrobe**, **Tag Browser** and **Anima Tools**. It opens on Character Forge. Anima Tools is available when an Anima model is selected.
+Prompt Studio assembles prompts in three sections: **Character Forge**, **Wardrobe** and **Tag Browser**. It opens on Character Forge. The assembled tags sit to the right on desktop; on narrow screens, the assembled panel replaces the constructor when opened.
+
+Anima-specific controls live beside the functions they affect: tag groups and Prompt Composer beneath generation prompts, Artist Mixer in Styles, and Multi-LoRA in the LoRA panel. Telegram export import lives in the preset library. These panels preserve the shared generation settings and expose their extension requirements when needed.
 
 ## Character and wardrobe constructors
 
@@ -22,7 +24,7 @@ The custom catalog and its images are saved locally for the current account, sep
 
 ## Prompt groups and macros
 
-The prompt area uses the same editor as generation, including autocomplete, syntax highlighting and weight editing. Keep the constructor output as the base and add named groups for lighting, style, background or other text. Groups can be renamed, enabled or disabled, reordered and deleted.
+The prompt area uses the same editor as generation, including autocomplete, syntax highlighting and weight editing. Keep the constructor output as the base and add named groups for lighting, style, background or other text. Groups can be renamed, enabled or disabled, reordered and deleted. **Prompt helpers** contains group creation, block import and macros; copy and send remain visible. Sending is unavailable until a pending tag conflict is resolved.
 
 Editing the constructor output switches it to manual text. **Return to constructor** restores the generated base while keeping the named groups.
 
@@ -42,6 +44,8 @@ Prompt alternation `[A|B|C]` is built in **Scheduling**, alongside Swap, From, T
 
 Browse live booru tags, Anima source recipes, the local tag library and saved collections. Booru cards load thumbnails when they become visible. Danbooru, Gelbooru and e621 keep separate search results and scroll positions while switching sources; Anima source filters and positions are kept too.
 
+**Art sources** provides image references and upstream catalogs. Selected images can be sent to img2img or inserted as raster canvas layers. Tag actions can append to the generation prompt or populate Anima tag groups. These actions return to generation without overwriting the Studio draft.
+
 Save individual entries, loaded search results or a complete Danbooru group to a collection. Filter saved collections, add their tags to the draft, remove entries, or export and import the collection as JSON. Saving loaded search results saves the pages already fetched, not the entire remote database. Ordinary source thumbnails use an expiring cache; permanent chosen images belong to the custom catalog described above.
 
 Administrators configure optional credentials in **Settings → Booru**. Credential fields are write-only; saved secrets are not returned to the desktop or browser UI. Use the clear action in Settings to remove them.
@@ -51,3 +55,24 @@ Administrators configure optional credentials in **Settings → Booru**. Credent
 Run `node scripts/test-prompt-studio-workspace.mjs` for context, groups, import, macros, persistence and pagination regressions. PR CI runs this check alongside build, i18n and types.
 
 `studio-probe.html` is a Vite-only manual test page. It is not included in the packaged application. Constructor, group and insertion controls can be exercised without ComfyUI; live remote sources require the backend.
+
+## Development handoff (2026-10-03)
+
+The current UI polish is saved on `release/v2.3.8-fork.5`, based on published `v2.3.8-fork.4` (commit `abb70c8`). This is a development checkpoint, not a released version. Version files still contain `2.3.8-fork.4`; no new release tag has been created.
+
+Implemented in this checkpoint:
+
+- Move assembled tags to the right on desktop and switch between assembled tags and the constructor on mobile.
+- Simplify header and navigation styling; keep copy/send visible and collapse group creation, block import and macros under Prompt helpers.
+- Distribute Anima controls across generation prompts (`AnimaPromptGroups`, `AnimaComposer`), Styles (`AnimaArtistMixer`), LoRA (`multi_lora_enabled`) and the preset library (`TelegramPromptImport`).
+- Add `ReferenceBrowser` to Tag Browser for image references, grouped tags and img2img/raster handoff. Its generation actions do not replace the Studio draft.
+- Remove the obsolete Anima modal and Advanced tab. Extension checks/install controls are shared in `AnimaNodeRequirement`; tag classification is shared in `animaIntegration.ts`.
+- Preserve fork.4 prompt groups, macros, custom catalog, saved collections, contextual item editing and destination selection.
+
+Validation: frontend production build, i18n parity, Prompt Studio regression script and Svelte type checking passed. Type checking reports 0 errors and 85 existing warnings outside the changed UI. `git diff --check` passed. Visual interaction testing in the running application and a real ComfyUI generation have not been completed.
+
+Release blocker: local Rust compilation/tests fail because the MSVC linker `link.exe` is unavailable; Visual Studio installation discovery returned no installed C++ toolchain. Install/configure Visual Studio C++ Build Tools and the Windows SDK, then repeat desktop/server `cargo check`, `cargo test`, frontend checks and the regular release skill. Do not treat this checkpoint as release-ready or bypass release validation. Release notes, version bump, PR merge, tagging, release CI and wiki updates remain outstanding.
+
+Next development checks: exercise narrow-screen panel switching, the lower prompt area, macro/group workflows, Anima setting persistence, extension availability/install errors, Telegram append/replace confirmation, stale reference requests and image handoff. Clean up unused localization keys only after confirming usage. All backend calls must retain the desktop/browser IPC abstraction.
+
+Local safety backup: a stash named `Prompt Studio polish before integrating fork.4` preserves the earlier fork.3-based UI experiment. It is not published with this checkpoint. Do not apply it wholesale over fork.4: its overlapping Studio components would regress the newer groups/catalog workflows. The integrated branch is the continuation point for other agents.
