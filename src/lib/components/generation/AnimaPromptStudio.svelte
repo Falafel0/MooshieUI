@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PromptTextarea from "./PromptTextarea.svelte";
+  import { promptPresets, inlineChunkToken } from "../../stores/promptPresets.svelte.js";
   import AnimaSources from "./AnimaSources.svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -22,10 +24,12 @@
     type TelegramPromptRecipe,
   } from "../../utils/telegramPromptImport.js";
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, initialTab = "groups" }: { onClose: () => void; initialTab?: "groups" | "composer" | "mixer" } = $props();
 
   type Tab = "groups" | "catalog" | "danbooru" | "telegram" | "composer" | "mixer" | "sources";
-  let tab = $state<Tab>("groups");
+  // svelte-ignore state_referenced_locally
+  // Initial tool selection; navigation owns the state after mount.
+  let tab = $state<Tab>(initialTab);
   let activeGroup = $state<AnimaPromptGroup>("character_tags");
   let localQuery = $state("");
   let danbooruQuery = $state("");
@@ -224,20 +228,27 @@
       {#if tab === "sources"}
         <AnimaSources />
       {:else if tab === "groups"}
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <nav class="mb-3 flex flex-wrap gap-2" aria-label={locale.t('anima_studio.tab.groups')}>
           {#each ANIMA_PROMPT_GROUPS as group}
-            <section class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
-              <div class="mb-2 flex items-center justify-between">
-                <button class="text-xs font-medium {activeGroup === group ? 'text-amber-300' : 'text-neutral-300'}" onclick={() => (activeGroup = group)}>{groupMeta[group].icon} {groupMeta[group].label}</button>
-                <span class="text-[10px] text-neutral-600">{parseTagList(generation.animaTools[group]).length}</span>
-              </div>
-              <div class="mb-2 flex min-h-8 flex-wrap gap-1">
-                {#each parseTagList(generation.animaTools[group]) as tag}
-                  <button class="rounded-full border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-[10px] text-neutral-300 hover:border-red-500 hover:text-red-300" onclick={() => removeTag(tag, group)} title={locale.t("common.remove")}>{tag} ×</button>
-                {/each}
-              </div>
-              <textarea rows="3" value={generation.animaTools[group]} oninput={(event) => setGroupValue(group, event.currentTarget.value)} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-2 font-mono text-[11px] text-neutral-200 focus:border-amber-500 focus:outline-none" placeholder={locale.t("anima_studio.group.placeholder")}></textarea>
-            </section>
+            <button type="button" aria-pressed={activeGroup === group} class="touch-target rounded border px-3 py-2 text-xs {activeGroup === group ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-neutral-700 text-neutral-400'}" onclick={() => activeGroup = group}>{groupMeta[group].label} · {parseTagList(generation.animaTools[group]).length}</button>
+          {/each}
+        </nav>
+        <section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+          <div class="mb-3 flex flex-wrap items-center gap-3">
+            <h3 class="min-w-0 flex-1 text-sm text-neutral-200">{groupMeta[activeGroup].label}</h3>
+            <select aria-label={locale.t('prompt_studio.macros')} class="touch-target rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-300" value="" onchange={event => { const macro = promptPresets.getById(event.currentTarget.value); if (macro) setGroupValue(activeGroup, [generation.animaTools[activeGroup].trim(), inlineChunkToken(macro.name)].filter(Boolean).join(', ')); event.currentTarget.value = ''; }}>
+              <option value="">{locale.t('prompt_studio.macros')}</option>
+              {#each promptPresets.presets as macro (macro.id)}<option value={macro.id}>{macro.name}</option>{/each}
+            </select>
+          </div>
+          {#key activeGroup}<PromptTextarea bind:value={() => generation.animaTools[activeGroup], value => setGroupValue(activeGroup, value)} rows={5} storageKey={`anima-group-${activeGroup}`} placeholder={locale.t('anima_studio.group.placeholder')} />{/key}
+        </section>
+        <div class="mt-4 divide-y divide-neutral-800 rounded-xl border border-neutral-800">
+          {#each ANIMA_PROMPT_GROUPS as group}
+            <button type="button" class="touch-target flex w-full min-w-0 flex-col gap-1 px-3 py-3 text-left" onclick={() => activeGroup = group}>
+              <span class="text-xs text-indigo-300">{groupMeta[group].label}</span>
+              <span class="line-clamp-2 break-words text-xs text-neutral-500">{generation.animaTools[group] || '—'}</span>
+            </button>
           {/each}
         </div>
       {:else if tab === "catalog"}

@@ -911,7 +911,9 @@
 
   /** Teleport overlays to body so fixed positioning escapes panel overflow/transform containers. */
   function portal(node: HTMLElement) {
-    document.body.appendChild(node);
+    // Native dialogs make the body inert; keep completion controls in the active dialog.
+    const target = textareaEl?.closest('dialog') ?? document.body;
+    target.appendChild(node);
     return {
       destroy() {
         node.remove();

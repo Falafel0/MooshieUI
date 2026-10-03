@@ -1,3 +1,24 @@
+## What's New in v2.3.8-fork.4
+
+### Prompt Studio workspace
+- Opens directly on Character Forge and consolidates sources into Tag Browser, alongside Wardrobe and focused Anima Tools. Removes the separate Tag Archive and introductory hub.
+- Replaces dense assembled-tag pills with grouped rows and contextual editing. The full-width prompt area uses the generation editor with autocomplete, syntax highlighting and weighting.
+- Adds named prompt groups with enable/disable, renaming, ordering, undo/redo and persistence. Imports pasted text or text/Markdown files into named blocks in Studio and generation fields.
+- Adds macro search, creation, editing and removal using the shared preset library. Studio-inserted references survive macro renames, and exact non-Latin macro names resolve correctly in main and Anima prompts.
+
+### Constructors, catalogs and sources
+- Expands offline character and clothing choices, searches Danbooru tags in pages, and browses searchable Danbooru tag groups directly from both constructors.
+- Applies shared contextual controls to built-in, live and custom garments. Colors, materials and additional details form phrases attached to their owner while preserving macro, LoRA and scheduling syntax.
+- Adds an editable custom catalog with uploaded or selected Danbooru previews. Chosen images persist separately from the thumbnail cache and travel with catalog export/import.
+- Adds booru-style cards, saved source collections, loaded-result/group saving, export/import, and retained searches, filters and scroll positions across source switches.
+
+### Generation handoff and scheduling
+- Send to generation chooses image mode, positive/negative field, text or named blocks, and append/prepend/replace. The preview includes the main field and all resulting additional blocks.
+- Moves every-step alternation into Scheduling alongside Swap, From, To and Range.
+- Keeps autocomplete overlays inside modal dialogs so the shared editor remains usable there.
+
+---
+
 ## What's New in v2.3.8-fork.3
 
 ### Native Prompt Studio

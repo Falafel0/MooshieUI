@@ -1,3 +1,4 @@
+import { resolveAnimaPromptGroups } from "../utils/animaIntegration.js";
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
@@ -19,6 +20,7 @@ import {
   mergeNovelAiTags,
   sanitizePromptForSend,
 } from "../utils/promptSanitize.js";
+import { insertPromptBlocks } from "../utils/promptBlocks.js";
 import { expandRandomPrompt, hasRandomSyntax } from "../utils/randomPrompt.js";
 import { extractScaleFromModel } from "../utils/upscalers.js";
 import {
@@ -2029,6 +2031,21 @@ class GenerationStore {
     return newBoxId();
   }
 
+  importPromptBoxes(side: 'positive' | 'negative', blocks: { name: string; content: string }[], mode: 'append' | 'prepend' | 'replace' = 'append') {
+    const incoming = blocks.filter(block => block.content.trim()).map(block => ({ id: this.newBoxId(), name: block.name, content: block.content }));
+    if (side === 'positive') this.extraPositiveBoxes = insertPromptBlocks(this.extraPositiveBoxes, incoming, mode);
+    else this.extraNegativeBoxes = insertPromptBlocks(this.extraNegativeBoxes, incoming, mode);
+    void this.saveSettings();
+  }
+  movePromptBox(side: 'positive' | 'negative', id: string, direction: number) {
+    const boxes = side === 'positive' ? this.extraPositiveBoxes : this.extraNegativeBoxes;
+    const index = boxes.findIndex(box => box.id === id); const target = index + direction;
+    if (index < 0 || target < 0 || target >= boxes.length) return;
+    const next = [...boxes]; [next[index], next[target]] = [next[target], next[index]];
+    if (side === 'positive') this.extraPositiveBoxes = next; else this.extraNegativeBoxes = next;
+    void this.saveSettings();
+  }
+
   addPositiveBox() {
     this.extraPositiveBoxes = [
       ...this.extraPositiveBoxes,
@@ -3948,7 +3965,7 @@ class GenerationStore {
           }
         : null,
       anima_tools: this.isAnima
-        ? { ...this.animaTools }
+        ? resolveAnimaPromptGroups(this.animaTools, text => promptPresets.resolveInline(text, { fixedChoices: options.fixedPresetChoices }))
         : null,
       edit_reference_images: this.editReferenceImages.filter((v): v is string => !!v),
       edit_reference_strength: this.editReferenceStrength,

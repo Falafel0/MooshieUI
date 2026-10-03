@@ -1,53 +1,45 @@
 <script lang="ts">
+  import { customCatalog } from "../../prompt-studio/custom-catalog.svelte.js";
   import { studio } from "../../prompt-studio/studio.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { gallery } from "../../stores/gallery.svelte.js";
-  import PromptStudioHub from "./PromptStudioHub.svelte";
+  import PromptStudioPromptArea from "./PromptStudioPromptArea.svelte";
+  import PromptStudioSend from "./PromptStudioSend.svelte";
+  import PromptStudioBrowser from "./PromptStudioBrowser.svelte";
   import PromptStudioRail from "./PromptStudioRail.svelte";
   import PromptStudioEditor from "./PromptStudioEditor.svelte";
   import PromptStudioAssembled from "./PromptStudioAssembled.svelte";
-  import PromptStudioSources from "./PromptStudioSources.svelte";
-  import PromptStudioCatalog from "./PromptStudioCatalog.svelte";
   import PromptStudioAdvanced from "./PromptStudioAdvanced.svelte";
   import { Dices, Redo2, RotateCcw, Undo2 } from "@lucide/svelte";
-  type View = "hub" | "character" | "wardrobe" | "sources" | "catalog" | "advanced";
+  type View = "character" | "wardrobe" | "browser" | "advanced";
   let { onApply, onClose }: { onApply?: () => void; onClose?: () => void } = $props();
-  let view = $state<View>("hub");
+  let view = $state<View>("character");
+  let browserVisited = $state(false);
   let mobilePanel = $state(false);
-  let replacePrompt = $state(false);
+  let sending = $state(false);
   const wardrobe = $derived(view === "wardrobe");
   const body = $derived(view === "character" || view === "wardrobe");
   const titles: Record<View, string> = {
-    hub: "prompt_studio.hub", character: "prompt_studio.character", wardrobe: "prompt_studio.wardrobe",
-    sources: "prompt_studio.sources", catalog: "prompt_studio.catalog", advanced: "prompt_studio.advanced",
+    character: "prompt_studio.character", wardrobe: "prompt_studio.wardrobe",
+    browser: "prompt_studio.browser", advanced: "prompt_studio.advanced",
   };
-  $effect(() => { studio.load(); });
+  $effect(() => { studio.load(); void customCatalog.load(); });
   $effect(() => { if (body) studio.ensureActive(wardrobe); });
   function navigate(next: View) {
     view = next;
+    if (next === "browser") browserVisited = true;
     if (next === "character" || next === "wardrobe") { studio.kind = next; studio.save(); }
   }
   async function copy() {
     try { await navigator.clipboard.writeText(studio.prompt); gallery.showToast(locale.t("prompt_studio.copied"), "success"); }
     catch (error) { gallery.showToast(String(error), "error"); }
   }
-  function requestApply() {
-    if (!studio.prompt.trim()) return;
-    if (generation.positivePrompt.trim() && generation.positivePrompt !== studio.prompt.trim()) { replacePrompt = true; return; }
-    apply();
-  }
-  function apply() {
-    replacePrompt = false;
-    generation.positivePrompt = studio.prompt.trim();
-    void generation.saveSettings();
-    gallery.showToast(locale.t("prompt_studio.apply"), "success");
-    (onApply ?? onClose)?.();
-  }
+  function requestApply() { if (studio.prompt.trim()) sending = true; }
   const tool = "touch-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-800 text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
-<div style="--color-indigo-300:#a5b4fc;--color-indigo-400:#818cf8;--color-indigo-500:#6366f1;--color-indigo-600:#4f46e5;--color-indigo-950:#1e1b4b" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-neutral-950 text-neutral-100 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-500">
+<div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-neutral-950 text-neutral-100 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-500">
   <header class="flex shrink-0 flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
     <div class="flex min-w-0 flex-1 items-center gap-2.5">
       <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-xs font-semibold text-indigo-300">PS</span>
@@ -74,13 +66,6 @@
   {#if studio.storageError}
     <div role="alert" class="shrink-0 border-b border-amber-700/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">{locale.t("prompt_studio.storage_error")}</div>
   {/if}
-  {#if replacePrompt}
-    <div role="alert" class="flex shrink-0 flex-wrap items-center gap-3 border-b border-indigo-500/30 bg-neutral-900 px-4 py-3 text-xs">
-      <p class="flex-1 text-neutral-300">{locale.t("prompt_studio.replace_prompt_confirm")}</p>
-      <button type="button" class="touch-target rounded-lg bg-indigo-600 px-3 py-2 text-white" onclick={apply}>{locale.t("generation.interrogate.replace_prompt")}</button>
-      <button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 py-2" onclick={() => (replacePrompt = false)}>{locale.t("common.cancel")}</button>
-    </div>
-  {/if}
   {#if studio.pendingConflict}
     {@const pending = studio.pendingConflict}
     <div role="alert" class="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-600/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
@@ -89,25 +74,23 @@
       <button type="button" class="touch-target rounded-lg border border-amber-600/40 px-3 py-2" onclick={() => studio.resolveConflict(false)}>{locale.t("common.cancel")}</button>
     </div>
   {/if}
-  <div class="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)] lg:overflow-hidden">
+  <div class="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:overflow-hidden">
     <div id="studio-assembled" class="min-h-0 min-w-0 border-b border-neutral-800 p-3 lg:overflow-y-auto lg:overscroll-contain lg:border-r lg:border-b-0 {mobilePanel ? '' : 'hidden lg:block'}">
-      <PromptStudioAssembled onApply={requestApply} onCopy={copy} />
+      <PromptStudioAssembled />
     </div>
-    <section aria-label={locale.t(titles[view])} class="min-h-0 min-w-0 p-3 lg:overflow-y-auto lg:overscroll-contain">
-      {#if view === "hub"}
-        <PromptStudioHub onOpen={navigate} advancedEnabled={generation.isAnima} />
-      {:else if body}
+    <section aria-label={locale.t(titles[view])} class="min-h-0 min-w-0 p-3 {view === 'browser' ? 'h-[60dvh] lg:h-full overflow-hidden' : 'lg:overflow-y-auto lg:overscroll-contain'}">
+      {#if body}
         <div class="grid min-w-0 gap-3 md:grid-cols-[112px_minmax(0,1fr)] md:items-start">
           <PromptStudioRail categories={studio.scoped(wardrobe)} {wardrobe} />
           <PromptStudioEditor />
         </div>
-      {:else if view === "sources"}
-        <PromptStudioSources />
-      {:else if view === "catalog"}
-        <PromptStudioCatalog />
-      {:else}
+      {:else if view === "advanced"}
         <PromptStudioAdvanced />
       {/if}
+      {#if browserVisited}<div hidden={view !== "browser"} class="h-full min-h-0"><PromptStudioBrowser /></div>{/if}
     </section>
   </div>
+  <PromptStudioPromptArea onApply={requestApply} onCopy={copy} />
 </div>
+
+{#if sending}<PromptStudioSend onCancel={() => sending = false} onDone={() => { sending = false; (onApply ?? onClose)?.(); }} />{/if}

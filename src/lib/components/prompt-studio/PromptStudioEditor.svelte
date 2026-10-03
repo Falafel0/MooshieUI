@@ -1,10 +1,17 @@
 <script lang="ts">
+  import { withContextOptions } from '../../prompt-studio/catalog-expansion.js';
+  import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { locale } from "../../stores/locale.svelte.js";
+  import PromptStudioCustomCatalog from "./PromptStudioCustomCatalog.svelte";
+  import PromptStudioLive from "./PromptStudioLive.svelte";
+  import PromptTextarea from "../generation/PromptTextarea.svelte";
   import PromptStudioPreview from "./PromptStudioPreview.svelte";
   import { studio } from "../../prompt-studio/studio.svelte.js";
   import { CLOTHING_PALETTE, DANBOORU_HUE_PALETTE, NEUTRAL_PALETTE } from "../../prompt-studio/palettes.js";
   import type { ColorWheelEntry } from "../../prompt-studio/types.js";
   import type { SubCategory, Variant } from "../../prompt-studio/types.js";
+  import { autocomplete } from "../../stores/autocomplete.svelte.js";
+  import { classifyTag } from "../../prompt-studio/sources.js";
   import { Check, Info, Palette, SlidersHorizontal } from "@lucide/svelte";
 
   const PALETTES: Record<string, ColorWheelEntry[]> = {
@@ -15,9 +22,16 @@
 
   const sub = $derived(studio.currentSub);
   const category = $derived(studio.currentCategory);
-  const chosenTag = $derived(sub ? studio.chosen(sub.id)?.tag : undefined);
+  let focusedTag = $state('');
+  let danbooru = $state(false);
+  let extraDetail = $state('');
+  const chosenTag = $derived(sub ? (studio.selected.some(v => v.category === sub.id && v.tag === focusedTag) ? focusedTag : studio.chosen(sub.id)?.tag) : undefined);
+  function chooseVariant(sub: SubCategory, variant: Variant) { focusedTag = variant.tag; if (!variant.tag) studio.clearSub(sub.id); else studio.chooseVariant(sub, variant); }
+
   const detail = $derived(chosenTag ? studio.detail(chosenTag) : undefined);
-  const activeVariant = $derived(sub?.variants?.find((v) => v.tag === chosenTag));
+  const savedPreview = $derived(customCatalog.entries.find(entry => entry.tag === chosenTag && entry.subId === sub?.id)?.preview);
+  const activeVariant = $derived(sub?.variants?.find((v) => v.tag === chosenTag) ?? (chosenTag ? withContextOptions({ id: chosenTag, tag: chosenTag, name: chosenTag.replaceAll('_', ' ') }, sub?.id ?? '') : undefined));
+  $effect(() => { chosenTag; extraDetail = ''; });
   const palette = $derived(sub?.paletteKey ? (PALETTES[sub.paletteKey] ?? CLOTHING_PALETTE) : CLOTHING_PALETTE);
   const paletteMap = $derived(new Map(palette.map((entry) => [entry.tag, entry])));
 
@@ -26,16 +40,20 @@
   const sliderIndex = $derived(sub ? studio.sliderIndex(sub) : -1);
   let variantQuery = $state('');
   let alphabetical = $state(false);
-  let alternatives = $state('red|blue');
-  const alternates = $derived(alternatives.split('|').map(value => value.trim()).filter(Boolean));
-  const validAlternation = $derived(alternates.length >= 2 && alternates.every(value => !/[\[\]\n]/.test(value)));
   $effect(() => { sub?.id; variantQuery = ''; });
   function visibleVariants(values: Variant[]): Variant[] {
     const needle = variantQuery.trim().toLowerCase();
-    const filtered = values.filter(v => v.tag && (!needle || v.name.toLowerCase().includes(needle) || v.tag.replaceAll('_', ' ').includes(needle) || v.tag.includes(needle)));
+    const filtered = values.filter(v => (!needle || v.name.toLowerCase().includes(needle) || v.tag.replaceAll('_', ' ').includes(needle) || v.tag.includes(needle)));
     return alphabetical ? filtered.sort((a, b) => a.name.localeCompare(b.name)) : filtered;
   }
   const tileVariants = $derived(visibleVariants(sub?.variants ?? []));
+  const libraryVariants = $derived.by(() => {
+    const needle = variantQuery.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const wardrobe = ['tops', 'bottoms', 'dresses', 'accessories', 'footwear'].includes(category?.id ?? '');
+    return autocomplete.search(needle, 100).filter(entry => entry.c === 0 && (classifyTag(entry.n).category === 'source:wardrobe') === wardrobe && !sub?.variants?.some(v => v.tag === entry.n)).slice(0, 30);
+  });
+
 
   /** Modifiers blocked by another modifier already on the same variant. */
   function modifierBlocked(variant: Variant, modTag: string): boolean {
@@ -44,6 +62,10 @@
     return (variant.modifiers ?? []).some(
       (mod) => taken.includes(mod.tag) && (mod.conflictsWith ?? []).includes(modTag),
     );
+  }
+
+  function variantPreview(tag: string): string | undefined {
+    return customCatalog.entries.find(entry => entry.tag === tag && entry.subId === sub?.id)?.preview;
   }
 
   function tileClass(selected: boolean) {
@@ -68,12 +90,12 @@
 {:else}
   <section class="flex min-h-0 flex-col gap-3">
     <!-- subcategory tabs -->
-    <div class="flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2">
+    <div class="sticky top-0 z-10 flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2">
       {#each visibleSubs as item (item.id)}
         {@const count = studio.selected.filter(value => value.category === item.id).length}
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors ${
+          class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {
             sub.id === item.id
               ? "border-indigo-500 bg-indigo-500/10 text-neutral-100"
               : "border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
@@ -88,7 +110,13 @@
       {/each}
     </div>
 
-    <div class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+    <PromptStudioCustomCatalog />
+    <nav class="flex flex-wrap gap-2" aria-label={locale.t('prompt_studio.constructor_source')}>
+      <button type="button" aria-pressed={!danbooru} class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" onclick={() => danbooru = false}>{locale.t('prompt_studio.curated')}</button>
+      <button type="button" aria-pressed={danbooru} class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-indigo-300" onclick={() => danbooru = true}>{locale.t('prompt_studio.all_danbooru')}</button>
+    </nav>
+    {#if danbooru}<PromptStudioLive constructorMode />{/if}
+    <div hidden={danbooru} class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
       <header class="mb-3 flex items-center gap-2">
         <h4 class="text-sm font-semibold text-neutral-100">{sub.name}</h4>
         <span class="font-mono text-[10px] tracking-[0.14em] text-neutral-500 uppercase">
@@ -114,14 +142,20 @@
                     {#if sub.variantSize === "swatch" || sub.variantSize === "icon"}
                       <button
                         type="button"
-                        class="{tileClass(studio.isChosen(variant.tag))} justify-start"
-                        aria-pressed={studio.isChosen(variant.tag)} onclick={() => studio.chooseVariant(sub as SubCategory, variant)}
+                        class="{tileClass((variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id)))} justify-start"
+                        aria-pressed={(variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id))} onclick={() => chooseVariant(sub as SubCategory, variant)}
                       >
                         <span class="h-3.5 w-3.5 shrink-0 rounded-full border border-black/30" style="background:{variant.colorHex ?? '#525252'}"></span>
+                        {#if variantPreview(variant.tag)}
+                          <img src={variantPreview(variant.tag)} alt="" class="h-10 w-10 shrink-0 rounded object-contain" />
+                        {/if}
                         <span class="truncate">{variant.name}</span>
                       </button>
                     {:else}
-                      <button type="button" class={tileClass(studio.isChosen(variant.tag))} aria-pressed={studio.isChosen(variant.tag)} onclick={() => studio.chooseVariant(sub as SubCategory, variant)}>
+                      <button type="button" class={tileClass((variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id)))} aria-pressed={(variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id))} onclick={() => chooseVariant(sub as SubCategory, variant)}>
+                        {#if variantPreview(variant.tag)}
+                          <img src={variantPreview(variant.tag)} alt="" class="h-10 w-10 shrink-0 rounded object-contain" />
+                        {/if}
                         {variant.name}
                       </button>
                     {/if}
@@ -133,12 +167,23 @@
         {:else}
           <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3 xl:grid-cols-4">
             {#each tileVariants as variant (variant.id)}
-              <button type="button" class={tileClass(studio.isChosen(variant.tag))} aria-pressed={studio.isChosen(variant.tag)} onclick={() => studio.chooseVariant(sub as SubCategory, variant)}>
+              <button type="button" class={tileClass((variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id)))} aria-pressed={(variant.tag ? studio.isChosen(variant.tag) : !studio.chosen(sub.id))} onclick={() => chooseVariant(sub as SubCategory, variant)}>
                 {#if variant.colorHex && (sub.variantSize === "swatch" || sub.variantSize === "icon")}
                   <span class="h-3.5 w-3.5 shrink-0 rounded-full border border-black/30" style="background:{variant.colorHex}"></span>
                 {/if}
+                {#if variantPreview(variant.tag)}
+                  <img src={variantPreview(variant.tag)} alt="" class="h-10 w-10 shrink-0 rounded object-contain" />
+                {/if}
                 <span class="truncate">{variant.name}</span>
               </button>
+            {/each}
+          </div>
+        {/if}
+        {#if libraryVariants.length}
+          <h5 class="mt-4 mb-2 text-xs text-neutral-400">{locale.t('prompt_studio.catalog_library')}</h5>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {#each libraryVariants as entry (entry.n)}
+              <button type="button" class={tileClass(studio.isChosen(entry.n))} aria-pressed={studio.isChosen(entry.n)} onclick={() => { studio.choose(entry.n, entry.n.replaceAll('_', ' '), classifyTag(entry.n).category); }}>{entry.n.replaceAll('_', ' ')}</button>
             {/each}
           </div>
         {/if}
@@ -171,7 +216,7 @@
           {#each palette as entry (entry.tag)}
             <button
               type="button"
-              class="flex flex-col items-center gap-1 rounded-lg border px-1 py-1.5 text-[9px] transition-colors ${
+              class="flex flex-col items-center gap-1 rounded-lg border px-1 py-1.5 text-[9px] transition-colors {
                 chosenTag === entry.tag ? "border-indigo-500 bg-indigo-500/10 text-neutral-100" : "border-neutral-800 text-neutral-400 hover:border-neutral-700"
               }"
               title={entry.name}
@@ -187,7 +232,7 @@
           {#each palette as entry (entry.tag)}
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] transition-colors ${
+              class="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] transition-colors {
                 chosenTag === entry.tag || detail?.secondary === entry.tag
                   ? "border-indigo-500 bg-indigo-500/10 text-neutral-100"
                   : "border-neutral-800 text-neutral-400 hover:border-neutral-700"
@@ -202,32 +247,32 @@
       {/if}
     </div>
 
-    <details class="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-xs text-neutral-400">
-      <summary class="cursor-pointer text-indigo-300">{locale.t("prompt_studio.alternation_title")}</summary>
-      <form class="mt-3 flex flex-wrap gap-2" onsubmit={event => { event.preventDefault(); if (validAlternation) studio.addMany([{ tag: `[${alternates.join('|')}]`, name: alternatives, category: 'custom' }]); }}>
-        <input aria-label={locale.t("prompt_studio.alternation_input")} class="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 p-2 text-neutral-200" bind:value={alternatives} placeholder="red|blue|green" />
-        <button type="submit" disabled={!validAlternation} class="touch-target rounded-lg border border-indigo-500/50 px-3 py-2 text-indigo-300 disabled:opacity-40">{locale.t("prompt_studio.add_expression", { expression: `[${alternates.join('|')}]` })}</button>
-      </form>
-      <p class="mt-2 leading-relaxed">{locale.t("prompt_studio.alternation_hint")}</p>
-    </details>
-    {#if chosenTag}<PromptStudioPreview tag={chosenTag} />{/if}
 
+
+
+    {#if sub.mode === 'multi' && studio.selected.filter(v => v.category === sub.id).length > 1}
+      <label class="text-xs text-neutral-400">{locale.t('prompt_studio.detail_owner')}
+        <select class="touch-target mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2" value={chosenTag} onchange={event => focusedTag = event.currentTarget.value}>
+          {#each studio.selected.filter(v => v.category === sub.id) as item (item.tag)}<option value={item.tag}>{item.name}</option>{/each}
+        </select>
+      </label>
+    {/if}
     <!-- per-variant detail: modifiers, secondary colour, quantity, nested parts -->
     {#if chosenTag && activeVariant}
       {@const variant = activeVariant}
-      {#if variant.modifiers?.length || variant.quantity?.length || variant.parts?.length}
+      {#if chosenTag}
         <div class="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-          <p class="font-mono text-[10px] tracking-[0.16em] text-indigo-400 uppercase">detail :: {variant.name}</p>
+          <p class="font-mono text-[10px] tracking-[0.16em] text-indigo-400 uppercase">{locale.t('prompt_studio.item_details', { name: variant.name })}</p>
 
           {#if variant.modifiers?.length}
             <div>
-              <p class="mb-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">модификаторы</p>
+              <p class="mb-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">{locale.t("prompt_studio.modifiers")}</p>
               <div class="flex flex-wrap gap-1.5">
                 {#each variant.modifiers as mod (mod.tag)}
                   {@const blocked = modifierBlocked(variant, mod.tag)}
                   <button
                     type="button"
-                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors ${
+                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors {
                       (detail?.mods ?? []).includes(mod.tag)
                         ? "border-indigo-500 bg-indigo-500/10 text-neutral-100"
                         : blocked
@@ -249,13 +294,13 @@
             {#if (variant.modifiers ?? []).some((mod) => mod.needsColor)}
               <div>
                 <p class="mb-1.5 flex items-center gap-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">
-                  <Palette size={11} strokeWidth={2} /> второй цвет
+                  <Palette size={11} strokeWidth={2} /> {locale.t("prompt_studio.secondary_color")}
                 </p>
                 <div class="flex flex-wrap gap-1.5">
                   {#each palette as entry (entry.tag)}
                     <button
                       type="button"
-                      class="h-6 w-6 rounded-full border transition-transform ${
+                      class="h-6 w-6 rounded-full border transition-transform {
                         detail?.secondary === entry.tag ? "scale-110 border-indigo-400 ring-2 ring-indigo-500/40" : "border-black/40 hover:scale-105"
                       }"
                       style="background:{entry.hex}"
@@ -271,13 +316,13 @@
           {#if variant.quantity?.length}
             <div>
               <p class="mb-1.5 flex items-center gap-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">
-                <SlidersHorizontal size={11} strokeWidth={2} /> количество
+                <SlidersHorizontal size={11} strokeWidth={2} /> {locale.t("prompt_studio.quantity")}
               </p>
               <div class="flex flex-wrap gap-1.5">
                 {#each variant.quantity as option (option.tag)}
                   <button
                     type="button"
-                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors ${
+                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors {
                       detail?.quantity === option.tag ? "border-indigo-500 bg-indigo-500/10 text-neutral-100" : "border-neutral-800 text-neutral-400 hover:border-neutral-700"
                     }"
                     onclick={() => studio.setQuantity(chosenTag as string, option.tag)}
@@ -291,12 +336,12 @@
 
           {#each (variant.parts ?? []) as part (part.name)}
             <div>
-              <p class="mb-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">{part.name}</p>
+              <p class="mb-1.5 text-[10px] tracking-[0.12em] text-neutral-500 uppercase">{part.name === "Color" ? locale.t("prompt_studio.garment_color") : part.name === "Material" ? locale.t("prompt_studio.garment_material") : part.name}</p>
               <div class="flex flex-wrap gap-1.5">
                 {#each part.tags as option (option.tag)}
                   <button
                     type="button"
-                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors ${
+                    class="rounded-lg border px-2 py-1 text-[11px] transition-colors {
                       detail?.parts?.[part.name] === option.tag ? "border-indigo-500 bg-indigo-500/10 text-neutral-100" : "border-neutral-800 text-neutral-400 hover:border-neutral-700"
                     }"
                     onclick={() => studio.setPart(chosenTag as string, part.name, option.tag)}
@@ -307,8 +352,16 @@
               </div>
             </div>
           {/each}
+          <div class="border-t border-neutral-800 pt-3">
+            <p class="mb-2 text-xs text-neutral-400">{locale.t('prompt_studio.additional_details')}</p>
+            <PromptTextarea bind:value={extraDetail} rows={2} minHeight="min-h-16" placeholder={locale.t('prompt_studio.additional_details_hint')} />
+            <button type="button" disabled={!extraDetail.trim()} class="touch-target mt-2 rounded border border-neutral-700 px-3 py-2 text-xs text-indigo-300 disabled:opacity-40" onclick={() => { studio.setPart(chosenTag!, 'Additional details', [detail?.parts['Additional details'], extraDetail.trim()].filter(Boolean).join(', ')); extraDetail = ''; }}>{locale.t('prompt_studio.add_tag')}</button>
+            {#if detail?.parts['Additional details']}<p class="mt-2 break-words text-xs text-neutral-400">{detail.parts['Additional details']} <button type="button" class="touch-target rounded p-1" onclick={() => studio.setPart(chosenTag!, 'Additional details', detail!.parts['Additional details'])}>{locale.t('prompt_studio.remove')}</button></p>{/if}
+          </div>
         </div>
       {/if}
     {/if}
+    {#if savedPreview}<img src={savedPreview} alt={activeVariant?.name ?? chosenTag} class="max-h-64 max-w-full self-start rounded-lg border border-neutral-700 object-contain" />
+    {:else if chosenTag}<PromptStudioPreview tag={chosenTag} />{/if}
   </section>
 {/if}

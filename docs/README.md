@@ -1,6 +1,6 @@
 # MooshieUI documentation
 
-Documentation for the current implementation, with music and connection updates for **v2.3.8-fork.3**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
+Documentation for the current implementation, including the Prompt Studio workspace updates for **v2.3.8-fork.4**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
 
 ## Feature and technical references
 
@@ -9,7 +9,7 @@ Documentation for the current implementation, with music and connection updates 
 | [METADATA_CARRIERS.md](METADATA_CARRIERS.md) | Where generation metadata lives per output format, and what survives |
 | [NOVELAI.md](NOVELAI.md) | NovelAI architecture, personal keys, face detailing, local post-processing and historical test notes |
 | [RANDOM_PROMPTS.md](RANDOM_PROMPTS.md) | Seeded alternation, multiple choices, weights, nesting and escapes |
-| [PROMPT_STUDIO.md](PROMPT_STUDIO.md) | Native Prompt Studio: tag sources, relations, presets and credentials |
+| [PROMPT_STUDIO.md](PROMPT_STUDIO.md) | Prompt Studio constructors, groups, macros, chosen previews, sources and generation handoff |
 | [STYLE_REFERENCE.md](STYLE_REFERENCE.md) | IP-Adapter/Flux Redux support, model files and controls |
 | [MACOS.md](MACOS.md) | Apple Silicon candidate installation, validation, and release gating |
 | [YuE2 integration](research/yue2-integration.md) | Native ComfyUI music support, model setup, and validation limits |

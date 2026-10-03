@@ -25,6 +25,7 @@ import {
   looseSlug,
   mayContainPresetToken,
   presetSlug,
+  presetNameKey,
   presetTokenRegex,
   presetTokenSlug,
 } from "../utils/promptChunkTokens.js";
@@ -285,15 +286,26 @@ class PromptPresetsStore {
     if (changed) this.saveActive();
   }
 
+  /** Bracket tokens preserve exact names, including names outside the Latin alphabet. */
+  private presetForToken(slug: string | undefined, name: string | undefined): PromptPreset | undefined {
+    if (name !== undefined) {
+      const exact = this.presets.find(preset => preset.name.trim().toLowerCase() === name.trim().toLowerCase());
+      if (exact) return exact;
+      // ASCII slugging must never turn an unknown Unicode name into another macro.
+      if (/[^\x00-\x7f]/.test(name)) return undefined;
+    }
+    if (slug) { const stable = this.getById(slug); if (stable) return stable; }
+    return this.bySlug.get(presetTokenSlug(['', slug, name] as unknown as RegExpMatchArray));
+  }
+
   inlinePresetIds(text: string): Set<string> {
     const ids = new Set<string>();
     if (!mayContainPresetToken(text)) return ids;
-    const lookup = this.bySlug;
     // A fresh matcher: `matchAll` copies the regex's `lastIndex`, so a shared
     // one that any other module has run `.test()` on would start past the
     // first token and report no chunks at all.
     for (const match of text.matchAll(presetTokenRegex())) {
-      const preset = lookup.get(presetTokenSlug(match));
+      const preset = this.presetForToken(match[1], match[2]);
       if (preset) ids.add(preset.id);
     }
     return ids;
@@ -376,6 +388,7 @@ class PromptPresetsStore {
    */
   get bySlug(): Map<string, PromptPreset> {
     const map = new Map<string, PromptPreset>();
+    for (const p of this.presets) map.set(p.id, p);
     for (const p of this.presets) {
       const slug = presetSlug(p.name);
       // First-write-wins on collisions — the renaming logic in importTxt and
@@ -392,9 +405,9 @@ class PromptPresetsStore {
     return map;
   }
 
-  /** Convenience getter: just the slug strings, for highlight rendering. */
+  /** Lookup keys used by the highlighter: stable IDs, ASCII slugs and exact names. */
   get slugs(): Set<string> {
-    return new Set(this.bySlug.keys());
+    return new Set([...this.bySlug.keys(), ...this.presets.map(preset => presetNameKey(preset.name))]);
   }
 
   /**
@@ -409,9 +422,8 @@ class PromptPresetsStore {
    */
   resolveInline(text: string, options: Pick<ResolvePromptPresetOptions, "fixedChoices"> = {}): string {
     if (!mayContainPresetToken(text)) return text;
-    const lookup = this.bySlug;
     let resolved = text.replace(presetTokenRegex(), (full: string, slug?: string, name?: string) => {
-      const preset = lookup.get(presetTokenSlug([full, slug, name] as unknown as RegExpMatchArray));
+      const preset = this.presetForToken(slug, name);
       if (!preset) return full;
       const fixedChoice = options.fixedChoices?.get(preset.id)?.trim();
       if (fixedChoice) return fixedChoice;

@@ -1,3 +1,7 @@
+import { locale } from '../stores/locale.svelte.js';
+import { customCatalog } from './custom-catalog.svelte.js';
+import { withContextOptions } from './catalog-expansion.js';
+import { contextualTag } from './context.js';
 import { CATEGORIES_DATA } from './categories.js';
 import { userScopedKey } from '../utils/ipc.js';
 import type { Category, SubCategory, Variant } from './types.js';
@@ -11,6 +15,7 @@ import {
   type StudioModel,
   type StudioSnapshotV1,
   type StudioState,
+  type StudioPromptGroup,
 } from './presets.js';
 
 export type Choice = { tag: string; name: string; category: string; weight: number };
@@ -35,6 +40,7 @@ class Studio {
   selected = $state<Choice[]>([]);
   pinned = $state<string[]>([]);
   banned = $state<string[]>([]);
+  groups = $state<StudioPromptGroup[]>([]);
   prefix = $state('');
   suffix = $state('');
   /** Literal output override; constructor choices remain intact. */
@@ -97,6 +103,7 @@ class Studio {
       prefix: this.prefix,
       suffix: this.suffix,
       rawPrompt: this.rawPrompt,
+      groups: this.groups.map(group => ({ ...group })),
       readable: this.readable,
       nai: this.nai,
       autoTags: this.autoTags,
@@ -114,6 +121,7 @@ class Studio {
     this.prefix = state.prefix;
     this.suffix = state.suffix;
     this.rawPrompt = state.rawPrompt;
+    this.groups = state.groups?.map(group => ({ ...group })) ?? [];
     this.readable = state.readable;
     this.nai = state.nai;
     if (state.autoTags !== undefined) this.autoTags = state.autoTags;
@@ -171,8 +179,23 @@ class Studio {
   redo() { const value = this.future.at(-1); if (!value) return; this.history = [...this.history, this.state()]; this.future = this.future.slice(0, -1); this.applyState(value); }
 
   // -------------------------------------------------------------- catalogue
-  get categories(): Category[] { return CATEGORIES_DATA; }
-  category(id: string): Category | undefined { return CATEGORIES_DATA.find((c) => c.id === id); }
+  get categories(): Category[] {
+    return CATEGORIES_DATA.map(category => ({ ...category, subs: category.subs.map(sub => {
+      const custom = customCatalog.entries.filter(entry => entry.subId === sub.id);
+      if (!custom.length || sub.type !== 'grid') return sub;
+      const variants = (sub.variants ?? []).map(variant => {
+        const entry = custom.find(entry => entry.tag === variant.tag);
+        // Keep built-in modifiers, quantities, nested parts and group references.
+        return entry ? { ...variant, name: entry.name } : variant;
+      });
+      const additions = custom.filter(entry => !variants.some(variant => variant.tag === entry.tag))
+        .map(entry => withContextOptions({ id: `custom:${entry.id}`, tag: entry.tag, name: entry.name }, sub.id));
+      return { ...sub, variants: [...variants, ...additions], groups: sub.groups?.length && additions.length
+        ? [...sub.groups, { name: locale.t('prompt_studio.custom_catalog'), variantIds: additions.map(entry => entry.id) }]
+        : sub.groups };
+    }) }));
+  }
+  category(id: string): Category | undefined { return this.categories.find((c) => c.id === id); }
   get currentCategory(): Category | undefined { return this.category(this.activeCategoryId) ?? CATEGORIES_DATA[0]; }
   get currentSub(): SubCategory | undefined {
     const cat = this.currentCategory;
@@ -181,7 +204,7 @@ class Studio {
   }
   /** Categories in scope: the whole figure, or wardrobe only. */
   scoped(wardrobe: boolean): Category[] {
-    return CATEGORIES_DATA.filter((c) => WARDROBE_CATEGORY_IDS.includes(c.id) === wardrobe);
+    return this.categories.filter((c) => WARDROBE_CATEGORY_IDS.includes(c.id) === wardrobe);
   }
   ensureActive(wardrobe = false) {
     const scope = this.scoped(wardrobe);
@@ -269,6 +292,14 @@ class Studio {
     this.details = this.validDetails(this.details, next);
     this.save();
   }
+  clearSub(id: string) {
+    const tags = this.selected.filter(value => value.category === id).map(value => value.tag);
+    if (!tags.length) return;
+    this.checkpoint();
+    this.selected = this.selected.filter(value => value.category !== id);
+    this.details = this.validDetails(this.details, this.selected);
+    this.save();
+  }
   chooseVariant(sub: SubCategory, variant: Variant) {
     if (!variant.tag) {
       const current = this.chosen(sub.id);
@@ -316,6 +347,12 @@ class Studio {
     if (!names.length) return;
     this.commit(names.map((name) => ({ tag: name, name, category: 'source:style' })), false);
     this.selected = this.selected.map((v) => names.includes(v.tag) ? { ...v, weight } : v);
+    this.save();
+  }
+
+  setOption(option: 'readable' | 'nai' | 'autoTags' | 'clothed', value: boolean) {
+    this.checkpoint();
+    this[option] = value;
     this.save();
   }
 
@@ -484,16 +521,51 @@ class Studio {
     return out;
   }
   format(value: Choice): string {
-    const tag = this.readable ? value.tag.replaceAll('_', ' ') : value.tag;
+    let detail = this.details[value.tag];
+    if (value.category === 'top_type') {
+      const material = this.selected.find(item => item.category === 'top_material');
+      if (material) detail = { ...emptyDetail(), ...detail, parts: { Material: material.tag, ...detail?.parts } };
+    }
+    if (detail) detail = {
+      mods: detail.mods.filter(tag => !this.banned.includes(tag)),
+      secondary: detail.secondary && !this.banned.includes(detail.secondary) ? detail.secondary : undefined,
+      quantity: detail.quantity && !this.banned.includes(detail.quantity) ? detail.quantity : undefined,
+      parts: Object.fromEntries(Object.entries(detail.parts).filter(([, tag]) => !this.banned.includes(tag))),
+    };
+    const tag = this.readable ? contextualTag(value, detail) : value.tag;
     if (value.weight === 1) return tag;
     return this.nai ? `${value.weight.toFixed(2)}::${tag}::` : `(${tag}:${value.weight.toFixed(2)})`;
   }
   get constructorPrompt(): string {
-    return [this.prefix.trim(), this.expanded().map(({ choice }) => this.format(choice)).join(', '), this.suffix.trim()]
+    return [this.prefix.trim(), this.expanded().filter(({ choice }) => !this.readable || ((choice.category !== 'detail' || ['clothed', 'fashion'].includes(choice.tag)) && !(choice.category === 'top_material' && this.selected.some(item => item.category === 'top_type')))).map(({ choice }) => this.format(choice)).join(', '), this.suffix.trim()]
       .filter(Boolean)
       .join(', ');
   }
-  get prompt(): string { return this.rawPrompt ?? this.constructorPrompt; }
+  get basePrompt(): string { return this.rawPrompt ?? this.constructorPrompt; }
+  get prompt(): string { return [this.basePrompt, ...this.groups.filter(group => group.enabled).map(group => group.content)].map(text => text.trim()).filter(Boolean).join(', '); }
+  importGroups(blocks: { name: string; content: string }[]) {
+    this.checkpoint();
+    this.groups = [...this.groups, ...blocks.filter(block => block.content.trim()).map(block => ({ id: crypto.randomUUID(), name: block.name, content: block.content, enabled: true }))];
+    this.save();
+  }
+  addGroup(name: string) {
+    this.checkpoint();
+    const group = { id: crypto.randomUUID(), name, content: '', enabled: true };
+    this.groups = [...this.groups, group]; this.save(); return group.id;
+  }
+  updateGroup(id: string, patch: Partial<Omit<StudioPromptGroup, 'id'>>) {
+    this.checkpoint();
+    this.groups = this.groups.map(group => group.id === id ? { ...group, ...patch } : group); this.save();
+  }
+  removeGroup(id: string) { this.checkpoint(); this.groups = this.groups.filter(group => group.id !== id); this.save(); }
+  moveGroup(id: string, direction: number) {
+    const index = this.groups.findIndex(group => group.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= this.groups.length) return;
+    this.checkpoint();
+    const next = [...this.groups]; [next[index], next[target]] = [next[target], next[index]];
+    this.groups = next; this.save();
+  }
   get count(): number { return this.expanded().length; }
   get autoCount(): number { return this.expanded().filter(({ choice }) => this.isDerived(choice.category)).length; }
 }

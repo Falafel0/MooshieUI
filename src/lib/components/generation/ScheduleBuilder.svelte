@@ -2,9 +2,13 @@
   import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
 
-  type Mode = "fromto" | "from" | "to" | "range";
+  type Mode = "fromto" | "from" | "to" | "range" | "alternate";
 
   let mode = $state<Mode>("fromto");
+
+  let alternatives = $state("red|blue");
+  const branches = $derived(alternatives.split('|').map(value => value.trim()));
+  const validAlternation = $derived(branches.length >= 2 && branches.every(value => value && !/[\[\]\n]/.test(value)));
 
   // Swap (SwarmUI fromto) inputs
   let swapPivot = $state(0.5);
@@ -46,6 +50,7 @@
   const swapSeparator = $derived<"||" | "|" | ",">(swapSeparatorOverride ?? autoSeparator);
 
   const output = $derived.by(() => {
+    if (mode === "alternate") return validAlternation ? `[${branches.join("|")}]` : "";
     if (mode === "fromto") {
       const before = swapBefore.trim();
       const after = swapAfter.trim();
@@ -66,6 +71,7 @@
   });
 
   const description = $derived.by(() => {
+    if (mode === "alternate") return locale.t("prompt_studio.alternation_title");
     if (mode === "fromto") {
       const pivot = String(Math.round(clamp01(swapPivot) * 100));
       return locale.t("schedule.desc_fromto", { pivot });
@@ -107,6 +113,7 @@
     const next = `${trimmed}${sep}${output}`;
     if (target === "positive") generation.positivePrompt = next;
     else generation.negativePrompt = next;
+    void generation.saveSettings();
   }
 </script>
 
@@ -122,6 +129,7 @@
       { id: "fromto", label: locale.t("schedule.mode_swap"), hint: locale.t("schedule.mode_swap_hint") },
       { id: "from", label: locale.t("schedule.mode_from"), hint: locale.t("schedule.mode_from_hint") },
       { id: "to", label: locale.t("schedule.mode_to"), hint: locale.t("schedule.mode_to_hint") },
+      { id: "alternate", label: locale.t("prompt_studio.alternation_title"), hint: "[A|B]" },
       { id: "range", label: locale.t("schedule.mode_range"), hint: locale.t("schedule.mode_range_hint") },
     ] as m (m.id)}
       <button
@@ -186,6 +194,12 @@
           </select>
         </label>
       </div>
+    </section>
+  {:else if mode === "alternate"}
+    <section class="mb-3 space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
+      <label for="sch-alternatives" class="block text-xs text-neutral-400">{locale.t("prompt_studio.alternation_input")}</label>
+      <input id="sch-alternatives" bind:value={alternatives} placeholder="red|blue|green" class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-2 text-sm text-neutral-100" />
+      <p class="text-xs leading-relaxed text-neutral-400">{locale.t("prompt_studio.alternation_example_hint")}</p>
     </section>
   {:else}
     <section class="mb-3 space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
@@ -269,6 +283,7 @@
   <details class="mt-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-3 text-[11px] text-neutral-400">
     <summary class="cursor-pointer text-neutral-300">{locale.t("schedule.syntax_reference")}</summary>
     <dl class="mt-2 space-y-1.5 font-mono text-[11px]">
+      <div><dt class="text-indigo-300">[A|B|C]</dt><dd>{locale.t("prompt_studio.alternation_example_hint")}</dd></div>
       <div>
         <dt class="text-indigo-300">&lt;fromto[N]:A || B&gt;</dt>
         <dd class="text-neutral-400">{locale.t("schedule.syntax_fromto")}</dd>

@@ -50,7 +50,7 @@ async function store(value: RecordValue): Promise<void> {
 }
 async function slot() {
   if (active >= 2) {
-    if (queue.length >= 8) throw new Error('Preview queue full');
+    if (queue.length >= 64) throw new Error('Preview queue full');
     await new Promise<void>(resolve => queue.push(resolve));
   } else active++;
 }

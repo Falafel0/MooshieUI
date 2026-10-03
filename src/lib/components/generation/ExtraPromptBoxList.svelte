@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PromptBlockImport from "./PromptBlockImport.svelte";
   import ExtraPromptBoxItem from "./ExtraPromptBoxItem.svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -8,6 +9,7 @@
   }
 
   let { side }: Props = $props();
+  let importing = $state(false);
 
   let boxes = $derived(
     side === "positive" ? generation.extraPositiveBoxes : generation.extraNegativeBoxes,
@@ -37,3 +39,6 @@
   <span class="text-sm leading-none">+</span>
   {locale.t("generation.prompts.extra_box_add")}
 </button>
+
+<button type="button" class="touch-target mt-2 w-full rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-400" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
+{#if importing}<PromptBlockImport onClose={() => importing = false} onImport={blocks => { generation.importPromptBoxes(side, blocks); importing = false; }} />{/if}

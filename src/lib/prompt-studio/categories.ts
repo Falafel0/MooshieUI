@@ -1,7 +1,8 @@
+import { expandCatalog } from './catalog-expansion.js';
 import type { Category } from './types.js';
 import { EXTRA_CATEGORIES } from './extra-categories.js';
 
-export const CATEGORIES_DATA: Category[] = [
+export const CATEGORIES_DATA: Category[] = expandCatalog([
   // 1. БАЗА (Identity)
   {
     id: 'base',
@@ -427,5 +428,5 @@ export const CATEGORIES_DATA: Category[] = [
     ]
   },
   ...EXTRA_CATEGORIES,
-];
+]);
 CATEGORIES_DATA.sort((a, b) => a.order - b.order);
