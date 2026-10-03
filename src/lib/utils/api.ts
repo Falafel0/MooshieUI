@@ -1,6 +1,7 @@
 import { getAuthToken, ipcInvoke, ipcListen, isBrowserMode, isTauri } from "./ipc.js";
 import { getLogSnapshot } from "./log-buffer.js";
 import type { ExportFormat } from "./videoExport.js";
+import type { ChatMessage } from "./enhancerSession.js";
 import { locale } from "../stores/locale.svelte.js";
 import type { CoverTranscriptionStatus, MusicCapabilities, MusicJob, MusicParams, MusicStatus } from "../types/music.js";
 import type { MusicTranscript } from "./musicReview.js";
@@ -1615,16 +1616,18 @@ export async function enhancePrompt(
   prompt: string,
   family: string,
   opts?: PromptAssistantOpts,
+  history: ChatMessage[] = [],
 ): Promise<string> {
-  return runPromptAssistant("enhance_prompt", { prompt, family, opts });
+  return runPromptAssistant("enhance_prompt", { prompt, family, opts, history });
 }
 
 export async function composePrompt(
   description: string,
   family: string,
   opts?: PromptAssistantOpts,
+  history: ChatMessage[] = [],
 ): Promise<string> {
-  return runPromptAssistant("compose_prompt", { description, family, opts });
+  return runPromptAssistant("compose_prompt", { description, family, opts, history });
 }
 
 /**
@@ -1712,6 +1715,7 @@ export async function callExternalLlm(
   maxTokens?: number,
   imageFilename?: string | null,
   imageData?: string[] | null,
+  history: ChatMessage[] = [],
 ): Promise<string> {
   return runPromptAssistant("call_external_llm", {
     system,
@@ -1719,6 +1723,7 @@ export async function callExternalLlm(
     maxTokens,
     imageFilename: imageFilename || undefined,
     imageData: imageData && imageData.length > 0 ? imageData : undefined,
+    history,
   });
 }
 

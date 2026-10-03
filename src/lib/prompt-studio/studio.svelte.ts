@@ -259,11 +259,11 @@ class Studio {
     delete this.details[tag];
     this.save();
   }
-  updateCatalogChoice(oldTag: string, entry: { tag: string; name: string; subId: string }) {
-    if (!this.isChosen(oldTag)) return;
+  updateCatalogChoice(oldTag: string, entry: { tag: string; name: string; subId: string }, oldSubId: string) {
+    const source = this.selected.find(item => item.tag === oldTag && item.category === oldSubId);
+    if (!source) return;
     this.checkpoint();
-    const source = this.selected.find(item => item.tag === oldTag)!;
-    this.selected = [...this.selected.filter(item => item.tag !== oldTag && item.tag !== entry.tag), { ...source, tag: entry.tag, name: entry.name, category: entry.subId }];
+    this.selected = this.selected.filter(item => item === source || item.tag !== entry.tag).map(item => item === source ? { ...source, tag: entry.tag, name: entry.name, category: entry.subId } : item);
     const details = { ...this.details }; const detail = details[oldTag]; delete details[oldTag];
     if (detail) details[entry.tag] = detail;
     this.details = details; this.pinned = this.pinned.map(tag => tag === oldTag ? entry.tag : tag); this.save();

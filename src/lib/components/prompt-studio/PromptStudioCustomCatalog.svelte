@@ -31,7 +31,7 @@
     const row = { id: previous?.id, name: name.trim() || tag.trim(), tag: tag.trim(), subId: previous?.subId ?? studio.activeSubId, description, preview, aliases: parts(aliases), contextualTags: parts(context) };
     if (!customCatalog.add(row)) { error = locale.t('prompt_studio.import_failed'); return; }
     const saved = customCatalog.entries.find(item => item.tag === row.tag && item.subId === row.subId);
-    if (previous && saved) studio.updateCatalogChoice(previous.tag, saved);
+    if (previous && saved) studio.updateCatalogChoice(previous.tag, saved, previous.subId);
     studio.catalogEntryId = saved?.id ?? '';
   }
   function remove() { if (entry) customCatalog.remove(entry.id); studio.catalogEntryId = ''; }
