@@ -6,18 +6,21 @@
   import { sourcePreview } from '../../prompt-studio/preview-cache.js';
   import PromptStudioCachedImage from './PromptStudioCachedImage.svelte';
   import type { DanbooruPost } from '../../types/index.js';
+  import { onDestroy } from 'svelte';
   let entryId = $state('');
   let name = $state('');
   let tag = $state('');
   let preview = $state('');
   let examples = $state<DanbooruPost[]>([]);
   let busy = $state(false);
-  let ready = $state(false);
-  $effect(() => { void customCatalog.load().then(() => { ready = true; }); });
+  const ready = $derived(customCatalog.ready);
+  $effect(() => { void customCatalog.load(); });
   let error = $state('');
   let request = 0;
   let input: HTMLInputElement;
-  const entries = $derived(customCatalog.entries.filter(entry => entry.subId === studio.activeSubId));
+  let query = $state('');
+  const entries = $derived(customCatalog.entries.filter(entry => entry.subId === studio.activeSubId && `${entry.name} ${entry.tag}`.toLowerCase().replaceAll('_', ' ').includes(query.trim().toLowerCase().replaceAll('_', ' '))));
+  onDestroy(() => { request++; });
   $effect(() => { studio.activeSubId; request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; error = ''; busy = false; });
   $effect(() => { tag; request++; examples = []; busy = false; error = ''; });
   async function upload(event: Event) {
@@ -44,8 +47,14 @@
     const target = event.currentTarget as HTMLInputElement; const file = target.files?.[0]; target.value = '';
     if (!file) return;
     if (file.size > 32 * 1024 * 1024) { error = locale.t('prompt_studio.import_failed'); return; }
-    try { if (!customCatalog.import(JSON.parse(await file.text()))) throw new Error(); error = ''; }
-    catch { error = locale.t('prompt_studio.import_failed'); }
+    const id = ++request; busy = true; error = '';
+    try {
+      const data = JSON.parse(await file.text());
+      if (id !== request) return;
+      if (!customCatalog.import(data)) throw new Error();
+    }
+    catch { if (id === request) error = locale.t('prompt_studio.import_failed'); }
+    finally { if (id === request) busy = false; }
   }
 </script>
 <details class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
@@ -73,16 +82,19 @@
       </div>
     {/if}
     <div class="flex gap-2">
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" disabled={!ready} onclick={() => customCatalog.export()}>{locale.t('prompt_studio.export')}</button>
+      <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" disabled={!ready || busy} onclick={() => customCatalog.export()}>{locale.t('prompt_studio.export')}</button>
       <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" disabled={!ready || busy} onclick={() => input.click()}>{locale.t('prompt_studio.import')}</button>
       <input type="file" class="hidden" accept="application/json,.json" bind:this={input} onchange={importFile} />
     </div>
+    {#if !ready && customCatalog.storageError}<button type="button" class="touch-target self-start rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" onclick={() => void customCatalog.load()}>{locale.t('prompt_studio.retry')}</button>{/if}
+    <input type="search" aria-label={locale.t('prompt_studio.search')} placeholder={locale.t('prompt_studio.search')} bind:value={query} class="rounded border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-200" />
+    {#if ready && query.trim() && !entries.length}<p role="status" class="text-xs text-neutral-400">{locale.t('prompt_studio.nothing_found')}</p>{/if}
     {#each entries as entry (entry.id)}
       <div class="flex min-w-0 items-center gap-3 rounded border border-neutral-800 p-2">
         {#if entry.preview}<img src={entry.preview} alt={entry.name} class="h-14 w-14 shrink-0 rounded object-contain" />{/if}
         <button type="button" class="touch-target min-w-0 flex-1 break-words text-left text-xs text-neutral-200" onclick={() => studio.choose(entry.tag, entry.name, entry.subId, studio.currentSub?.mode === 'single')}>{entry.name}<span class="block text-[10px] text-neutral-500">{entry.tag}</span></button>
-        <button type="button" disabled={busy} class="touch-target text-xs text-neutral-400" onclick={() => { request++; entryId = entry.id; name = entry.name; tag = entry.tag; preview = entry.preview ?? ''; }}>{locale.t('common.edit')}</button>
-        <button type="button" disabled={busy} class="touch-target text-xs text-neutral-500" onclick={() => { customCatalog.remove(entry.id); if (entryId === entry.id) { request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; } }}>{locale.t('prompt_studio.remove')}</button>
+        <button type="button" disabled={!ready || busy} class="touch-target text-xs text-neutral-400" onclick={() => { request++; entryId = entry.id; name = entry.name; tag = entry.tag; preview = entry.preview ?? ''; examples = []; error = ''; }}>{locale.t('common.edit')}</button>
+        <button type="button" disabled={!ready || busy} class="touch-target text-xs text-neutral-500" onclick={() => { customCatalog.remove(entry.id); if (entryId === entry.id) { request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; } }}>{locale.t('prompt_studio.remove')}</button>
       </div>
     {/each}
   </div>

@@ -1,6 +1,9 @@
 name: Build & Release
 
 on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
   push:
     tags:
       - 'v*'
@@ -21,13 +24,33 @@ permissions:
 # as well, because it asserts the exact bundle set it expects to find.
 jobs:
   build:
+    # Execute only the already-merged commit from this fork's release branch.
+    # This event also permits packaging after a checkless [skip ci] release PR.
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
     runs-on: windows-latest
+    outputs:
+      release_tag: ${{ steps.release-version.outputs.tag }}
+      release_ref: ${{ steps.release-version.outputs.ref }}
 
     steps:
+      - name: Resolve release version and commit
+        id: release-version
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ github.event.inputs.tag || github.event.pull_request.head.ref || github.ref_name }}
+          SOURCE_REF: ${{ github.event.inputs.tag || github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          printf 'tag=%s\n' "${SOURCE_TAG#release/}" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n' "$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ steps.release-version.outputs.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -38,7 +61,7 @@ jobs:
       - name: Verify release versions
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ steps.release-version.outputs.tag }}
         run: node scripts/verify-release-version.mjs "$RELEASE_TAG"
 
       - name: Setup Rust
@@ -85,7 +108,7 @@ jobs:
       - name: Checkout release scripts and notes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ needs.build.outputs.release_ref }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -96,7 +119,7 @@ jobs:
 
       - name: Collect installers, updater manifest and checksums
         env:
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG: ${{ needs.build.outputs.release_tag }}
           REPOSITORY: ${{ github.repository }}
         run: |
           python3 scripts/release_artifacts.py \
@@ -105,7 +128,8 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG: ${{ needs.build.outputs.release_tag }}
+          RELEASE_TARGET: ${{ needs.build.outputs.release_ref }}
         run: |
           # Build release body: installer blurb + changelog from RELEASE_NOTES.md
           printf '%s\n' \
@@ -149,6 +173,7 @@ jobs:
           else
             gh release create "${TAG}" \
               --repo "${{ github.repository }}" \
+              --target "$RELEASE_TARGET" \
               --title "MooshieUI Fork ${TAG}" \
               --latest \
               --notes-file /tmp/release-body.md \
