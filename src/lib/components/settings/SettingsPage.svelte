@@ -141,8 +141,6 @@
   let showThemeCreatorModal = $state(false);
   let draftEditingProfileId = $state<string | null>(null);
   let settingsLoadError = $state<string | null>(null);
-  let booruDanbooruLogin = $state("");
-  let booruDanbooruApiKey = $state("");
   let booruGelbooruUserId = $state("");
   let booruGelbooruApiKey = $state("");
   let booruE621Login = $state("");
@@ -1172,7 +1170,7 @@
     { key: "interrogator", labelKey: "settings.sections.interrogator", keywords: "interrogate tags tagger threshold confidence onnx model wd eva02 vit swinv2 convnext download delete disk space" },
     { key: "prompt_assistant", labelKey: "settings.sections.prompt_assistant", keywords: "llm prompt enhance compose model gguf ai assistant" },
     { key: "civitai", labelKey: "settings.sections.civitai", keywords: "civitai api key metadata model hub image fetch download authentication" },
-    { key: "booru", labelKey: "settings.sections.booru", keywords: "booru danbooru gelbooru e621 tags api key credentials search groups" },
+    { key: "booru", labelKey: "settings.sections.booru", keywords: "booru gelbooru e621 api key credentials" },
     { key: "projects", labelKey: "settings.sections.projects", keywords: "projects project workspace snapshot named save load switch local state presets history" },
     { key: "novelai", labelKey: "settings.sections.novelai", keywords: "novelai nai api key anlas opus subscription cloud remote generation persistent token allowance balance usage show" },
     { key: "queue", labelKey: "settings.sections.queue", keywords: "queue position pending running cancel clear jobs users order wait" },
@@ -1348,8 +1346,6 @@
     booruCredentialsSaved = false;
     booruCredentialsError = null;
     const values = {
-      danbooru_login: booruDanbooruLogin.trim() || undefined,
-      danbooru_api_key: booruDanbooruApiKey.trim() || undefined,
       gelbooru_user_id: booruGelbooruUserId.trim() || undefined,
       gelbooru_api_key: booruGelbooruApiKey.trim() || undefined,
       e621_login: booruE621Login.trim() || undefined,
@@ -1359,7 +1355,7 @@
       await updateBooruCredentials(values, clear);
       if (config) {
         for (const key of [
-          "danbooru_login", "danbooru_api_key", "gelbooru_user_id",
+          "gelbooru_user_id",
           "gelbooru_api_key", "e621_login", "e621_api_key",
         ] as const) {
           const flag = `${key}_configured` as keyof AppConfig;
@@ -1368,8 +1364,6 @@
           Reflect.set(config, flag, clear ? false : wasConfigured);
         }
       }
-      booruDanbooruLogin = "";
-      booruDanbooruApiKey = "";
       booruGelbooruUserId = "";
       booruGelbooruApiKey = "";
       booruE621Login = "";
@@ -4310,10 +4304,7 @@
             </span>
           </div>
           <div class="px-5 pb-5 space-y-4">
-            <p class="text-xs text-neutral-500">{locale.t('settings.booru.desc')}</p>
             {#each [
-              { id: 'danbooru-login', key: 'danbooru_login', label: 'settings.booru.danbooru_login', value: booruDanbooruLogin, configured: config.danbooru_login_configured || !!config.danbooru_login, type: 'text' },
-              { id: 'danbooru-api-key', key: 'danbooru_api_key', label: 'settings.booru.danbooru_api_key', value: booruDanbooruApiKey, configured: config.danbooru_api_key_configured || !!config.danbooru_api_key, type: 'password' },
               { id: 'gelbooru-user-id', key: 'gelbooru_user_id', label: 'settings.booru.gelbooru_user_id', value: booruGelbooruUserId, configured: config.gelbooru_user_id_configured || !!config.gelbooru_user_id, type: 'text' },
               { id: 'gelbooru-api-key', key: 'gelbooru_api_key', label: 'settings.booru.gelbooru_api_key', value: booruGelbooruApiKey, configured: config.gelbooru_api_key_configured || !!config.gelbooru_api_key, type: 'password' },
               { id: 'e621-login', key: 'e621_login', label: 'settings.booru.e621_login', value: booruE621Login, configured: config.e621_login_configured || !!config.e621_login, type: 'text' },
@@ -4329,8 +4320,6 @@
                   oninput={(event) => {
                     const value = (event.currentTarget as HTMLInputElement).value;
                     switch (field.key) {
-                      case 'danbooru_login': booruDanbooruLogin = value; break;
-                      case 'danbooru_api_key': booruDanbooruApiKey = value; break;
                       case 'gelbooru_user_id': booruGelbooruUserId = value; break;
                       case 'gelbooru_api_key': booruGelbooruApiKey = value; break;
                       case 'e621_login': booruE621Login = value; break;
@@ -4346,7 +4335,6 @@
             <div class="flex flex-wrap gap-2">
               <button
                 class="px-3 py-2 rounded-lg text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
-                disabled={booruCredentialsSaving || !(booruDanbooruLogin.trim() || booruDanbooruApiKey.trim() || booruGelbooruUserId.trim() || booruGelbooruApiKey.trim() || booruE621Login.trim() || booruE621ApiKey.trim())}
                 onclick={() => { void saveBooruCredentials(); }}
               >{locale.t('settings.booru.save')}</button>
               {#if config.danbooru_login_configured || config.danbooru_api_key_configured || config.gelbooru_user_id_configured || config.gelbooru_api_key_configured || config.e621_login_configured || config.e621_api_key_configured || config.danbooru_login || config.danbooru_api_key || config.gelbooru_user_id || config.gelbooru_api_key || config.e621_login || config.e621_api_key}

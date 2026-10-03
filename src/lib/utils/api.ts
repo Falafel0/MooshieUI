@@ -1176,24 +1176,6 @@ export async function checkNodeAvailable(
   return ipcInvoke("check_node_available", { nodeClass, requiredInputs });
 }
 
-export async function searchDanbooru(
-  tags: string,
-  page = 1,
-  limit = 24,
-  safeMode = true,
-  source = "danbooru",
-): Promise<import("../types/index.js").DanbooruPost[]> {
-  return ipcInvoke("danbooru_search", { tags, page, limit, safeMode, source });
-}
-
-export async function loadAnimaCatalog(catalog: string): Promise<unknown> {
-  return ipcInvoke("anima_catalog", { catalog });
-}
-
-export async function loadAnimaSourceImage(url: string): Promise<number[]> {
-  return ipcInvoke("anima_source_image", { url });
-}
-
 export async function isCustomNodeInstalled(nodeName: string): Promise<boolean> {
   return ipcInvoke("is_custom_node_installed", { nodeName });
 }

@@ -1,23 +1,7 @@
 import { userScopedKey } from '../utils/ipc.js';
-export type CustomCatalogEntry = { id: string; name: string; tag: string; subId: string; preview?: string };
+import { normalizeCatalog, normalizeEntries, type CatalogCategory, type CustomCatalogEntry } from './catalog-model.js';
+export type { CustomCatalogEntry } from './catalog-model.js';
 const scopedKey = () => userScopedKey('mooshie.studio.custom-catalog.v1');
-function normalized(value: unknown): CustomCatalogEntry[] {
-  if (!Array.isArray(value)) return [];
-  const rows = value.flatMap((row: any) => {
-    if (!row || typeof row.tag !== 'string' || !row.tag.trim() || typeof row.subId !== 'string' || !row.subId.trim()) return [];
-    return [{ id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : crypto.randomUUID(), tag: row.tag.trim(), name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : row.tag.trim().replaceAll('_', ' '), subId: row.subId.trim(), preview: typeof row.preview === 'string' && row.preview.length <= 400000 && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(row.preview) ? row.preview : undefined }];
-  });
-  const unique = new Map<string, CustomCatalogEntry>();
-  const ids = new Set<string>();
-  for (const row of rows) {
-    const key = JSON.stringify([row.subId, row.tag]);
-    const existing = unique.get(key);
-    const id = existing?.id ?? (ids.has(row.id) ? crypto.randomUUID() : row.id);
-    ids.add(id);
-    unique.set(key, { ...row, id, preview: row.preview ?? existing?.preview });
-  }
-  return [...unique.values()];
-}
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('mooshie-studio-custom-catalog', 1);
@@ -27,9 +11,11 @@ async function database(): Promise<IDBDatabase> {
   });
 }
 class CustomCatalog {
+  categories = $state<CatalogCategory[]>([]);
   entries = $state<CustomCatalogEntry[]>([]);
   storageError = $state(false);
   ready = $state(false);
+  get scope() { return scopedKey(); }
   private loadedKey = '';
   private revision = 0;
   private saveQueue = Promise.resolve();
@@ -39,7 +25,7 @@ class CustomCatalog {
     if (this.loading?.key === key) return this.loading.promise;
     if (this.ready && this.loadedKey === key) return Promise.resolve();
     const revision = ++this.revision;
-    this.ready = false; this.loadedKey = ''; this.entries = []; this.storageError = false;
+    this.ready = false; this.loadedKey = ''; this.entries = []; this.categories = []; this.storageError = false;
     const promise = this.loadEntries(key, revision);
     this.loading = { key, promise };
     void promise.finally(() => { if (this.loading?.promise === promise) this.loading = undefined; });
@@ -57,15 +43,17 @@ class CustomCatalog {
         finally { db.close(); }
       }
       if (revision === this.revision && key === scopedKey()) {
-        this.entries = normalized(rows); this.loadedKey = key; this.ready = true;
+        const data = normalizeCatalog(rows);
+        this.categories = data.categories; this.entries = data.entries; this.loadedKey = key; this.ready = true;
       }
     } catch (error) { if (revision === this.revision && key === scopedKey()) this.storageError = true; console.warn('Custom catalogue load:', error); }
   }
   add(entry: Omit<CustomCatalogEntry, 'id'> & { id?: string }) {
-    if (!this.ready || this.loadedKey !== scopedKey()) return false;
+    if (!this.ready || this.loadedKey !== scopedKey() || !this.hasBucket(entry.subId)) return false;
     const existing = this.entries.find(row => entry.id && row.id === entry.id)
       ?? this.entries.find(row => row.tag === entry.tag.trim() && row.subId === entry.subId.trim());
-    const rows = normalized([{ ...existing, ...entry, id: existing?.id ?? crypto.randomUUID() }]);
+    const rows = normalizeEntries([{ ...existing, ...entry, id: existing?.id ?? crypto.randomUUID(), preview: entry.preview === undefined ? existing?.preview : entry.preview }]);
+    if (entry.preview === '') rows.forEach(row => { row.preview = undefined; });
     if (!rows.length) return false;
     this.entries = [...this.entries.filter(row => row.id !== rows[0].id && !(row.tag === rows[0].tag && row.subId === rows[0].subId)), ...rows]; this.save();
     return true;
@@ -75,7 +63,7 @@ class CustomCatalog {
     this.entries = this.entries.filter(row => row.id !== id); this.save();
   }
   private save() {
-    const key = this.loadedKey; const rows = JSON.parse(JSON.stringify(this.entries));
+    const key = this.loadedKey; const rows = JSON.parse(JSON.stringify({ categories: this.categories, entries: this.entries }));
     this.saveQueue = this.saveQueue.then(async () => {
       try {
         if (typeof indexedDB === 'undefined') localStorage.setItem(key, JSON.stringify(rows));
@@ -88,32 +76,126 @@ class CustomCatalog {
       } catch (error) { if (key === this.loadedKey) this.storageError = true; console.warn('Custom catalogue save:', error); }
     });
   }
-  export() {
+  export(categoryId?: string) {
     if (!this.ready || this.loadedKey !== scopedKey()) return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: 'mooshie-custom-catalog', version: 1, entries: this.entries }, null, 2)], { type: 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'prompt-studio-custom-catalog.json'; link.click(); URL.revokeObjectURL(url);
+    const categories = categoryId ? this.categories.filter(category => category.id === categoryId) : this.categories;
+    const buckets = new Set(categories.flatMap(category => [category.id, ...category.subs.map(sub => sub.id)]));
+    const entries = this.entries.filter(entry => buckets.has(entry.subId));
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: 'mooshie-tag-pack', version: 1, categories, entries }, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'prompt-studio-tag-pack.json'; link.click(); URL.revokeObjectURL(url);
+  }
+  hasBucket(id: string) { return this.categories.some(category => category.id === id || category.subs.some(sub => sub.id === id)); }
+  private writable() { return this.ready && this.loadedKey === scopedKey(); }
+  addCategory(name: string): string | undefined {
+    if (!this.writable() || !name.trim()) return;
+    const id = crypto.randomUUID();
+    this.categories = [...this.categories, { id, name: name.trim(), icon: 'sparkles', subs: [] }];
+    this.save(); return id;
+  }
+  addSub(categoryId: string, name: string): string | undefined {
+    if (!this.writable() || !name.trim() || !this.categories.some(category => category.id === categoryId)) return;
+    const id = crypto.randomUUID();
+    this.categories = this.categories.map(category => category.id === categoryId ? { ...category, subs: [...category.subs, { id, name: name.trim() }] } : category);
+    this.save(); return id;
+  }
+  rename(id: string, name: string) {
+    if (!this.writable() || !name.trim()) return;
+    this.categories = this.categories.map(category => ({ ...category, name: category.id === id ? name.trim() : category.name, subs: category.subs.map(sub => sub.id === id ? { ...sub, name: name.trim() } : sub) }));
+    this.save();
+  }
+  removeCategory(id: string) {
+    if (!this.writable()) return;
+    const category = this.categories.find(category => category.id === id);
+    if (!category) return;
+    const buckets = new Set([id, ...category.subs.map(sub => sub.id)]);
+    this.entries = this.entries.filter(entry => !buckets.has(entry.subId));
+    this.categories = this.categories.filter(category => category.id !== id);
+    this.save();
+  }
+  removeSub(id: string) {
+    if (!this.writable()) return;
+    const parent = this.categories.find(category => category.subs.some(sub => sub.id === id));
+    if (!parent) return;
+    this.categories = this.categories.map(category => category.id === parent.id ? { ...category, subs: category.subs.filter(sub => sub.id !== id) } : category);
+    this.entries = normalizeEntries(this.entries.map(entry => entry.subId === id ? { ...entry, subId: parent.id } : entry));
+    this.save();
+  }
+  move(id: string, direction: number) {
+    if (!this.writable()) return;
+    const parent = this.categories.find(category => category.subs.some(sub => sub.id === id));
+    const items = [...(parent ? parent.subs : this.categories)];
+    const index = items.findIndex(item => item.id === id), target = index + direction;
+    if (index < 0 || target < 0 || target >= items.length) return;
+    [items[index], items[target]] = [items[target], items[index]];
+    if (parent) this.categories = this.categories.map(category => category.id === parent.id ? { ...category, subs: items as CatalogCategory['subs'] } : category);
+    else this.categories = items as CatalogCategory[];
+    this.save();
+  }
+  duplicate(id: string): string | undefined {
+    const entry = this.entries.find(entry => entry.id === id);
+    if (!this.writable() || !entry) return;
+    let number = 2;
+    let tag = `${entry.tag} (${number})`;
+    while (this.entries.some(row => row.subId === entry.subId && row.tag === tag)) tag = `${entry.tag} (${++number})`;
+    const newId = crypto.randomUUID();
+    this.add({ ...entry, id: newId, tag, name: `${entry.name} (${number})` });
+    return this.entries.find(row => row.subId === entry.subId && row.tag === tag)?.id;
   }
   import(value: unknown): boolean {
-    if (!this.ready || this.loadedKey !== scopedKey()) return false;
-    const data = value as { kind?: string; version?: number; entries?: unknown } | null;
-    if (!data || data.kind !== 'mooshie-custom-catalog' || data.version !== 1 || !Array.isArray(data.entries)) return false;
-    const merged = new Map(this.entries.map(entry => [JSON.stringify([entry.subId, entry.tag]), entry]));
-    const imported = normalized(data.entries);
-    if (data.entries.length && !imported.length) return false;
-    const usedIds = new Set(this.entries.map(entry => entry.id));
-    for (const row of imported) {
-      const key = JSON.stringify([row.subId, row.tag]);
-      const existing = merged.get(key);
-      const id = existing?.id ?? (usedIds.has(row.id) ? crypto.randomUUID() : row.id);
-      usedIds.add(id);
-      merged.set(key, { ...row, id, preview: row.preview ?? existing?.preview });
+    if (!this.writable()) return false;
+    const data = value as { kind?: string; version?: number; entries?: unknown; categories?: unknown } | null;
+    if (!data || !Array.isArray(data.entries)) return false;
+    if (!(data.kind === 'mooshie-tag-pack' && data.version === 1 && Array.isArray(data.categories)) && !(data.kind === 'mooshie-custom-catalog' && [1, 2].includes(data.version ?? 0))) return false;
+    if (data.kind === 'mooshie-tag-pack') {
+      const declared = new Set<string>();
+      for (const category of data.categories as any[]) {
+        if (!category || typeof category.id !== 'string' || !category.id.trim() || typeof category.name !== 'string' || !category.name.trim() || !Array.isArray(category.subs) || declared.has(category.id.trim())) return false;
+        declared.add(category.id.trim());
+      }
+      for (const category of data.categories as any[]) for (const sub of category.subs) {
+        if (!sub || typeof sub.id !== 'string' || !sub.id.trim() || typeof sub.name !== 'string' || !sub.name.trim() || declared.has(sub.id.trim())) return false;
+        declared.add(sub.id.trim());
+      }
+      if (data.entries.some(row => !row || typeof row.tag !== 'string' || !row.tag.trim() || typeof row.subId !== 'string' || !declared.has(row.subId.trim()))) return false;
     }
-    this.entries = [...merged.values()]; this.save(); return true;
+    const imported = normalizeCatalog(data);
+    if (data.entries.length && !imported.entries.length) return false;
+    // Merge definitions and entries atomically; preserve user order and existing IDs.
+    const categories = this.categories.map(category => ({ ...category, subs: [...category.subs] }));
+    const usedBuckets = new Set(categories.flatMap(category => [category.id, ...category.subs.map(sub => sub.id)]));
+    const mapping = new Map<string, string>();
+    for (const category of imported.categories) {
+      if (data.kind === 'mooshie-custom-catalog' && data.version === 1 && usedBuckets.has(category.id)) { mapping.set(category.id, category.id); continue; }
+      let target = categories.find(row => row.id === category.id);
+      if (!target) {
+        let id = category.id;
+        while (usedBuckets.has(id) && !categories.some(row => row.id === id)) id = `pack-category:${id}`;
+        target = categories.find(row => row.id === id);
+        if (!target) { target = { ...category, id, subs: [] }; categories.push(target); usedBuckets.add(id); }
+      }
+      mapping.set(category.id, target.id);
+      for (const sub of category.subs) {
+        let id = sub.id;
+        while (usedBuckets.has(id) && !target.subs.some(row => row.id === id)) id = `pack-sub:${target.id}:${id}`;
+        if (!target.subs.some(row => row.id === id)) target.subs.push({ ...sub, id });
+        usedBuckets.add(id); mapping.set(sub.id, id);
+      }
+    }
+    const merged = new Map(this.entries.map(entry => [JSON.stringify([entry.subId, entry.tag]), entry]));
+    const usedIds = new Set(this.entries.map(entry => entry.id));
+    for (const row of imported.entries) {
+      const subId = mapping.get(row.subId) ?? row.subId;
+      const key = JSON.stringify([subId, row.tag]); const existing = merged.get(key);
+      const id = existing?.id ?? (usedIds.has(row.id) ? crypto.randomUUID() : row.id);
+      usedIds.add(id); merged.set(key, { ...row, id, subId, preview: row.preview ?? existing?.preview, description: row.description ?? existing?.description, aliases: row.aliases ?? existing?.aliases, contextualTags: row.contextualTags ?? existing?.contextualTags });
+    }
+    this.categories = categories; this.entries = [...merged.values()]; this.save(); return true;
   }
+
 }
 export const customCatalog = new CustomCatalog();
 
-/** Store a compact chosen image independently of the expiring source-preview cache. */
+/** Store a compact local preview inside portable tag packs. */
 export async function catalogPreview(blob: Blob): Promise<string> {
   if (blob.size > 8 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) throw new Error('Unsupported catalogue image');
   const bitmap = await createImageBitmap(blob);

@@ -20,8 +20,6 @@
   import { promptAssistant } from "../../stores/promptAssistant.svelte.js";
   import PromptAssistantSetupModal from "./PromptAssistantSetupModal.svelte";
   import PromptComposeModal from "./PromptComposeModal.svelte";
-  import AnimaPromptGroups from "./AnimaPromptGroups.svelte";
-  import AnimaComposer from "./AnimaComposer.svelte";
 
   import H3PromptGuide from "../video/H3PromptGuide.svelte";
   import { buildH3Context } from "../../utils/h3Prompt.js";
@@ -584,10 +582,6 @@
     {@render negativeFields()}
   {/if}
 
-  {#if generation.isAnima}
-    <AnimaPromptGroups />
-    <AnimaComposer />
-  {/if}
 
   {#if hasAnySchedule}
     <div class="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2.5 space-y-2">

@@ -1,12 +1,7 @@
 import { locale } from '../stores/locale.svelte.js';
 import { customCatalog } from './custom-catalog.svelte.js';
-import { withContextOptions } from './catalog-expansion.js';
-import { contextualTag } from './context.js';
-import { CATEGORIES_DATA } from './categories.js';
 import { userScopedKey } from '../utils/ipc.js';
 import type { Category, SubCategory, Variant } from './types.js';
-import { conflictingTags, dependentTags, suggestedTags } from './relations.js';
-import { THEME_LABELS, themeForCategory, type StudioTheme } from './sources.js';
 import {
   fromSnapshot,
   toSnapshot,
@@ -28,7 +23,6 @@ export type Detail = {
 };
 export type PendingConflict = { tag: string; name: string; category: string; single: boolean; with: string[] };
 
-export const WARDROBE_CATEGORY_IDS = ['tops', 'bottoms', 'dresses', 'accessories', 'footwear'];
 /** Tags that are computed rather than picked, so their chip cannot be edited. */
 const DERIVED = new Set(['auto', 'dependency', 'detail']);
 
@@ -47,9 +41,10 @@ class Studio {
   rawPrompt = $state<string | undefined>(undefined);
   nai = $state(false);
   readable = $state(true);
-  autoTags = $state(true);
-  clothed = $state(true);
+  autoTags = $state(false);
+  clothed = $state(false);
   details = $state<Record<string, Detail>>({});
+  catalogEntryId = $state('');
   activeCategoryId = $state('');
   activeSubId = $state('');
   kind = $state<StudioKind>('character');
@@ -68,7 +63,7 @@ class Studio {
     if (this.loadedKey === key()) return;
     this.loadedKey = key();
     this.applyState({ name: '', kind: 'character', model: 'NAI', choices: [], details: {}, prefix: '', suffix: '', readable: true, nai: false }, false);
-    this.pinned = []; this.banned = []; this.presets = [];
+    this.pinned = []; this.banned = []; this.presets = []; this.catalogEntryId = '';
     this.history = []; this.future = [];
     try {
       const raw = JSON.parse(localStorage.getItem(key()) || '{}');
@@ -76,8 +71,8 @@ class Studio {
       if (state) this.applyState(state, false);
       this.pinned = this.stringList(raw.pinned);
       this.banned = this.stringList(raw.banned);
-      this.autoTags = raw.autoTags !== false;
-      this.clothed = raw.clothed !== false;
+      this.autoTags = false;
+      this.clothed = false;
       this.activeCategoryId = text(raw.activeCategoryId);
       this.activeSubId = text(raw.activeSubId);
       this.presets = Array.isArray(raw.presets)
@@ -116,7 +111,7 @@ class Studio {
     this.name = state.name;
     this.kind = state.kind;
     this.model = state.model;
-    this.selected = state.choices.filter((v) => v.tag && v.tag.trim());
+    this.selected = state.choices.filter((v) => v.tag && v.tag.trim() && !this.isDerived(v.category));
     this.details = this.validDetails(state.details, this.selected);
     this.prefix = state.prefix;
     this.suffix = state.suffix;
@@ -124,8 +119,7 @@ class Studio {
     this.groups = state.groups?.map(group => ({ ...group })) ?? [];
     this.readable = state.readable;
     this.nai = state.nai;
-    if (state.autoTags !== undefined) this.autoTags = state.autoTags;
-    if (state.clothed !== undefined) this.clothed = state.clothed;
+    this.autoTags = false; this.clothed = false;
     if (save) this.save();
   }
   private validDetails(value: Record<string, Detail> | undefined, selected: Choice[]): Record<string, Detail> {
@@ -180,53 +174,26 @@ class Studio {
 
   // -------------------------------------------------------------- catalogue
   get categories(): Category[] {
-    return CATEGORIES_DATA.map(category => ({ ...category, subs: category.subs.map(sub => {
-      const custom = customCatalog.entries.filter(entry => entry.subId === sub.id);
-      if (!custom.length || sub.type !== 'grid') return sub;
-      const variants = (sub.variants ?? []).map(variant => {
-        const entry = custom.find(entry => entry.tag === variant.tag);
-        // Keep built-in modifiers, quantities, nested parts and group references.
-        return entry ? { ...variant, name: entry.name } : variant;
-      });
-      const additions = custom.filter(entry => !variants.some(variant => variant.tag === entry.tag))
-        .map(entry => withContextOptions({ id: `custom:${entry.id}`, tag: entry.tag, name: entry.name }, sub.id));
-      return { ...sub, variants: [...variants, ...additions], groups: sub.groups?.length && additions.length
-        ? [...sub.groups, { name: locale.t('prompt_studio.custom_catalog'), variantIds: additions.map(entry => entry.id) }]
-        : sub.groups };
-    }) }));
+    return customCatalog.categories.map((category, order) => ({ ...category, order, subs: category.subs.map(sub => ({ ...sub, type: 'grid' as const, mode: 'multi' as const, variants: customCatalog.entries.filter(entry => entry.subId === sub.id).map(entry => ({ id: entry.id, tag: entry.tag, name: entry.name })) })) }));
   }
-  category(id: string): Category | undefined { return this.categories.find((c) => c.id === id); }
-  get currentCategory(): Category | undefined { return this.category(this.activeCategoryId) ?? CATEGORIES_DATA[0]; }
+  category(id: string): Category | undefined { return this.categories.find(category => category.id === id); }
+  get currentCategory(): Category | undefined { return this.category(this.activeCategoryId); }
   get currentSub(): SubCategory | undefined {
-    const cat = this.currentCategory;
-    if (!cat) return undefined;
-    return cat.subs.find((s) => s.id === this.activeSubId) ?? cat.subs[0];
+    const category = this.currentCategory;
+    if (!category) return;
+    return category.subs.find(sub => sub.id === this.activeSubId) ?? { id: category.id, name: category.name, type: 'grid', mode: 'multi', variants: customCatalog.entries.filter(entry => entry.subId === category.id).map(entry => ({ id: entry.id, tag: entry.tag, name: entry.name })) };
   }
-  /** Categories in scope: the whole figure, or wardrobe only. */
-  scoped(wardrobe: boolean): Category[] {
-    return this.categories.filter((c) => WARDROBE_CATEGORY_IDS.includes(c.id) === wardrobe);
+  scoped(_wardrobe = false): Category[] { return this.categories; }
+  ensureActive(_wardrobe = false) {
+    if (!customCatalog.ready) return;
+    if (!this.categories.some(category => category.id === this.activeCategoryId)) this.activeCategoryId = this.categories[0]?.id ?? '';
+    const category = this.currentCategory;
+    if (!category || (this.activeSubId !== category.id && !category.subs.some(sub => sub.id === this.activeSubId))) this.activeSubId = category?.id ?? '';
   }
-  ensureActive(wardrobe = false) {
-    const scope = this.scoped(wardrobe);
-    if (!scope.length) return;
-    if (!scope.some((c) => c.id === this.activeCategoryId)) {
-      this.activeCategoryId = scope[0].id;
-      this.activeSubId = scope[0].subs[0]?.id ?? '';
-    }
-    const cat = this.category(this.activeCategoryId);
-    if (cat && !cat.subs.some((s) => s.id === this.activeSubId)) this.activeSubId = cat.subs[0]?.id ?? '';
-  }
-  selectCategory(id: string) {
-    this.activeCategoryId = id;
-    this.activeSubId = this.category(id)?.subs[0]?.id ?? '';
-    this.save();
-  }
-  selectSub(id: string) { this.activeSubId = id; this.save(); }
-  subVisible(sub: SubCategory): boolean { return !sub.ifGender || sub.ifGender === this.gender; }
-  get gender(): string {
-    const chosen = this.selected.find((v) => v.category === 'gender');
-    return chosen ? chosen.tag.replace(/^\d/, '') : 'girl';
-  }
+  selectCategory(id: string) { this.activeCategoryId = id; this.activeSubId = id; this.catalogEntryId = ''; this.save(); }
+  selectSub(id: string) { this.activeSubId = id; this.catalogEntryId = ''; this.save(); }
+  subVisible(_sub: SubCategory): boolean { return true; }
+  get gender(): string { return ''; }
 
   // -------------------------------------------------------------- selection
   chosen(subId: string): Choice | undefined { return this.selected.find((v) => v.category === subId); }
@@ -239,58 +206,24 @@ class Studio {
    * can ask before one selection silently replaces another.
    */
   choose(tag: string, name: string, category: string, single = false) {
-    if (!tag) return;
-    if (this.selected.some((v) => v.tag === tag)) { this.remove(tag); return; }
-    const clashes = conflictingTags(tag, this.selected.map((v) => v.tag));
-    if (clashes.length) { this.pendingEntries = [{ tag, name: name || tag, category }]; this.pendingConflict = { tag, name, category, single, with: clashes }; return; }
+    if (!tag.trim()) return;
+    if (this.isChosen(tag)) { this.remove(tag); return; }
     this.commit([{ tag, name: name || tag, category }], single);
   }
-  resolveConflict(replace: boolean) {
-    const pending = this.pendingConflict;
-    const entries = this.pendingEntries;
-    this.pendingConflict = null;
-    this.pendingEntries = [];
-    if (!pending || !replace) return;
-    this.checkpoint();
-    const removed = new Set(entries.flatMap((entry) => conflictingTags(entry.tag, this.selected.map((v) => v.tag))));
-    this.selected = this.selected.filter((v) => !removed.has(v.tag));
-    for (const tag of removed) delete this.details[tag];
-    this.commit(entries, pending.single, false);
-  }
-  /** A recipe is one undoable action; never silently apply only half of it. */
+  resolveConflict(_replace: boolean) { this.pendingConflict = null; this.pendingEntries = []; }
   addMany(entries: { tag: string; name?: string; category: string }[]) {
-    const seen = new Set(this.selected.map((item) => item.tag));
-    const incoming = entries.filter((entry) => entry.tag && !seen.has(entry.tag) && !!seen.add(entry.tag))
-      .map((entry) => ({ ...entry, name: entry.name || entry.tag }));
-    if (!incoming.length) return;
-    const clashes = [...new Set(incoming.flatMap((entry) => conflictingTags(entry.tag, this.selected.map((v) => v.tag))))];
-    if (clashes.length) {
-      this.pendingEntries = incoming;
-      this.pendingConflict = { ...incoming[0], single: false, with: clashes };
-      return;
-    }
-    this.commit(incoming, false);
+    const seen = new Set(this.selected.map(item => item.tag));
+    this.commit(entries.filter(entry => entry.tag.trim() && !seen.has(entry.tag) && !!seen.add(entry.tag)).map(entry => ({ ...entry, name: entry.name || entry.tag })), false);
   }
   private commit(entries: { tag: string; name: string; category: string }[], single: boolean, checkpoint = true) {
     if (!entries.length) return;
     if (checkpoint) this.checkpoint();
     let next = [...this.selected];
     for (const entry of entries) {
-      if (single) next = next.filter((v) => v.category !== entry.category);
-      if (!next.some((v) => v.tag === entry.tag)) next.push({ ...entry, weight: 1 });
-      for (const dep of dependentTags(entry.tag)) {
-        if ((dep.type !== 'requires' && !this.autoTags) || this.banned.includes(dep.tag) || next.some((v) => v.tag === dep.tag)) continue;
-        next.push({
-          tag: dep.tag,
-          name: dep.tag.replaceAll('_', ' '),
-          category: dep.type === 'requires' ? 'dependency' : 'auto',
-          weight: 1,
-        });
-      }
+      if (single) next = next.filter(item => item.category !== entry.category);
+      if (!next.some(item => item.tag === entry.tag)) next = [...next, { ...entry, weight: 1 }];
     }
-    this.selected = next;
-    this.details = this.validDetails(this.details, next);
-    this.save();
+    this.selected = next; this.details = this.validDetails(this.details, next); this.save();
   }
   clearSub(id: string) {
     const tags = this.selected.filter(value => value.category === id).map(value => value.tag);
@@ -325,6 +258,15 @@ class Studio {
     this.selected = this.selected.filter((v) => v.tag !== tag);
     delete this.details[tag];
     this.save();
+  }
+  updateCatalogChoice(oldTag: string, entry: { tag: string; name: string; subId: string }) {
+    if (!this.isChosen(oldTag)) return;
+    this.checkpoint();
+    const source = this.selected.find(item => item.tag === oldTag)!;
+    this.selected = [...this.selected.filter(item => item.tag !== oldTag && item.tag !== entry.tag), { ...source, tag: entry.tag, name: entry.name, category: entry.subId }];
+    const details = { ...this.details }; const detail = details[oldTag]; delete details[oldTag];
+    if (detail) details[entry.tag] = detail;
+    this.details = details; this.pinned = this.pinned.map(tag => tag === oldTag ? entry.tag : tag); this.save();
   }
   weight(tag: string, weight: number) {
     if (!Number.isFinite(weight)) return;
@@ -394,57 +336,11 @@ class Studio {
   }
 
   // ------------------------------------------------------ random and presets
-  randomize(wardrobe = false) {
-    this.checkpoint();
-    const categories = this.scoped(wardrobe);
-    const subIds = new Set(categories.flatMap((c) => c.subs.map((s) => s.id)));
-    const keepsDetail = (tag: string) => !subIds.has(this.selected.find((v) => v.tag === tag)?.category ?? '');
-    const next = this.selected.filter((v) => this.pinned.includes(v.tag) || !subIds.has(v.category));
-    const details: Record<string, Detail> = {};
-    for (const [tag, detail] of Object.entries(this.details)) if (this.pinned.includes(tag) || keepsDetail(tag)) details[tag] = detail;
-
-    // Gender drives `ifGender` subcategories and *_female / *_male spellings, so
-    // it is settled first: an existing (pinned or surviving) choice wins.
-    let gender = this.gender;
-    if (!wardrobe && !next.some((v) => v.category === 'gender')) {
-      const options = ['1girl', '1boy', '1other'].filter((tag) => !this.banned.includes(tag));
-      if (options.length) {
-        gender = options[Math.floor(Math.random() * options.length)].replace(/^\d/, '');
-        next.push({ tag: `1${gender}`, name: gender, category: 'gender', weight: 1 });
-      }
-    }
-    const genderFits = (tag: string) =>
-      gender === 'girl' ? !/_male$/.test(tag) : gender === 'boy' ? !/_female$/.test(tag) : true;
-
-    for (const cat of categories) {
-      for (const sub of cat.subs) {
-        if (next.some((v) => v.category === sub.id)) continue;
-        if (sub.type === 'color-wheel' || sub.type === 'blend') continue;
-        if (sub.ifGender && sub.ifGender !== gender) continue;
-        const choices = (sub.variants ?? (sub.sliderSteps ?? []).map((s) => ({ id: s.tag, name: s.label, tag: s.tag }) as Variant))
-          .filter((v) => v.tag && genderFits(v.tag) && !this.banned.includes(v.tag))
-          .filter((v) => !conflictingTags(v.tag, next.map((item) => item.tag)).length);
-        if (!choices.length) continue;
-        const choice = choices[Math.floor(Math.random() * choices.length)];
-        next.push({ tag: choice.tag, name: choice.name, category: sub.id, weight: 1 });
-      }
-    }
-
-    let resolved = next;
-    for (const tag of next.map((v) => v.tag)) {
-      for (const dep of dependentTags(tag)) {
-        if ((dep.type !== 'requires' && !this.autoTags) || this.banned.includes(dep.tag) || resolved.some((v) => v.tag === dep.tag)) continue;
-        resolved = [...resolved, {
-          tag: dep.tag,
-          name: dep.tag.replaceAll('_', ' '),
-          category: dep.type === 'requires' ? 'dependency' : 'auto',
-          weight: 1,
-        }];
-      }
-    }
-    this.selected = resolved;
-    this.details = details;
-    this.save();
+  randomize(_wardrobe = false) {
+    const entries = customCatalog.entries.filter(entry => entry.subId === this.activeSubId && !this.banned.includes(entry.tag));
+    if (!entries.length) return;
+    const entry = entries[Math.floor(Math.random() * entries.length)];
+    if (!this.isChosen(entry.tag)) this.choose(entry.tag, entry.name, entry.subId);
   }
   preset(name: string) {
     const trimmed = name.trim();
@@ -485,75 +381,17 @@ class Studio {
   }
 
   // ---------------------------------------------------------------- output
-  private expanded(): { choice: Choice; theme: StudioTheme }[] {
-    const values = this.selected.filter((value) => this.autoTags || value.category !== 'auto').sort((a, b) => Number(this.pinned.includes(b.tag)) - Number(this.pinned.includes(a.tag)));
-    const seen = new Set(values.map((v) => v.tag));
-    const out: { choice: Choice; theme: StudioTheme }[] = [];
-    for (const value of values) {
-      const theme = themeForCategory(value.category);
-      out.push({ choice: value, theme });
-      const detail = this.details[value.tag];
-      if (!detail) continue;
-      for (const tag of [detail.secondary, ...detail.mods, detail.quantity, ...Object.values(detail.parts)]) {
-        if (!tag || seen.has(tag) || this.banned.includes(tag)) continue;
-        out.push({ choice: { tag, name: tag.replaceAll('_', ' '), category: 'detail', weight: 1 }, theme });
-        seen.add(tag);
-      }
-    }
-    if (this.clothed && values.some((value) => !this.isDerived(value.category))) {
-      for (const tag of ['clothed', 'fashion']) {
-        if (!seen.has(tag)) {
-          out.push({ choice: { tag, name: tag, category: 'detail', weight: 1 }, theme: 'wardrobe' });
-          seen.add(tag);
-        }
-      }
-    }
-    return out;
-  }
-  get entries(): Choice[] { return this.expanded().map((item) => item.choice); }
-  /** The same tags grouped under the theme they belong to. */
-  get sections(): { theme: StudioTheme; labelKey: string; items: Choice[] }[] {
-    const grouped = new Map<StudioTheme, Choice[]>();
-    for (const { choice, theme } of this.expanded()) {
-      const list = grouped.get(theme);
-      if (list) list.push(choice); else grouped.set(theme, [choice]);
-    }
-    return THEME_LABELS
-      .filter(({ theme }) => grouped.has(theme))
-      .map(({ theme, key }) => ({ theme, labelKey: key, items: grouped.get(theme)! }));
-  }
-  /** Companion tags the current selection suggests but has not taken. */
-  get suggestions(): string[] {
-    const seen = new Set(this.selected.map((v) => v.tag));
-    const out: string[] = [];
-    for (const value of this.selected) {
-      for (const tag of suggestedTags(value.tag)) {
-        if (seen.has(tag) || this.banned.includes(tag) || out.includes(tag)) continue;
-        out.push(tag);
-      }
-    }
-    return out;
-  }
+  get entries(): Choice[] { return this.selected; }
+  get suggestions(): string[] { return []; }
   format(value: Choice): string {
-    let detail = this.details[value.tag];
-    if (value.category === 'top_type') {
-      const material = this.selected.find(item => item.category === 'top_material');
-      if (material) detail = { ...emptyDetail(), ...detail, parts: { Material: material.tag, ...detail?.parts } };
-    }
-    if (detail) detail = {
-      mods: detail.mods.filter(tag => !this.banned.includes(tag)),
-      secondary: detail.secondary && !this.banned.includes(detail.secondary) ? detail.secondary : undefined,
-      quantity: detail.quantity && !this.banned.includes(detail.quantity) ? detail.quantity : undefined,
-      parts: Object.fromEntries(Object.entries(detail.parts).filter(([, tag]) => !this.banned.includes(tag))),
-    };
-    const tag = this.readable ? contextualTag(value, detail) : value.tag;
+    const detail = this.details[value.tag];
+    const tags = [value.tag, ...(detail ? [detail.secondary, ...detail.mods, detail.quantity, ...Object.values(detail.parts)] : [])].filter((tag): tag is string => !!tag && !this.banned.includes(tag));
+    const tag = [...new Set(tags)].map(tag => this.readable && /^[\p{L}\p{N}_ -]+$/u.test(tag) ? tag.replaceAll('_', ' ') : tag).join(', ');
     if (value.weight === 1) return tag;
     return this.nai ? `${value.weight.toFixed(2)}::${tag}::` : `(${tag}:${value.weight.toFixed(2)})`;
   }
   get constructorPrompt(): string {
-    return [this.prefix.trim(), this.expanded().filter(({ choice }) => !this.readable || ((choice.category !== 'detail' || ['clothed', 'fashion'].includes(choice.tag)) && !(choice.category === 'top_material' && this.selected.some(item => item.category === 'top_type')))).map(({ choice }) => this.format(choice)).join(', '), this.suffix.trim()]
-      .filter(Boolean)
-      .join(', ');
+    return [this.prefix.trim(), this.selected.map(choice => this.format(choice)).join(', '), this.suffix.trim()].filter(Boolean).join(', ');
   }
   get basePrompt(): string { return this.rawPrompt ?? this.constructorPrompt; }
   get prompt(): string { return [this.basePrompt, ...this.groups.filter(group => group.enabled).map(group => group.content)].map(text => text.trim()).filter(Boolean).join(', '); }
@@ -603,8 +441,8 @@ class Studio {
     const next = [...this.groups]; [next[index], next[target]] = [next[target], next[index]];
     this.groups = next; this.save();
   }
-  get count(): number { return this.expanded().length; }
-  get autoCount(): number { return this.expanded().filter(({ choice }) => this.isDerived(choice.category)).length; }
+  get count(): number { return this.selected.length; }
+  get autoCount(): number { return 0; }
 }
 
 export const studio = new Studio();

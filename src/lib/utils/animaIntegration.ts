@@ -160,3 +160,10 @@ export function resolveAnimaPromptGroups(params: AnimaToolsParams, resolve: (tex
   for (const group of ANIMA_PROMPT_GROUPS) result[group] = resolve(params[group]);
   return result;
 }
+
+/** Keep the visible model-only LoRA switch without reviving retired prompt groups. */
+export function generationAnimaTools(params: AnimaToolsParams): AnimaToolsParams | null {
+  return params.multi_lora_enabled
+    ? { ...defaultAnimaTools(), enabled: true, multi_lora_enabled: true }
+    : null;
+}

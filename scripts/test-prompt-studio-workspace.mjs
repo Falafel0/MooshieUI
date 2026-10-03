@@ -10,7 +10,9 @@ const cache = new Map();
 const storage = new Map();
 let booruRequest = async () => [];
 let userScope = '';
-const runtime = {};
+let exportedBlob;
+let download;
+const runtime = { Blob, URL: { createObjectURL: blob => { exportedBlob = blob; return 'blob:test'; }, revokeObjectURL() {} }, document: { createElement: () => (download = { click() {} }) } };
 const boundaries = {
   '../utils/ipc.js': { userScopedKey: key => key + userScope, ipcInvoke: (...args) => booruRequest(...args) },
   '../utils/syncTrigger.js': { triggerSync: () => {} },
@@ -38,216 +40,69 @@ function load(path) {
 }
 const { insertPrompt } = load('src/lib/prompt-studio/insertion.ts');
 assert.equal(insertPrompt('old,', '[red|blue]', 'append'), 'old, [red|blue]');
-assert.equal(insertPrompt('old', 'new', 'prepend'), 'new, old');
-assert.equal(insertPrompt('old', 'new', 'replace'), 'new');
-assert.equal(insertPrompt('old', ' ', 'replace'), 'old');
-assert.equal(insertPrompt('', '<fromto[0.5]:a || b>', 'append'), '<fromto[0.5]:a || b>');
-const { studio } = load('src/lib/prompt-studio/studio.svelte.ts');
-const { toSnapshot, fromSnapshot } = load('src/lib/prompt-studio/presets.ts');
-studio.load();
-studio.clothed = false;
-studio.autoTags = false;
-studio.choose('shirt', 'Shirt', 'top_type');
-studio.toggleModifier('shirt', 'sleeves_rolled_up');
-studio.setPart('shirt', 'Color', 'blue');
-assert.equal(studio.prompt, 'blue shirt with rolled-up sleeves');
-studio.weight('shirt', 1.2);
-assert.equal(studio.prompt, '(blue shirt with rolled-up sleeves:1.20)');
-studio.setOption('readable', false);
-assert.match(studio.prompt, /\(shirt:1.20\)/);
-assert.match(studio.prompt, /sleeves_rolled_up/);
-studio.setOption('readable', true);
-const light = studio.addGroup('Lighting');
-studio.updateGroup(light, { content: 'golden hour' });
-const style = studio.addGroup('Style');
-studio.updateGroup(style, { content: '@[Watercolor]' });
-assert.ok(studio.prompt.endsWith('golden hour, @[Watercolor]'));
-studio.moveGroup(style, -1);
-assert.ok(studio.prompt.endsWith('@[Watercolor], golden hour'));
-studio.updateGroup(style, { enabled: false });
-assert.ok(!studio.prompt.includes('@[Watercolor]'));
-studio.undo();
-assert.ok(studio.prompt.includes('@[Watercolor]'));
-studio.redo();
-assert.ok(!studio.prompt.includes('@[Watercolor]'));
-studio.editPrompt('manual base');
-assert.equal(studio.prompt, 'manual base, golden hour');
-studio.toggleModifier('shirt', 'striped');
-assert.equal(studio.basePrompt, 'manual base');
-studio.editPrompt(undefined);
-assert.match(studio.prompt, /rolled-up sleeves and a striped pattern/);
-const snapshot = toSnapshot(studio.state());
-const restored = fromSnapshot(JSON.parse(JSON.stringify(snapshot)));
-studio.applyState(restored);
-assert.equal(studio.groups.length, 2);
-assert.equal(studio.groups[0].enabled, false);
-assert.match(studio.prompt, /golden hour$/);
-studio.removeGroup(light);
-assert.ok(!studio.prompt.includes('golden hour'));
-studio.undo();
-assert.ok(studio.prompt.includes('golden hour'));
-const legacy = { ...snapshot }; delete legacy.groups;
-assert.equal(fromSnapshot(legacy).groups.length, 0);
-const malformed = { ...snapshot, groups: [null, {id:'x',content:'a'}, {id:'x',content:'b'}, {id:1,content:'x'}] };
-assert.equal(fromSnapshot(malformed).groups.length, 1);
-const { contextualTag } = load('src/lib/prompt-studio/context.ts');
-assert.equal(contextualTag({tag:'black_hair',category:'hair_color'}, {mods:['gradient_hair'],secondary:'blue',parts:{}}), 'black hair with a gradient fading to blue');
-assert.equal(contextualTag({tag:'braid',category:'hair_style'}, {mods:[],quantity:'twin_braids',parts:{}}), 'twin braids');
-assert.equal(contextualTag({tag:'blue',category:'eye_color_wheel'}), 'blue eyes');
-const cats = studio.categories;
-for (const cat of cats) for (const sub of cat.subs) {
-  const names = (sub.variants ?? []).map(v => v.tag);
-  assert.equal(new Set(names).size, names.length, `Duplicate variants in ${sub.id}`);
-  for (const group of sub.groups ?? []) for (const id of group.variantIds) assert.ok(sub.variants.some(v => v.id === id), `Invalid variant reference: ${id}`);
-}
-assert.ok(cats.find(c=>c.id==='tops').subs.find(s=>s.id==='top_type').variants.length >= 30);
-assert.ok(cats.find(c=>c.id==='hair').subs.find(s=>s.id==='hair_style').variants.length >= 25);
-console.log('Prompt Studio regressions passed: insertion, context, groups, undo/redo, persistence, legacy imports, catalog.');
-
-const { parsePromptBlocks } = load('src/lib/utils/promptBlocks.ts');
-assert.equal(parsePromptBlocks('1girl, solo\n\n[red|blue], <fromto[0.5]:a || b>').length, 2);
-assert.equal(parsePromptBlocks('# Character\n1girl, solo\nlong hair\n\n# Lighting\ngolden hour')[0].content, '1girl, solo\nlong hair');
-assert.equal(parsePromptBlocks('a\r\nb', 'lines').length, 2);
-assert.equal(parsePromptBlocks('a, b, c').length, 1);
-const { promptPresets } = load('src/lib/stores/promptPresets.svelte.ts');
-const sky = promptPresets.create('Небо', 'blue sky');
-const hair = promptPresets.create('Волосы', 'black hair');
-assert.equal(promptPresets.resolveInline('@[Небо], @[Волосы]'), 'blue sky, black hair');
-assert.ok(promptPresets.inlinePresetIds('@[Волосы]').has(hair.id));
-const { resolveAnimaPromptGroups, defaultAnimaTools } = load('src/lib/utils/animaIntegration.ts');
-const tools = { ...defaultAnimaTools(), character_tags: '@[Волосы]', background_tags: '@[Небо]' };
-const resolved = resolveAnimaPromptGroups(tools, text => promptPresets.resolveInline(text));
-assert.equal(resolved.character_tags, 'black hair');
-assert.equal(resolved.background_tags, 'blue sky');
-assert.equal(tools.character_tags, '@[Волосы]');
-const { savedSources } = load('src/lib/prompt-studio/saved-sources.svelte.ts');
-savedSources.load(); savedSources.add([{ id:'blue_eyes', name:'Blue eyes', source:'danbooru', tags:['blue_eyes'] }]);
-savedSources.add([{ id:'blue_eyes', name:'Blue eyes', source:'danbooru', tags:['blue_eyes'] }]);
-assert.equal(savedSources.entries.length, 1);
-savedSources.add([{ id:'blue_eyes', name:'Blue eyes', source:'gelbooru', tags:['blue_eyes'] }]);
-assert.equal(savedSources.entries.length, 2);
-assert.equal(savedSources.import({ kind:'mooshie-studio-sources',version:1,entries:[{id:'group',source:'danbooru:group',tags:['shirt','skirt']}] }),true);
-assert.ok(savedSources.has('group','danbooru:group'));
 const { customCatalog } = load('src/lib/prompt-studio/custom-catalog.svelte.ts');
-await customCatalog.load();
-customCatalog.add({ tag:'custom_shirt',name:'Custom shirt',subId:'top_type',preview:'data:image/webp;base64,YQ==' });
-assert.ok(studio.categories.find(cat=>cat.id==='tops').subs.find(sub=>sub.id==='top_type').variants.some(v=>v.tag==='custom_shirt'));
-customCatalog.add({ tag:'custom_shirt',name:'Renamed shirt',subId:'top_type' });
-assert.equal(customCatalog.entries.length, 1);
-assert.equal(customCatalog.entries[0].preview, 'data:image/webp;base64,YQ==', 'Renaming keeps the chosen preview');
+const { studio } = load('src/lib/prompt-studio/studio.svelte.ts');
+await customCatalog.load(); studio.load();
+assert.equal(studio.categories.length, 0, 'A fresh catalog must be empty');
+const category = customCatalog.addCategory('My category');
+const sub = customCatalog.addSub(category, 'My subcategory');
+studio.selectCategory(category); studio.selectSub(sub);
 const preview = 'data:image/webp;base64,YQ==';
-customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'custom',tag:'my_dress',name:'My dress',subId:'dress_type',preview}]});
-assert.equal(customCatalog.entries.find(entry=>entry.tag==='my_dress').preview,preview);
-console.log('Block import, named macros, Anima macro resolution, saved sources and custom catalog regressions passed.');
-
-const shirtSub = studio.categories.find(cat => cat.id === 'tops').subs.find(sub => sub.id === 'top_type');
-const originalShirt = shirtSub.variants.find(variant => variant.tag === 'shirt');
-customCatalog.add({ tag: 'shirt', name: 'My shirt', subId: 'top_type', preview });
-const updatedSub = studio.categories.find(cat => cat.id === 'tops').subs.find(sub => sub.id === 'top_type');
-const updatedShirt = updatedSub.variants.find(variant => variant.tag === 'shirt');
-assert.equal(updatedShirt.id, originalShirt.id);
-assert.deepEqual(updatedShirt.modifiers, originalShirt.modifiers);
-assert.deepEqual(updatedShirt.parts, originalShirt.parts);
-for (const group of updatedSub.groups ?? []) for (const id of group.variantIds) assert.ok(updatedSub.variants.some(variant => variant.id === id));
-const importedId = customCatalog.entries[0].id;
-assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id: importedId, tag:'second_shirt',subId:'top_type'}]}), true);
-assert.equal(new Set(customCatalog.entries.map(entry => entry.id)).size, customCatalog.entries.length);
-const originalId = customCatalog.entries.find(entry => entry.tag === 'shirt').id;
-customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'foreign',tag:'shirt',name:'Imported shirt',subId:'top_type'}]});
-assert.equal(customCatalog.entries.find(entry => entry.tag === 'shirt').id, originalId);
-assert.equal(customCatalog.entries.find(entry => entry.tag === 'shirt').preview, preview);
-customCatalog.add({ id: originalId, tag:'shirt',name:'Imported shirt',subId:'top_type',preview:undefined });
-assert.equal(customCatalog.entries.find(entry => entry.tag === 'shirt').preview, undefined);
-// Reload a fresh store from the fallback persistence path after pending writes.
-await new Promise(resolve => setImmediate(resolve));
-cache.delete('src/lib/prompt-studio/custom-catalog.svelte.ts');
-const reloadedCatalog = load('src/lib/prompt-studio/custom-catalog.svelte.ts').customCatalog;
-await reloadedCatalog.load();
-assert.equal(reloadedCatalog.entries.find(entry => entry.tag === 'my_dress').preview, preview);
-assert.equal(reloadedCatalog.entries.length, customCatalog.entries.length);
-console.log('Chosen previews survive updates, import and reload; imports keep unique IDs and built-in details remain intact.');
-
-const secondId = customCatalog.entries.find(entry => entry.tag === 'second_shirt').id;
-customCatalog.add({id:secondId,tag:'custom_shirt',name:'Merged shirt',subId:'top_type',preview});
-assert.equal(customCatalog.entries.filter(entry => entry.tag === 'custom_shirt').length,1);
-assert.equal(customCatalog.entries.find(entry => entry.tag === 'custom_shirt').id,secondId);
-
-const { withContextOptions } = load('src/lib/prompt-studio/catalog-expansion.ts');
-const liveGarment = withContextOptions({ id:'live', name:'New coat', tag:'unknown_coat' }, 'top_type');
-assert.ok(liveGarment.modifiers.some(mod => mod.tag === 'striped'));
-assert.ok(liveGarment.parts.some(part => part.name === 'Color'));
-assert.equal(new Set(withContextOptions(liveGarment, 'top_type').parts.map(part => part.name)).size, liveGarment.parts.length);
-assert.ok(studio.categories.find(cat => cat.id === 'tops').subs.find(sub => sub.id === 'top_type').variants.find(variant => variant.tag === 'custom_shirt').parts.some(part => part.name === 'Material'));
-assert.equal(contextualTag({tag:'braid',category:'hair_style'}, {mods:[],quantity:'twin_braids',parts:{Color:'blue'}}), 'blue twin braids');
-assert.equal(contextualTag({tag:'black_hair',category:'hair_color'}, {mods:['colored_tips'],secondary:'blue',parts:{}}), 'black hair with blue tips');
-assert.equal(contextualTag({tag:'coat',category:'top_type'}, {mods:[],parts:{'Additional details':'@preset:night_sky, <lora:coat_style:1>, floral_print'}}), 'coat with @preset:night_sky, <lora:coat_style:1>, floral print');
-const { inlineChunkToken } = load('src/lib/utils/promptChunkTokens.ts');
-const token = inlineChunkToken(hair.name, hair.id);
-promptPresets.update(hair.id, {name:'Переименованный макрос'});
-assert.equal(promptPresets.resolveInline(token), 'black hair');
-assert.ok(promptPresets.inlinePresetIds(token).has(hair.id));
-assert.ok(promptPresets.slugs.has(hair.id));
-const { insertPromptBlocks } = load('src/lib/utils/promptBlocks.ts');
-const existingBlocks = [{name:'Old',content:'old'}];
-const newBlocks = [{name:'New',content:'[red|blue], @[Небо]'}];
-assert.equal(insertPromptBlocks(existingBlocks,newBlocks,'append')[1].content,newBlocks[0].content);
-assert.equal(insertPromptBlocks(existingBlocks,newBlocks,'prepend')[0].name,'New');
-assert.equal(insertPromptBlocks(existingBlocks,newBlocks,'replace').length,1);
-assert.equal(insertPromptBlocks(existingBlocks,[{name:'Empty',content:' '}],'replace')[0].name,'Old');
-console.log('Live/custom context, syntax preservation, stable macro references and block insertion modes passed.');
-
-const { BooruSearchPager } = load('src/lib/utils/booru.ts');
-const pager = new BooruSearchPager();
-let pendingResponse;
-booruRequest = () => new Promise(resolve => { pendingResponse = resolve; });
-pager.reset('danbooru','old',2);
-const stalePage = pager.loadNext();
-assert.equal(await pager.loadNext(),null);
-pager.reset('danbooru','new',2);
-pendingResponse([{name:'old_tag',category:0,post_count:1}]);
-assert.equal(await stalePage,null);
-const requestedPages = [];
-booruRequest = async (_, args) => {
-  requestedPages.push(args.page);
-  return [{name:'new_tag',category:0,post_count:10},{name:'second_tag',category:0,post_count:9}];
-};
-assert.equal((await pager.loadNext()).hasMore,true);
-assert.equal((await pager.loadNext()).tags.length,0);
-assert.equal(pager.hasMore,false);
-assert.deepEqual(requestedPages,[1,2]);
-pager.reset('danbooru','retry',2);
-booruRequest = async () => {throw new Error('source unavailable');};
-await assert.rejects(pager.loadNext(),/source unavailable/);
-booruRequest = async (_,args) => {assert.equal(args.page,1);return [{name:'retried',category:0,post_count:1}];};
-assert.equal((await pager.loadNext()).tags[0].name,'retried');
-console.log('Booru pagination rejects stale pages, stops on repeated pages and retries without skipping results.');
-
-assert.equal(promptPresets.resolveInline('@[Неизвестный макрос]'), '@[Неизвестный макрос]');
-assert.equal(promptPresets.resolveInline(token.toUpperCase()), 'black hair');
-const { renderHighlightedPrompt } = load('src/lib/utils/promptSchedule.ts');
-assert.match(renderHighlightedPrompt('@[Небо]', promptPresets.slugs), /rgba\(99, 102, 241, 0.18\)/);
-assert.match(renderHighlightedPrompt('@[Неизвестный макрос]', promptPresets.slugs), /rgba\(239, 68, 68, 0.16\)/);
-console.log('Unknown Unicode macros remain literal and highlighting agrees with macro resolution.');
-
-// Anima group actions must not rewrite syntax inside a selected prompt fragment.
-const { parseTagList, updateTagList, groupAnimaTags } = load('src/lib/utils/animaIntegration.ts');
-const syntaxTokens = [
-  '@preset:night_sky', '@[Sky, cloudy]', '<lora:coat_style:1>',
-  '<fromto[0.5]:red, blue || green, yellow>',
-  '<from:0.5>red, blue\nnight sky</from>',
-  '(blue shirt, silk:1.2)', '[red, blue|green, yellow]',
-  '<region:0,0,1,1>red, blue</region>',
-];
-for (const syntax of syntaxTokens) {
-  assert.equal(parseTagList(`solo, ${syntax}, blue_eyes`).length, 3, syntax);
-  assert.equal(parseTagList(`solo, ${syntax}, blue_eyes`)[1], syntax);
-  assert.ok(updateTagList(`${syntax}, solo`, 'blue_eyes').includes(syntax));
-  assert.equal(updateTagList(`${syntax}, solo`, 'solo', true), syntax);
-}
-const syntaxGroups = groupAnimaTags(syntaxTokens.slice(0, 5));
-assert.equal(syntaxGroups.character_tags.join(', '), syntaxTokens.slice(0, 5).join(', '));
-assert.equal(parseTagList('solo, escaped\\,comma, blue_eyes').length, 3);
-console.log('Anima group editing preserves macros, LoRA names, nested weights, schedules and regions.');
+customCatalog.add({tag:'my_tag',name:'My tag',subId:sub,preview,description:'Description',aliases:['Alias'],contextualTags:['my_context']});
+customCatalog.add({tag:'my_tag',name:'Renamed tag',subId:sub});
+assert.equal(customCatalog.entries.length, 1);
+assert.equal(customCatalog.entries[0].preview, preview);
+assert.equal(customCatalog.entries[0].contextualTags[0], 'my_context');
+studio.choose('my_tag','My tag',sub); studio.toggleModifier('my_tag','my_context');
+assert.equal(studio.prompt,'my tag, my context');
+assert.ok(!studio.prompt.includes('clothed'));
+customCatalog.export(category);
+assert.equal(download.download, 'prompt-studio-tag-pack.json');
+const pack = JSON.parse(await exportedBlob.text());
+assert.equal(pack.categories.length, 1);
+assert.equal(pack.entries[0].preview, preview);
+assert.deepEqual(pack.entries[0].contextualTags, ['my_context']);
+assert.equal(customCatalog.import(pack),true);
+assert.equal(customCatalog.entries.length,1,'Reimporting a pack is idempotent');
+assert.equal(customCatalog.entries[0].preview,preview);
+assert.equal(customCatalog.entries[0].aliases[0],'Alias');
+// Older packs omit metadata; importing them must not erase authored contexts/previews.
+assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'old',tag:'my_tag',subId:sub}]}),true);
+assert.equal(customCatalog.entries[0].description,'Description');
+assert.equal(customCatalog.entries[0].aliases[0],'Alias');
+assert.equal(customCatalog.entries[0].contextualTags[0],'my_context');
+// Whitespace IDs normalize together, and conflicting category/sub IDs remap consistently.
+const padded = {kind:'mooshie-tag-pack',version:1,categories:[{id:' padded ',name:'Padded',subs:[{id:' nested ',name:'Nested'}]}],entries:[{id:'pad',tag:'pad_tag',subId:' nested '}]};
+assert.equal(customCatalog.import(padded),true);
+assert.equal(customCatalog.entries.find(row=>row.tag==='pad_tag').subId,'nested');
+const collision = {kind:'mooshie-tag-pack',version:1,categories:[{id:sub,name:'Collision',subs:[{id:category,name:'Collision sub'}]}],entries:[{id:customCatalog.entries[0].id,tag:'collision_tag',subId:category}]};
+assert.equal(customCatalog.import(collision),true);
+const beforeRepeat = JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries});
+assert.equal(customCatalog.import(collision),true);
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeRepeat);
+assert.equal(new Set(customCatalog.entries.map(row=>row.id)).size,customCatalog.entries.length);
+const invalid = {...padded,categories:[...padded.categories,{id:'padded',name:'Duplicate ID',subs:[]}]};
+assert.equal(customCatalog.import(invalid),false);
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeRepeat,'Invalid packs must not partly mutate the catalog');
+customCatalog.removeSub(sub);
+assert.equal(customCatalog.entries[0].subId,category,'Deleting a subcategory keeps its entries');
+const group = studio.addGroup('My block'); studio.updateGroup(group,{content:'manual prose'});
+assert.ok(studio.prompt.endsWith('manual prose')); studio.undo();
+assert.ok(!studio.prompt.includes('manual prose')); studio.redo();
+assert.ok(studio.prompt.endsWith('manual prose'));
+assert.equal(customCatalog.import({kind:'mooshie-tag-pack',version:99,categories:[],entries:[]}),false);
+assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'legacy',tag:'saved_tag',subId:'old_bucket',preview}]}),true);
+assert.ok(customCatalog.categories.some(row=>row.id==='old_bucket'));
+const { generationAnimaTools, defaultAnimaTools } = load('src/lib/utils/animaIntegration.ts');
+const retired = {...defaultAnimaTools(),enabled:true,composer_enabled:true,quality_prompt:'hidden quality',character_tags:'hidden character'};
+assert.equal(generationAnimaTools(retired),null,'Retired controls cannot inject hidden saved groups');
+const multiLora = generationAnimaTools({...retired,multi_lora_enabled:true});
+assert.equal(multiLora.enabled,true);
+assert.equal(multiLora.multi_lora_enabled,true);
+assert.equal(multiLora.composer_enabled,false);
+assert.equal(multiLora.quality_prompt,'');
+assert.equal(multiLora.character_tags,'');
+console.log('Local catalog, user contexts, portable packs, legacy import and prompt history cases passed.');
 
 // Drive real store reads and writes through deferred IndexedDB boundary calls.
 const reads = [];
@@ -294,7 +149,7 @@ assert.equal(isolatedCatalog.entries.length, 2, 'Different account cannot mutate
 const carolLoad = isolatedCatalog.load();
 await flush();
 assert.equal(writes[0].key.endsWith(':bob'), true);
-assert.equal(writes[0].rows.length, 2);
+assert.equal(writes[0].rows.entries.length, 2);
 assert.equal(isolatedCatalog.entries.length, 0, 'Account switch clears previous previews immediately');
 readResult(reads[2], [
   {id:'duplicate',tag:'coat',subId:'top_type',preview},

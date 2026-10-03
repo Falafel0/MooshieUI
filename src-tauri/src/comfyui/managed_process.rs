@@ -141,14 +141,14 @@ mod windows_process {
         // just checked, and it was opened with PROCESS_TERMINATE rights.
         if unsafe { TerminateProcess(handle.as_raw_handle(), 1) } == 0 {
             let error = io::Error::last_os_error();
-            if wait_for_exit(&handle, 0)? {
-                return Ok(true); // It exited between our check and termination.
+            if wait_for_exit(&handle, 15_000)? {
+                return Ok(true); // Wait for an already-exiting process to release its resources.
             }
             return Err(error);
         }
         // TerminateProcess only initiates shutdown. Wait for the port and any
         // child launcher's resources to be released before starting a new copy.
-        wait_for_exit(&handle, 5_000)
+        wait_for_exit(&handle, 15_000)
     }
 }
 
