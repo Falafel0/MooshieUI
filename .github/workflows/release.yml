@@ -35,7 +35,6 @@ jobs:
     outputs:
       release_tag: ${{ steps.release-version.outputs.tag }}
       release_ref: ${{ steps.release-version.outputs.ref }}
-          persist-credentials: false
 
     steps:
       - name: Resolve release version and commit
