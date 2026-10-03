@@ -3,10 +3,20 @@ export type CustomCatalogEntry = { id: string; name: string; tag: string; subId:
 const scopedKey = () => userScopedKey('mooshie.studio.custom-catalog.v1');
 function normalized(value: unknown): CustomCatalogEntry[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((row: any) => {
+  const rows = value.flatMap((row: any) => {
     if (!row || typeof row.tag !== 'string' || !row.tag.trim() || typeof row.subId !== 'string' || !row.subId.trim()) return [];
-    return [{ id: typeof row.id === 'string' ? row.id : crypto.randomUUID(), tag: row.tag.trim(), name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : row.tag.replaceAll('_', ' '), subId: row.subId.trim(), preview: typeof row.preview === 'string' && row.preview.length <= 400000 && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(row.preview) ? row.preview : undefined }];
+    return [{ id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : crypto.randomUUID(), tag: row.tag.trim(), name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : row.tag.trim().replaceAll('_', ' '), subId: row.subId.trim(), preview: typeof row.preview === 'string' && row.preview.length <= 400000 && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(row.preview) ? row.preview : undefined }];
   });
+  const unique = new Map<string, CustomCatalogEntry>();
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const key = JSON.stringify([row.subId, row.tag]);
+    const existing = unique.get(key);
+    const id = existing?.id ?? (ids.has(row.id) ? crypto.randomUUID() : row.id);
+    ids.add(id);
+    unique.set(key, { ...row, id, preview: row.preview ?? existing?.preview });
+  }
+  return [...unique.values()];
 }
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -19,21 +29,25 @@ async function database(): Promise<IDBDatabase> {
 class CustomCatalog {
   entries = $state<CustomCatalogEntry[]>([]);
   storageError = $state(false);
+  ready = $state(false);
   private loadedKey = '';
+  private revision = 0;
   private saveQueue = Promise.resolve();
   private loading: { key: string; promise: Promise<void> } | undefined;
   load(): Promise<void> {
     const key = scopedKey();
     if (this.loading?.key === key) return this.loading.promise;
-    if (this.loadedKey === key) return Promise.resolve();
-    const promise = this.loadEntries(key);
+    if (this.ready && this.loadedKey === key) return Promise.resolve();
+    const revision = ++this.revision;
+    this.ready = false; this.loadedKey = ''; this.entries = []; this.storageError = false;
+    const promise = this.loadEntries(key, revision);
     this.loading = { key, promise };
     void promise.finally(() => { if (this.loading?.promise === promise) this.loading = undefined; });
     return promise;
   }
-  private async loadEntries(key: string) {
+  private async loadEntries(key: string, revision: number) {
     await this.saveQueue;
-    this.loadedKey = key; this.entries = []; this.storageError = false;
+    if (revision !== this.revision || key !== scopedKey()) return;
     try {
       let rows: unknown;
       if (typeof indexedDB === 'undefined') rows = JSON.parse(localStorage.getItem(key) || '[]');
@@ -42,19 +56,25 @@ class CustomCatalog {
         try { rows = await new Promise((resolve, reject) => { const request = db.transaction('catalogs').objectStore('catalogs').get(key); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
         finally { db.close(); }
       }
-      if (key === this.loadedKey) this.entries = normalized(rows);
-    } catch (error) { if (key === this.loadedKey) { this.loadedKey = ''; this.storageError = true; } console.warn('Custom catalogue load:', error); }
+      if (revision === this.revision && key === scopedKey()) {
+        this.entries = normalized(rows); this.loadedKey = key; this.ready = true;
+      }
+    } catch (error) { if (revision === this.revision && key === scopedKey()) this.storageError = true; console.warn('Custom catalogue load:', error); }
   }
   add(entry: Omit<CustomCatalogEntry, 'id'> & { id?: string }) {
+    if (!this.ready || this.loadedKey !== scopedKey()) return;
     const existing = this.entries.find(row => entry.id && row.id === entry.id)
       ?? this.entries.find(row => row.tag === entry.tag.trim() && row.subId === entry.subId.trim());
     const rows = normalized([{ ...existing, ...entry, id: existing?.id ?? crypto.randomUUID() }]);
     if (!rows.length) return;
     this.entries = [...this.entries.filter(row => row.id !== rows[0].id && !(row.tag === rows[0].tag && row.subId === rows[0].subId)), ...rows]; this.save();
   }
-  remove(id: string) { this.entries = this.entries.filter(row => row.id !== id); this.save(); }
+  remove(id: string) {
+    if (!this.ready || this.loadedKey !== scopedKey()) return;
+    this.entries = this.entries.filter(row => row.id !== id); this.save();
+  }
   private save() {
-    const key = scopedKey(); const rows = JSON.parse(JSON.stringify(this.entries));
+    const key = this.loadedKey; const rows = JSON.parse(JSON.stringify(this.entries));
     this.saveQueue = this.saveQueue.then(async () => {
       try {
         if (typeof indexedDB === 'undefined') localStorage.setItem(key, JSON.stringify(rows));
@@ -68,10 +88,12 @@ class CustomCatalog {
     });
   }
   export() {
+    if (!this.ready || this.loadedKey !== scopedKey()) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: 'mooshie-custom-catalog', version: 1, entries: this.entries }, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = 'prompt-studio-custom-catalog.json'; link.click(); URL.revokeObjectURL(url);
   }
   import(value: unknown): boolean {
+    if (!this.ready || this.loadedKey !== scopedKey()) return false;
     const data = value as { kind?: string; version?: number; entries?: unknown } | null;
     if (!data || data.kind !== 'mooshie-custom-catalog' || data.version !== 1 || !Array.isArray(data.entries)) return false;
     const merged = new Map(this.entries.map(entry => [JSON.stringify([entry.subId, entry.tag]), entry]));

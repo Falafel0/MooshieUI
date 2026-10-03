@@ -87,11 +87,19 @@
       if (id !== requestId) return;
       const blob = new Blob([new Uint8Array(bytes)]);
       const bitmap = await createImageBitmap(blob);
+      if (id !== requestId) { bitmap.close(); return; }
       const pixels = document.createElement("canvas");
       pixels.width = bitmap.width; pixels.height = bitmap.height;
-      pixels.getContext("2d")!.drawImage(bitmap, 0, 0); bitmap.close();
+      try {
+        const context = pixels.getContext("2d");
+        if (!context) throw new Error('Image canvas unavailable');
+        context.drawImage(bitmap, 0, 0);
+      } finally { bitmap.close(); }
       const png = pixels.toDataURL("image/png");
-      if (raster) await canvas.addRasterImage(png, entry.name);
+      if (raster) {
+        const layer = await canvas.addRasterImage(png, entry.name, "raster", () => id === requestId);
+        if (!layer) return;
+      }
       else {
         const pngBytes = new Uint8Array(await (await fetch(png)).arrayBuffer());
         const uploaded = await uploadImageBytes(Array.from(pngBytes), `source-${entry.id.replace(/[^\w-]/g, "_")}.png`);
@@ -116,7 +124,7 @@
     </select>
     <input aria-label={locale.t("anima_studio.search")} disabled={busy} class="touch-target min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-xs text-neutral-200" bind:value={query} oninput={() => { if (!online) page = 1; }} onkeydown={e => { if (e.key === "Enter" && !busy) void search(); }} placeholder={locale.t("anima_studio.search")} />
     <button type="button" class="touch-target rounded-lg bg-indigo-600 px-4 py-2 text-xs text-white disabled:opacity-50" disabled={busy} onclick={() => search()}>{busy ? locale.t("prompt_studio.loading") : locale.t("anima_studio.search")}</button>
-    {#if online}<label class="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" bind:checked={generalOnly} />{locale.t("anima_studio.danbooru.safe")}</label>{/if}
+    {#if online}<label class="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" disabled={busy} bind:checked={generalOnly} onchange={() => { entries = []; selected = null; imported = false; void search(); }} />{locale.t("anima_studio.danbooru.safe")}</label>{/if}
   </div>
   <p class="text-xs text-neutral-500">{locale.t("anima_sources.description")}</p>
   {#if error}<p role="alert" class="break-words text-xs text-amber-300">{error}</p>{/if}

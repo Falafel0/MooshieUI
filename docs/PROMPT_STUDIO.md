@@ -18,6 +18,8 @@ With **Readable** enabled, `shirt`, blue, silk and rolled-up sleeves become `blu
 
 Open **Edit my catalog** in the active constructor category to add a tag or prompt fragment and a display name. Existing entries can be edited or removed. Editing a built-in tag preserves its modifiers, quantities and nested parts.
 
+Use the search field to filter the active category by name or tag. Spaces and underscores match interchangeably. Catalog editing and import become available after loading completes. If storage cannot be read, use **Retry**; the existing saved catalog is not overwritten by an empty draft. Switching accounts discards stale load results, and queued saves retain their original account.
+
 Upload a PNG, JPEG or WebP, or choose a general-rated Danbooru example as the entry's preview. Uploaded files are limited to 8 MiB and stored as compact thumbnails. The chosen preview is displayed in the constructor and tag catalog. It can be replaced or removed.
 
 The custom catalog and its images are saved locally for the current account, separately from the expiring source-preview cache. Catalog export and import include those images. Import merges entries by category and tag instead of creating duplicates.
@@ -31,6 +33,8 @@ Editing the constructor output switches it to manual text. **Return to construct
 **Import prompt blocks** accepts pasted text and `.txt` or `.md` files. Blank lines, individual lines or Markdown headings such as `# Character` define blocks. Headings keep multiline text together. Commas and scheduling expressions are preserved. Import is also available in the positive and negative additional fields on generation tabs.
 
 Macros use the shared prompt-preset library. Search, create, edit, insert and remove macros in the prompt area. References inserted by the macro panel use stable preset IDs and survive a display-name change. Handwritten `@[Name]` and `@preset:slug` remain supported, including exact names in non-Latin alphabets. As in generation, a multiline macro acts as a wildcard: one nonempty line is selected per generation.
+
+Anima tag groups use the generation prompt editor too. Adding or removing a group tag preserves macros, LoRA identifiers, weighted phrases, regional blocks and scheduling expressions, including their internal commas and newlines. Syntax fragments imported into groups retain their original spelling.
 
 ## Sending to generation
 
@@ -46,6 +50,8 @@ Browse live booru tags, Anima source recipes, the local tag library and saved co
 
 **Art sources** provides image references and upstream catalogs. Selected images can be sent to img2img or inserted as raster canvas layers. Tag actions can append to the generation prompt or populate Anima tag groups. These actions return to generation without overwriting the Studio draft.
 
+Closing the reference browser cancels pending image handoffs. Late image decoding or upload results do not insert a layer or replace the img2img input. Changing the general-rated filter clears the old selection and starts a new search.
+
 Save individual entries, loaded search results or a complete Danbooru group to a collection. Filter saved collections, add their tags to the draft, remove entries, or export and import the collection as JSON. Saving loaded search results saves the pages already fetched, not the entire remote database. Ordinary source thumbnails use an expiring cache; permanent chosen images belong to the custom catalog described above.
 
 Administrators configure optional credentials in **Settings → Booru**. Credential fields are write-only; saved secrets are not returned to the desktop or browser UI. Use the clear action in Settings to remove them.
@@ -53,6 +59,8 @@ Administrators configure optional credentials in **Settings → Booru**. Credent
 ## Checks without ComfyUI
 
 Run `node scripts/test-prompt-studio-workspace.mjs` for context, groups, import, macros, persistence and pagination regressions. PR CI runs this check alongside build, i18n and types.
+
+Run `node --test tests/reference-browser.test.mjs` for image handoff cancellation and successful img2img insertion. PR CI runs this check as well.
 
 `studio-probe.html` is a Vite-only manual test page. It is not included in the packaged application. Constructor, group and insertion controls can be exercised without ComfyUI; live remote sources require the backend.
 
@@ -76,3 +84,9 @@ Release blocker: local Rust compilation/tests fail because the MSVC linker `link
 Next development checks: exercise narrow-screen panel switching, the lower prompt area, macro/group workflows, Anima setting persistence, extension availability/install errors, Telegram append/replace confirmation, stale reference requests and image handoff. Clean up unused localization keys only after confirming usage. All backend calls must retain the desktop/browser IPC abstraction.
 
 Local safety backup: a stash named `Prompt Studio polish before integrating fork.4` preserves the earlier fork.3-based UI experiment. It is not published with this checkpoint. Do not apply it wholesale over fork.4: its overlapping Studio components would regress the newer groups/catalog workflows. The integrated branch is the continuation point for other agents.
+
+### Continuation checks (2026-10-03)
+
+The continuation adds searchable custom entries, load/error gating and IndexedDB account-switch regressions; the shared Anima group editor and syntax-preserving tag actions; and cancellation checks during reference decoding, layer insertion and upload. Stored duplicate catalog IDs and category/tag pairs are repaired during loading without losing chosen previews. The Telegram regression loader now resolves the real utility dependencies.
+
+Validation in the Linux workspace: production build passed; Svelte checking reports 0 errors and the same 85 warnings as the checkpoint; i18n parity passed; all 124 existing Node regression tests and 4 new reference-browser tests passed; Prompt Studio, Telegram and Animadex scripts passed; 5 release artifact checks passed. No Rust source or version files changed. Native Windows checks run through PR Guardrails. Interactive visual testing and real ComfyUI generation remain outstanding; this continuation does not establish release readiness.

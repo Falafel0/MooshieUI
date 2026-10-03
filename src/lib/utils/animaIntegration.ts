@@ -2,6 +2,7 @@ import type {
   AnimaArtistMixerParams,
   AnimaToolsParams,
 } from "../types/index.js";
+import { getPromptInertRanges } from "./promptInertRanges.js";
 
 export function defaultAnimaArtistMixer(): AnimaArtistMixerParams {
   return {
@@ -104,11 +105,13 @@ export function groupAnimaTags(tags: string[], known: readonly { n: string; c: n
   const index = new Map(known.map(entry => [entry.n.toLowerCase(), entry.c]));
   const groups: Partial<Record<AnimaPromptGroup, string[]>> = {};
   for (const raw of tags) {
-    const tag = raw.trim().replace(/^@/, '').replaceAll('_', ' ');
+    // Macro IDs, scheduling and LoRA names must retain their exact spelling.
+    const syntax = getPromptInertRanges(raw);
+    const tag = syntax.length ? raw.trim() : raw.trim().replace(/^@/, '').replaceAll('_', ' ');
     if (!tag) continue;
     const category = index.get(raw.trim().replace(/^@/, '').toLowerCase().replaceAll(' ', '_'));
     const value = tag.toLowerCase();
-    const group: AnimaPromptGroup = category === 1 ? 'artist_tags' : category === 4 ? 'character_tags'
+    const group: AnimaPromptGroup = syntax.length ? 'character_tags' : category === 1 ? 'artist_tags' : category === 4 ? 'character_tags'
       : /background|indoors|outdoors|sky|room|street|forest|beach|city|night|day|sunset|scenery/.test(value) ? 'background_tags'
       : /standing|sitting|lying|kneeling|looking|holding|walking|running|pose|from (above|below|side)|cowboy shot|full body|upper body/.test(value) ? 'pose_tags'
       : /dress|shirt|skirt|pants|shorts|jacket|coat|uniform|swimsuit|bikini|shoes|boots|socks|gloves|hat|clothes|clothing/.test(value) ? 'clothing_tags'
@@ -119,10 +122,28 @@ export function groupAnimaTags(tags: string[], known: readonly { n: string; c: n
 }
 
 export function parseTagList(value: string): string[] {
-  return value
-    .split(/[\n,]+/)
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  const ranges = getPromptInertRanges(value);
+  const tags: string[] = [];
+  const stack: string[] = [];
+  let start = 0, rangeIndex = 0;
+  for (let i = 0; i < value.length; i++) {
+    while (ranges[rangeIndex] && ranges[rangeIndex].end <= i) rangeIndex++;
+    if (ranges[rangeIndex]?.start === i) { i = ranges[rangeIndex].end - 1; continue; }
+    const char = value[i];
+    if (char === '\\') { i++; continue; }
+    if (char === '(') stack.push(')');
+    else if (char === '[') stack.push(']');
+    else if (char === '{') stack.push('}');
+    else if (char === stack.at(-1)) stack.pop();
+    else if (!stack.length && (char === ',' || char === '\n')) {
+      const tag = value.slice(start, i).trim();
+      if (tag) tags.push(tag);
+      start = i + 1;
+    }
+  }
+  const tail = value.slice(start).trim();
+  if (tail) tags.push(tail);
+  return tags;
 }
 
 export function updateTagList(value: string, tag: string, remove = false): string {

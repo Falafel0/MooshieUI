@@ -9,8 +9,10 @@ const root = new URL('../', import.meta.url);
 const cache = new Map();
 const storage = new Map();
 let booruRequest = async () => [];
+let userScope = '';
+const runtime = {};
 const boundaries = {
-  '../utils/ipc.js': { userScopedKey: key => key, ipcInvoke: (...args) => booruRequest(...args) },
+  '../utils/ipc.js': { userScopedKey: key => key + userScope, ipcInvoke: (...args) => booruRequest(...args) },
   '../utils/syncTrigger.js': { triggerSync: () => {} },
   '../stores/locale.svelte.js': { locale: { t: key => key } },
 };
@@ -30,6 +32,7 @@ function load(path) {
     },
     console, $state: value => value, crypto: { randomUUID },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
+    ...runtime,
   }, { filename: path });
   return module.exports;
 }
@@ -225,3 +228,96 @@ const { renderHighlightedPrompt } = load('src/lib/utils/promptSchedule.ts');
 assert.match(renderHighlightedPrompt('@[Небо]', promptPresets.slugs), /rgba\(99, 102, 241, 0.18\)/);
 assert.match(renderHighlightedPrompt('@[Неизвестный макрос]', promptPresets.slugs), /rgba\(239, 68, 68, 0.16\)/);
 console.log('Unknown Unicode macros remain literal and highlighting agrees with macro resolution.');
+
+// Anima group actions must not rewrite syntax inside a selected prompt fragment.
+const { parseTagList, updateTagList, groupAnimaTags } = load('src/lib/utils/animaIntegration.ts');
+const syntaxTokens = [
+  '@preset:night_sky', '@[Sky, cloudy]', '<lora:coat_style:1>',
+  '<fromto[0.5]:red, blue || green, yellow>',
+  '<from:0.5>red, blue\nnight sky</from>',
+  '(blue shirt, silk:1.2)', '[red, blue|green, yellow]',
+  '<region:0,0,1,1>red, blue</region>',
+];
+for (const syntax of syntaxTokens) {
+  assert.equal(parseTagList(`solo, ${syntax}, blue_eyes`).length, 3, syntax);
+  assert.equal(parseTagList(`solo, ${syntax}, blue_eyes`)[1], syntax);
+  assert.ok(updateTagList(`${syntax}, solo`, 'blue_eyes').includes(syntax));
+  assert.equal(updateTagList(`${syntax}, solo`, 'solo', true), syntax);
+}
+const syntaxGroups = groupAnimaTags(syntaxTokens.slice(0, 5));
+assert.equal(syntaxGroups.character_tags.join(', '), syntaxTokens.slice(0, 5).join(', '));
+assert.equal(parseTagList('solo, escaped\\,comma, blue_eyes').length, 3);
+console.log('Anima group editing preserves macros, LoRA names, nested weights, schedules and regions.');
+
+// Drive real store reads and writes through deferred IndexedDB boundary calls.
+const reads = [];
+const writes = [];
+const db = {
+  close() {},
+  transaction(_store, mode) {
+    const tx = {
+      objectStore() {
+        return {
+          get(key) { const request = {}; reads.push({key, request}); return request; },
+          put(rows, key) { writes.push({rows, key}); queueMicrotask(() => tx.oncomplete()); },
+        };
+      },
+    };
+    return tx;
+  },
+};
+runtime.indexedDB = {open() { const request = {result: db}; queueMicrotask(() => request.onsuccess()); return request; }};
+cache.delete('src/lib/prompt-studio/custom-catalog.svelte.ts');
+const isolatedCatalog = load('src/lib/prompt-studio/custom-catalog.svelte.ts').customCatalog;
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const readResult = (read, rows) => {read.request.result = rows; read.request.onsuccess();};
+userScope = ':alice';
+const aliceLoad = isolatedCatalog.load();
+assert.equal(isolatedCatalog.ready, false);
+isolatedCatalog.add({tag:'premature',subId:'top_type',name:'Premature'});
+assert.equal(isolatedCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[]}), false);
+assert.equal(isolatedCatalog.entries.length, 0);
+await flush();
+userScope = ':bob';
+const bobLoad = isolatedCatalog.load();
+await flush();
+readResult(reads[1], [{id:'bob',tag:'bob_shirt',subId:'top_type',preview}]);
+await bobLoad;
+readResult(reads[0], [{id:'alice',tag:'alice_shirt',subId:'top_type'}]);
+await aliceLoad;
+assert.equal(isolatedCatalog.entries[0].tag, 'bob_shirt');
+assert.equal(isolatedCatalog.ready, true);
+isolatedCatalog.add({tag:'bob_coat',subId:'top_type',name:'Coat'});
+userScope = ':carol';
+isolatedCatalog.remove('bob');
+assert.equal(isolatedCatalog.entries.length, 2, 'Different account cannot mutate the old account catalog');
+const carolLoad = isolatedCatalog.load();
+await flush();
+assert.equal(writes[0].key.endsWith(':bob'), true);
+assert.equal(writes[0].rows.length, 2);
+assert.equal(isolatedCatalog.entries.length, 0, 'Account switch clears previous previews immediately');
+readResult(reads[2], [
+  {id:'duplicate',tag:'coat',subId:'top_type',preview},
+  {id:'duplicate',tag:'dress',subId:'dress_type'},
+  {id:'other',tag:'coat',subId:'top_type',name:'Updated coat'},
+]);
+await carolLoad;
+assert.equal(isolatedCatalog.entries.length, 2);
+assert.equal(new Set(isolatedCatalog.entries.map(row => row.id)).size, 2);
+assert.equal(isolatedCatalog.entries.find(row => row.tag === 'coat').preview, preview);
+userScope = ':dave';
+const failedLoad = isolatedCatalog.load();
+await flush();
+reads[3].request.error = new Error('Storage temporarily unavailable');
+reads[3].request.onerror();
+await failedLoad;
+assert.equal(isolatedCatalog.ready, false);
+assert.equal(isolatedCatalog.storageError, true);
+const retryLoad = isolatedCatalog.load();
+await flush();
+readResult(reads[4], []);
+await retryLoad;
+assert.equal(isolatedCatalog.ready, true);
+assert.equal(isolatedCatalog.storageError, false);
+userScope = '';
+console.log('IndexedDB account switches reject stale reads, scope queued writes, repair duplicates and allow retry.');

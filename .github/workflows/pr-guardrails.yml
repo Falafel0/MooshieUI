@@ -54,7 +54,9 @@ jobs:
         run: npm run build
 
       - name: Prompt Studio workspace regressions
-        run: node scripts/test-prompt-studio-workspace.mjs
+        run: |
+          node scripts/test-prompt-studio-workspace.mjs
+          node --test tests/reference-browser.test.mjs
 
       - name: i18n parity
         run: node scripts/check-i18n-parity.mjs

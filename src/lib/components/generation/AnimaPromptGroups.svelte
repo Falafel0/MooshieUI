@@ -4,12 +4,17 @@
   import { locale } from "../../stores/locale.svelte.js";
   import { ANIMA_PROMPT_GROUPS, ANIMA_GROUP_LABELS, parseTagList, updateTagList, type AnimaPromptGroup } from "../../utils/animaIntegration.js";
   import AnimaNodeRequirement from "./AnimaNodeRequirement.svelte";
+  import PromptTextarea from "./PromptTextarea.svelte";
   let opened = $state(false);
   let group = $state<AnimaPromptGroup>("character_tags");
   let query = $state("");
   const hits = $derived(query.trim() ? autocomplete.search(query, 20) : []);
   function add(tag: string) {
     generation.animaTools[group] = updateTagList(generation.animaTools[group], tag.replace(/^@/, '').replaceAll('_', ' '));
+    void generation.saveSettings();
+  }
+  function edit(value: string) {
+    generation.animaTools[group] = value;
     void generation.saveSettings();
   }
 </script>
@@ -22,7 +27,10 @@
       <select aria-label={locale.t("anima_studio.tab.groups")} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs text-neutral-200" bind:value={group}>
         {#each ANIMA_PROMPT_GROUPS as id}<option value={id}>{locale.t(ANIMA_GROUP_LABELS[id])} ({parseTagList(generation.animaTools[id]).length})</option>{/each}
       </select>
-      <label class="block text-xs text-neutral-400">{locale.t(ANIMA_GROUP_LABELS[group])}<textarea rows="3" class="mt-2 w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs leading-relaxed text-neutral-200 outline-none focus:border-indigo-500" value={generation.animaTools[group]} oninput={event => { generation.animaTools[group] = event.currentTarget.value; }} placeholder={locale.t("anima_studio.group.placeholder")}></textarea></label>
+      <p class="text-xs text-neutral-400">{locale.t(ANIMA_GROUP_LABELS[group])}</p>
+      {#key group}
+        <PromptTextarea bind:value={() => generation.animaTools[group], edit} rows={3} minHeight="min-h-24" storageKey={`anima-group-${group}`} placeholder={locale.t("anima_studio.group.placeholder")} />
+      {/key}
       {#if parseTagList(generation.animaTools[group]).length}
         <details><summary class="cursor-pointer text-xs text-neutral-500">{locale.t("prompt_studio.remove_tag")}</summary><div class="mt-2 flex flex-wrap gap-1.5">{#each [...new Set(parseTagList(generation.animaTools[group]))] as tag (tag)}<button type="button" class="touch-target rounded-lg bg-neutral-800 px-2 text-xs text-neutral-300" aria-label={`${locale.t("prompt_studio.remove_tag")}: ${tag}`} onclick={() => { generation.animaTools[group] = updateTagList(generation.animaTools[group], tag, true); void generation.saveSettings(); }}>{tag} ×</button>{/each}</div></details>
       {/if}
