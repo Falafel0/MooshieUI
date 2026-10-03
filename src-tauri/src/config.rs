@@ -140,9 +140,8 @@ pub struct AppConfig {
     /// Optional NovelAI API key. Required before any NovelAI model can be used.
     #[serde(default)]
     pub novelai_api_key: Option<String>,
-    /// Danbooru credentials (`login` + profile API key). Tag search and the
-    /// curated tag-group wikis work anonymously; a key only raises the rate
-    /// limit, so an empty value costs throughput, not access.
+    /// Legacy Danbooru fields retained only for config migration/redaction.
+    /// No Danbooru network endpoints remain.
     #[serde(default)]
     pub danbooru_login: Option<String>,
     #[serde(default)]

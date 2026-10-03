@@ -39,7 +39,8 @@
       {/each}
     </nav>
     <button type="button" class="touch-target rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 disabled:opacity-40" disabled={!studio.prompt.trim()} onclick={onCopy} aria-label={locale.t('prompt_studio.copy')}><Copy size={16} /></button>
-    <button type="button" class="touch-target rounded-lg bg-indigo-600 px-4 py-2 text-xs text-white disabled:opacity-40" disabled={!studio.prompt.trim() || !!studio.pendingConflict} onclick={onApply}>{locale.t('prompt_studio.apply')}</button>
+    <button type="button" disabled={!content.trim()} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => { macroId = ''; macroName = ''; macroContent = content; macros = true; }}>{locale.t('prompt_studio.save_chunk')}</button>
+    <button type="button" class="touch-target rounded-lg bg-amber-400 px-4 py-2 text-xs font-medium text-neutral-950 disabled:opacity-40" disabled={!studio.prompt.trim() || !!studio.pendingConflict} onclick={onApply}>{locale.t('prompt_studio.apply')}</button>
   </div>
   {#if group}
     <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">

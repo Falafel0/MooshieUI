@@ -10,7 +10,7 @@ import {
 } from "@lucide/svelte";
 
 /**
- * Catalogue `icon` names are authored in `prompt-studio/categories.ts`, so the
+ * User catalog packs may carry an `icon` name, so the
  * rail maps those strings onto real components instead of importing the whole
  * lucide barrel (which would pull every icon into the bundle).
  */

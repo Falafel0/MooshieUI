@@ -1377,116 +1377,13 @@ pub async fn animadex_proxy_fetch(
     Ok(body)
 }
 
-/// Read-only Danbooru post search for the Anima Prompt Studio. The origin is
-/// fixed and only a compact allow-list of post fields is returned, so this is
-/// neither an open proxy nor a way to relay arbitrary response bodies.
-pub async fn danbooru_search_impl(
-    state: &AppState,
-    tags: String,
-    page: u32,
-    limit: u32,
-    safe_mode: bool,
-    source: Option<String>,
-) -> Result<serde_json::Value, AppError> {
-    let mut query = tags.trim().to_string();
-    if safe_mode {
-        if !query.is_empty() {
-            query.push(' ');
-        }
-        query.push_str("rating:general");
-    }
-    let endpoint = match source.as_deref().unwrap_or("danbooru") {
-        "danbooru" => "https://danbooru.donmai.us/posts.json",
-        "safebooru" => "https://safebooru.donmai.us/posts.json",
-        _ => return Err(AppError::Other("Unknown booru source".into())),
-    };
-    let mut url = reqwest::Url::parse(endpoint)
-        .map_err(|e| AppError::Other(format!("Invalid Danbooru URL: {e}")))?;
-    url.query_pairs_mut()
-        .append_pair("tags", &query)
-        .append_pair("page", &page.max(1).to_string())
-        .append_pair("limit", &limit.clamp(1, 40).to_string());
-    let credentials = booru_credentials(state).await;
-    let auth = if source.as_deref().unwrap_or("danbooru") == "danbooru" {
-        credentials
-            .danbooru_login
-            .as_deref()
-            .zip(credentials.danbooru_api_key.as_deref())
-    } else {
-        None
-    };
-    crate::booru::throttle("danbooru", auth.is_some()).await;
-    let mut request = state
-        .http_client
-        .get(url)
-        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT);
-    if let Some((login, key)) = auth {
-        request = request.basic_auth(login, Some(key));
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("Danbooru search failed: {}", e.without_url())))?;
-    if !response.status().is_success() {
-        return Err(AppError::ApiError {
-            status: response.status().as_u16(),
-            message: format!("Danbooru returned {}", response.status()),
-        });
-    }
-    let posts: Vec<serde_json::Value> = response.json().await?;
-    let fields = [
-        "id",
-        "created_at",
-        "rating",
-        "tag_string",
-        "tag_string_artist",
-        "tag_string_character",
-        "tag_string_copyright",
-        "tag_string_general",
-        "tag_string_meta",
-        "preview_file_url",
-        "large_file_url",
-        "file_url",
-        "source",
-        "image_width",
-        "image_height",
-    ];
-    let compact = posts
-        .into_iter()
-        .filter_map(|post| post.as_object().cloned())
-        .map(|post| {
-            let mut selected = serde_json::Map::new();
-            for field in fields {
-                if let Some(value) = post.get(field) {
-                    selected.insert(field.to_string(), value.clone());
-                }
-            }
-            serde_json::Value::Object(selected)
-        })
-        .collect::<Vec<_>>();
-    Ok(serde_json::Value::Array(compact))
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn danbooru_search(
-    state: State<'_, Arc<AppState>>,
-    tags: String,
-    page: u32,
-    limit: u32,
-    safe_mode: bool,
-    source: Option<String>,
-) -> Result<serde_json::Value, AppError> {
-    danbooru_search_impl(state.as_ref(), tags, page, limit, safe_mode, source).await
-}
-
-/// Credentials for the booru tag sources, read out of the owner-only config.
+/// Credentials for the remaining booru providers.
 async fn booru_credentials(state: &AppState) -> crate::booru::Credentials {
     let config = state.config.read().await;
     crate::booru::Credentials::from_config(&config)
 }
 
-/// Live tag search across Danbooru, Gelbooru and e621 in one shape.
+/// Live tag search for the remaining Gelbooru and e621 providers.
 pub async fn booru_tag_search_impl(
     state: &AppState,
     source: String,
@@ -1517,27 +1414,6 @@ pub async fn booru_tag_search_page_impl(
     serde_json::to_value(tags).map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Danbooru's curated `tag_groups` tree (section → group).
-pub async fn booru_tag_groups_impl(state: &AppState) -> Result<serde_json::Value, AppError> {
-    let credentials = booru_credentials(state).await;
-    let sections = crate::booru::group_index(&state.http_client, &credentials)
-        .await
-        .map_err(AppError::Other)?;
-    serde_json::to_value(sections).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// The tag list behind one curated group, e.g. `tag group:hair color`.
-pub async fn booru_tag_group_impl(
-    state: &AppState,
-    title: String,
-) -> Result<serde_json::Value, AppError> {
-    let credentials = booru_credentials(state).await;
-    let page = crate::booru::group_page(&state.http_client, &credentials, &title)
-        .await
-        .map_err(AppError::Other)?;
-    serde_json::to_value(page).map_err(|e| AppError::Other(e.to_string()))
-}
-
 /// Write-only settings path for booru credentials. The regular config response
 /// never needs to send these values back to the browser.
 pub async fn booru_credentials_update_impl(
@@ -1548,20 +1424,15 @@ pub async fn booru_credentials_update_impl(
     credentials.normalize();
     let mut config = state.config.write().await;
     let mut updated = config.clone();
+    // Discard retired Danbooru credentials when settings are next saved.
+    updated.danbooru_login = None;
+    updated.danbooru_api_key = None;
     if clear {
-        updated.danbooru_login = None;
-        updated.danbooru_api_key = None;
         updated.gelbooru_user_id = None;
         updated.gelbooru_api_key = None;
         updated.e621_login = None;
         updated.e621_api_key = None;
     } else {
-        if credentials.danbooru_login.is_some() {
-            updated.danbooru_login = credentials.danbooru_login;
-        }
-        if credentials.danbooru_api_key.is_some() {
-            updated.danbooru_api_key = credentials.danbooru_api_key;
-        }
         if credentials.gelbooru_user_id.is_some() {
             updated.gelbooru_user_id = credentials.gelbooru_user_id;
         }
@@ -1594,133 +1465,12 @@ pub async fn booru_tag_search(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn booru_tag_groups(
-    state: State<'_, Arc<AppState>>,
-) -> Result<serde_json::Value, AppError> {
-    booru_tag_groups_impl(state.as_ref()).await
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn booru_tag_group(
-    state: State<'_, Arc<AppState>>,
-    title: String,
-) -> Result<serde_json::Value, AppError> {
-    booru_tag_group_impl(state.as_ref(), title).await
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
 pub async fn booru_credentials_update(
     state: State<'_, Arc<AppState>>,
     credentials: crate::booru::Credentials,
     clear: bool,
 ) -> Result<(), AppError> {
     booru_credentials_update_impl(state.as_ref(), credentials, clear).await
-}
-
-/// Read upstream catalog data as JSON; never execute the JavaScript wrapper.
-pub async fn anima_catalog_impl(
-    state: &AppState,
-    catalog: &str,
-) -> Result<serde_json::Value, AppError> {
-    let file = match catalog {
-        "artists" => "data.js",
-        "characters" => "character_data.js",
-        "clothing" => "clothing_data.js",
-        "backgrounds" => "background_data.js",
-        "poses" => "pose_data.js",
-        "character_details" => "character_official_data.json",
-        "attire" => "danbooru_attire_data.json",
-        _ => return Err(AppError::Other("Unknown Anima catalog".into())),
-    };
-    let response = state
-        .http_client
-        .get(format!(
-            "https://raw.githubusercontent.com/nregret/Comfyui-Anima-Tools/main/js/{file}"
-        ))
-        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT)
-        .send()
-        .await?
-        .error_for_status()?;
-    let text = response.text().await?;
-    let payload = if file.ends_with(".js") {
-        let start = text
-            .find('[')
-            .ok_or_else(|| AppError::Other("Invalid catalog array".into()))?;
-        let end = text
-            .rfind(']')
-            .ok_or_else(|| AppError::Other("Invalid catalog array".into()))?;
-        text.get(start..=end)
-            .ok_or_else(|| AppError::Other("Invalid catalog bounds".into()))?
-    } else {
-        text.as_str()
-    };
-    Ok(serde_json::from_str(payload)?)
-}
-
-pub async fn anima_source_image_impl(state: &AppState, url: &str) -> Result<Vec<u8>, AppError> {
-    let url = reqwest::Url::parse(url).map_err(|e| AppError::Other(e.to_string()))?;
-    let host = url.host_str().unwrap_or("");
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || !(host == "cdn.jsdelivr.net" || host == "donmai.us" || host.ends_with(".donmai.us"))
-    {
-        return Err(AppError::Other("Unsupported source image host".into()));
-    }
-    let mut response = state
-        .http_client_no_redirect
-        .get(url)
-        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT)
-        .send()
-        .await?
-        .error_for_status()?;
-    if response.status().is_redirection() {
-        return Err(AppError::Other("Image redirect is not supported".into()));
-    }
-    let mime = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .unwrap_or("")
-        .trim();
-    if !matches!(
-        mime,
-        "image/jpeg" | "image/png" | "image/webp" | "image/gif"
-    ) {
-        return Err(AppError::Other(
-            "Source did not return a supported image".into(),
-        ));
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
-        if bytes.len() + chunk.len() > 32 * 1024 * 1024 {
-            return Err(AppError::Other("Image exceeds 32 MB".into()));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn anima_source_image(
-    state: State<'_, Arc<AppState>>,
-    url: String,
-) -> Result<Vec<u8>, AppError> {
-    anima_source_image_impl(state.as_ref(), &url).await
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn anima_catalog(
-    state: State<'_, Arc<AppState>>,
-    catalog: String,
-) -> Result<serde_json::Value, AppError> {
-    anima_catalog_impl(state.as_ref(), &catalog).await
 }
 
 #[cfg(feature = "desktop")]

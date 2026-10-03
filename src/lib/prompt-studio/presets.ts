@@ -1,6 +1,4 @@
 import type { Choice, Detail } from './studio.svelte.js';
-import { CATEGORIES_DATA } from './categories.js';
-import { classifyTag } from './sources.js';
 
 /**
  * Saved-set format shared with the reference Atelier build, so an exported set
@@ -97,14 +95,7 @@ export function tagsFromRawPrompt(raw: string): Choice[] {
   return out;
 }
 
-function categoryFor(tag: string): string {
-  for (const category of CATEGORIES_DATA) {
-    for (const sub of category.subs) {
-      if (sub.variants?.some((item) => item.tag === tag) || sub.sliderSteps?.some((item) => item.tag === tag)) return sub.id;
-    }
-  }
-  return classifyTag(tag).category;
-}
+function categoryFor(_tag: string): string { return 'custom'; }
 
 const isKind = (value: unknown): value is StudioKind =>
   value === 'character' || value === 'wardrobe' || value === 'scene';

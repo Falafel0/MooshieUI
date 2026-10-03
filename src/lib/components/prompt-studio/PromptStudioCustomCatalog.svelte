@@ -1,101 +1,85 @@
 <script lang="ts">
+  import { untrack, onDestroy } from 'svelte';
   import { customCatalog, catalogPreview } from '../../prompt-studio/custom-catalog.svelte.js';
+  import { parseTagList } from '../../utils/animaIntegration.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
-  import { searchDanbooru } from '../../utils/api.js';
-  import { sourcePreview } from '../../prompt-studio/preview-cache.js';
-  import PromptStudioCachedImage from './PromptStudioCachedImage.svelte';
-  import type { DanbooruPost } from '../../types/index.js';
-  import { onDestroy } from 'svelte';
-  let entryId = $state('');
-  let name = $state('');
-  let tag = $state('');
-  let preview = $state('');
-  let examples = $state<DanbooruPost[]>([]);
-  let busy = $state(false);
-  const ready = $derived(customCatalog.ready);
-  $effect(() => { void customCatalog.load(); });
-  let error = $state('');
+  import { Image, Copy, Trash2, X } from '@lucide/svelte';
+  const entry = $derived(customCatalog.entries.find(row => row.id === studio.catalogEntryId));
+  let name = $state(''), tag = $state(''), description = $state(''), preview = $state('');
+  let aliases = $state(''), context = $state('');
+  let busy = $state(false), error = $state('');
   let request = 0;
-  let input: HTMLInputElement;
-  let query = $state('');
-  const entries = $derived(customCatalog.entries.filter(entry => entry.subId === studio.activeSubId && `${entry.name} ${entry.tag}`.toLowerCase().replaceAll('_', ' ').includes(query.trim().toLowerCase().replaceAll('_', ' '))));
+  const editing = $derived(studio.catalogEntryId === 'new' || !!entry);
+  const parts = (text: string) => [...new Set(parseTagList(text))];
+  $effect(() => {
+    const current = entry; const id = studio.catalogEntryId; const scope = customCatalog.scope;
+    untrack(() => { request++; name = current?.name ?? ''; tag = current?.tag ?? ''; description = current?.description ?? ''; preview = current?.preview ?? ''; aliases = current?.aliases?.join(', ') ?? ''; context = current?.contextualTags?.join(', ') ?? ''; busy = false; error = ''; });
+  });
   onDestroy(() => { request++; });
-  $effect(() => { studio.activeSubId; request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; error = ''; busy = false; });
-  $effect(() => { tag; request++; examples = []; busy = false; error = ''; });
   async function upload(event: Event) {
-    const fileInput = event.currentTarget as HTMLInputElement; const file = fileInput.files?.[0]; fileInput.value = '';
+    const input = event.currentTarget as HTMLInputElement; const file = input.files?.[0]; input.value = '';
     if (!file) return;
-    const id = ++request; busy = true;
-    try { const result = await catalogPreview(file); if (id === request) { preview = result; error = ''; } }
+    const id = ++request; const scope = customCatalog.scope; busy = true; error = '';
+    try { const image = await catalogPreview(file); if (id === request && scope === customCatalog.scope) preview = image; }
     catch { if (id === request) error = locale.t('prompt_studio.import_failed'); }
     finally { if (id === request) busy = false; }
   }
-  async function loadExamples() {
-    const id = ++request; busy = true; error = '';
-    try { const posts = await searchDanbooru(tag, 1, 12, true, 'danbooru'); if (id === request) examples = posts.filter(post => post.rating === 'g' && post.preview_file_url); }
-    catch { if (id === request) error = locale.t('prompt_studio.source_error'); }
-    finally { if (id === request) busy = false; }
+  function save() {
+    if (busy || !tag.trim()) return;
+    const previous = entry;
+    const row = { id: previous?.id, name: name.trim() || tag.trim(), tag: tag.trim(), subId: previous?.subId ?? studio.activeSubId, description, preview, aliases: parts(aliases), contextualTags: parts(context) };
+    if (!customCatalog.add(row)) { error = locale.t('prompt_studio.import_failed'); return; }
+    const saved = customCatalog.entries.find(item => item.tag === row.tag && item.subId === row.subId);
+    if (previous && saved) studio.updateCatalogChoice(previous.tag, saved);
+    studio.catalogEntryId = saved?.id ?? '';
   }
-  async function chooseImage(url: string) {
-    const id = ++request; busy = true; error = '';
-    try { const result = await catalogPreview((await sourcePreview(url)).blob); if (id === request) preview = result; }
-    catch { if (id === request) error = locale.t('prompt_studio.preview_unavailable'); }
-    finally { if (id === request) busy = false; }
-  }
-  async function importFile(event: Event) {
-    const target = event.currentTarget as HTMLInputElement; const file = target.files?.[0]; target.value = '';
-    if (!file) return;
-    if (file.size > 32 * 1024 * 1024) { error = locale.t('prompt_studio.import_failed'); return; }
-    const id = ++request; busy = true; error = '';
-    try {
-      const data = JSON.parse(await file.text());
-      if (id !== request) return;
-      if (!customCatalog.import(data)) throw new Error();
-    }
-    catch { if (id === request) error = locale.t('prompt_studio.import_failed'); }
-    finally { if (id === request) busy = false; }
-  }
+  function remove() { if (entry) customCatalog.remove(entry.id); studio.catalogEntryId = ''; }
 </script>
-<details class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-  <summary class="cursor-pointer text-sm text-indigo-300">{locale.t('prompt_studio.custom_catalog')}</summary>
-  <p class="mt-2 text-xs leading-relaxed text-neutral-400">{locale.t('prompt_studio.custom_catalog_hint')}</p>
-  <div class="mt-3 flex flex-col gap-3">
-    <div class="grid gap-2 sm:grid-cols-2">
-      <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="rounded border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-200" />
-      <input aria-label={locale.t('prompt_studio.custom_tag')} placeholder={locale.t('prompt_studio.custom_tag')} bind:value={tag} class="rounded border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-200" />
+<aside class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+  {#if editing}
+    <div class="flex min-h-32 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
+      {#if preview}<img src={preview} alt={name || tag} class="max-h-80 w-full object-contain" />{:else}<Image size={40} class="my-12 text-neutral-600" />{/if}
     </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <label class="text-xs text-neutral-400">{locale.t('prompt_studio.custom_upload')}<input type="file" accept="image/png,image/jpeg,image/webp" onchange={upload} disabled={!ready || busy} class="ml-2 max-w-56 text-xs" /></label>
-      <button type="button" disabled={busy || !tag.trim() || /[\s:\[\]|]/.test(tag)} class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={loadExamples}>{locale.t('prompt_studio.custom_examples')}</button>
-      <button type="button" disabled={!ready || busy || !tag.trim()} class="touch-target rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-40" onclick={() => { customCatalog.add({ id: entryId || undefined, name: name.trim() || tag.replaceAll('_', ' '), tag: tag.trim(), subId: studio.activeSubId, preview: preview || undefined }); entryId = ''; name = ''; tag = ''; preview = ''; examples = []; }}>{locale.t('common.save')}</button>
-    </div>
-    {#if preview}<div class="flex items-center gap-2"><img src={preview} alt={name || tag} class="h-24 w-24 rounded border border-indigo-500 object-contain" /><button type="button" disabled={busy} class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-400" onclick={() => preview = ''}>{locale.t('prompt_studio.custom_remove_preview')}</button></div>{/if}
-    {#if entryId}<button type="button" disabled={busy} class="touch-target self-start text-xs text-neutral-400" onclick={() => { request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; error = ''; }}>{locale.t('common.cancel')}</button>{/if}
-    {#if busy}<p role="status" class="text-xs text-neutral-400">{locale.t('prompt_studio.loading')}</p>{/if}
-    {#if error || customCatalog.storageError}<p role="alert" class="text-xs text-amber-300">{error || locale.t('prompt_studio.storage_error')}</p>{/if}
-    {#if examples.length}
-      <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
-        {#each examples as post (post.id)}
-          <div class="flex flex-col items-center gap-1 rounded border border-neutral-700 p-2"><PromptStudioCachedImage src={post.preview_file_url!} alt={`#${post.id}`} /><button type="button" disabled={busy} class="touch-target text-[10px] text-neutral-400" onclick={() => chooseImage(post.preview_file_url!)}>{locale.t('prompt_studio.custom_choose_preview', { id: post.id })}</button></div>
-        {/each}
-      </div>
-    {/if}
-    <div class="flex gap-2">
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" disabled={!ready || busy} onclick={() => customCatalog.export()}>{locale.t('prompt_studio.export')}</button>
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" disabled={!ready || busy} onclick={() => input.click()}>{locale.t('prompt_studio.import')}</button>
-      <input type="file" class="hidden" accept="application/json,.json" bind:this={input} onchange={importFile} />
-    </div>
-    {#if !ready && customCatalog.storageError}<button type="button" class="touch-target self-start rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" onclick={() => void customCatalog.load()}>{locale.t('prompt_studio.retry')}</button>{/if}
-    <input type="search" aria-label={locale.t('prompt_studio.search')} placeholder={locale.t('prompt_studio.search')} bind:value={query} class="rounded border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-200" />
-    {#if ready && query.trim() && !entries.length}<p role="status" class="text-xs text-neutral-400">{locale.t('prompt_studio.nothing_found')}</p>{/if}
-    {#each entries as entry (entry.id)}
-      <div class="flex min-w-0 items-center gap-3 rounded border border-neutral-800 p-2">
-        {#if entry.preview}<img src={entry.preview} alt={entry.name} class="h-14 w-14 shrink-0 rounded object-contain" />{/if}
-        <button type="button" class="touch-target min-w-0 flex-1 break-words text-left text-xs text-neutral-200" onclick={() => studio.choose(entry.tag, entry.name, entry.subId, studio.currentSub?.mode === 'single')}>{entry.name}<span class="block text-[10px] text-neutral-500">{entry.tag}</span></button>
-        <button type="button" disabled={!ready || busy} class="touch-target text-xs text-neutral-400" onclick={() => { request++; entryId = entry.id; name = entry.name; tag = entry.tag; preview = entry.preview ?? ''; examples = []; error = ''; }}>{locale.t('common.edit')}</button>
-        <button type="button" disabled={!ready || busy} class="touch-target text-xs text-neutral-500" onclick={() => { customCatalog.remove(entry.id); if (entryId === entry.id) { request++; entryId = ''; name = ''; tag = ''; preview = ''; examples = []; } }}>{locale.t('prompt_studio.remove')}</button>
+    <section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+      <header class="mb-3 flex items-center justify-between"><h3 class="text-xs font-semibold text-amber-300">{locale.t('prompt_studio.tag_info')}</h3><button type="button" aria-label={locale.t('common.close')} class="touch-target rounded p-2 text-neutral-400" onclick={() => studio.catalogEntryId = ''}><X size={15} /></button></header>
+      <form class="flex flex-col gap-3" onsubmit={event => { event.preventDefault(); save(); }}>
+        <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="touch-target rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs text-neutral-200" />
+        <textarea aria-label={locale.t('prompt_studio.custom_tag')} placeholder={locale.t('prompt_studio.custom_tag')} bind:value={tag} rows={2} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea>
+        <textarea aria-label={locale.t('prompt_studio.description')} placeholder={locale.t('prompt_studio.description')} bind:value={description} rows={2} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea>
+        <label class="text-xs text-neutral-400">{locale.t('prompt_studio.aliases')}<input bind:value={aliases} class="touch-target mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-neutral-200" /></label>
+        <label class="text-xs text-neutral-400">{locale.t('prompt_studio.contextual_tags')}<textarea bind:value={context} rows={2} class="mt-1 w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea></label>
+        <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.contextual_tags_hint')}</p>
+        <label class="text-xs text-neutral-400">{locale.t('prompt_studio.custom_upload')}<input type="file" accept="image/png,image/jpeg,image/webp" onchange={upload} disabled={busy} class="mt-2 w-full text-xs" /></label>
+        {#if preview}<button type="button" disabled={busy} class="touch-target text-left text-xs text-neutral-500" onclick={() => preview = ''}>{locale.t('prompt_studio.custom_remove_preview')}</button>{/if}
+        <div class="flex flex-wrap gap-2">
+          <button type="submit" disabled={!customCatalog.ready || busy || !tag.trim()} class="touch-target rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
+          {#if entry}<button type="button" disabled={busy} class="touch-target flex items-center gap-1 rounded-lg border border-neutral-700 px-2 text-xs text-neutral-400" onclick={() => studio.catalogEntryId = customCatalog.duplicate(entry!.id) ?? ''}><Copy size={13} />{locale.t('common.duplicate')}</button><button type="button" disabled={busy} class="touch-target rounded-lg border border-red-900 px-2 text-red-300" aria-label={locale.t('prompt_studio.delete')} onclick={remove}><Trash2 size={14} /></button>{/if}
+        </div>
+      </form>
+      {#if entry && studio.isChosen(entry.tag)}
+        <label class="mt-3 block text-xs text-neutral-400">{locale.t('prompt_studio.weight')}<input type="number" min="0.1" max="2" step="0.05" value={studio.selected.find(item => item.tag === entry!.tag)?.weight ?? 1} onchange={event => studio.weight(entry!.tag, Number(event.currentTarget.value))} class="touch-target mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3" /></label>
+      {/if}
+      {#if entry?.contextualTags?.length}
+        <div class="mt-3 flex flex-wrap gap-1 border-t border-neutral-800 pt-3">
+          {#each entry.contextualTags as modifier (modifier)}<button type="button" class="touch-target rounded-lg border px-2 text-xs {studio.detail(entry.tag).mods.includes(modifier) ? 'border-amber-400 text-amber-300' : 'border-neutral-700 text-neutral-400'}" aria-pressed={studio.detail(entry.tag).mods.includes(modifier)} onclick={() => { if (!studio.isChosen(entry!.tag)) studio.choose(entry!.tag, entry!.name, entry!.subId); studio.toggleModifier(entry!.tag, modifier); }}>{modifier}</button>{/each}
+        </div>
+      {/if}
+      {#if busy}<p role="status" class="mt-3 text-xs text-neutral-400">{locale.t('prompt_studio.loading')}</p>{/if}
+      {#if error}<p role="alert" class="mt-3 text-xs text-amber-300">{error}</p>{/if}
+    </section>
+  {/if}
+  <section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+    <header class="mb-3 flex items-center justify-between gap-2"><h3 class="text-xs font-semibold">{locale.t('prompt_studio.selected_tags')} ({studio.selected.length})</h3><button type="button" class="touch-target px-2 text-xs text-neutral-500" onclick={() => studio.clear()}>{locale.t('prompt_studio.reset')}</button></header>
+    {#if !studio.selected.length}<p class="text-xs text-neutral-500">{locale.t('prompt_studio.empty')}</p>{/if}
+    {#if !editing && studio.currentCategory}<button type="button" class="touch-target mb-3 rounded border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => studio.catalogEntryId = 'new'}>{locale.t('prompt_studio.add_tag')}</button>{/if}
+    {#each studio.selected as item (item.tag)}
+      {@const saved = customCatalog.entries.find(row => row.tag === item.tag && row.subId === item.category)}
+      <div class="mb-2 flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-950 p-2">
+        {#if saved?.preview}<img src={saved.preview} alt="" class="h-10 w-12 shrink-0 rounded object-cover" />{/if}
+        <button type="button" class="touch-target min-w-0 flex-1 break-words text-left text-xs text-neutral-300" onclick={() => { if (saved) studio.catalogEntryId = saved.id; }}>{item.name}</button>
+        <button type="button" aria-label={`${locale.t('prompt_studio.remove_tag')}: ${item.name}`} class="touch-target shrink-0 rounded p-2 text-neutral-500" onclick={() => studio.remove(item.tag)}><X size={14} /></button>
       </div>
     {/each}
-  </div>
-</details>
+  </section>
+</aside>
