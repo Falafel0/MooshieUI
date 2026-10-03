@@ -436,34 +436,46 @@ fn build_extra_model_paths_yaml(model_dirs_str: &str) -> Option<(String, usize)>
     }
     let mut yaml_content = String::new();
     let mut index = 0;
-    for category in [
-        "checkpoints",
-        "vae",
-        "loras",
-        "upscale_models",
-        "embeddings",
-        "controlnet",
-        "clip",
-        "unet",
-        "diffusion_models",
-        "text_encoders",
-        "ultralytics",
-        "model_patches",
-        "style_models",
-        "ipadapter",
-        "clip_vision",
-    ] {
-        let dirs =
-            crate::commands::api::model_install_dirs_for_config("", Some(model_dirs_str), category)
-                .ok()?;
-        for dir in dirs {
-            index += 1;
-            // JSON strings are valid YAML scalars and safely escape Windows
-            // drive colons, backslashes, quotes and control characters.
-            let quoted = serde_json::to_string(&dir.path).ok()?;
-            yaml_content.push_str(&format!(
-                "mooshieui_{index}:\n  base_path: {quoted}\n  {category}: \".\"\n",
-            ));
+    let mut seen = std::collections::BTreeSet::new();
+    // Preserve configured root order, including flat category folders, while
+    // sharing discovery rules with the model manager and deduplicating aliases.
+    for root in model_dirs_str
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        for category in [
+            "checkpoints",
+            "vae",
+            "loras",
+            "upscale_models",
+            "embeddings",
+            "controlnet",
+            "clip",
+            "unet",
+            "diffusion_models",
+            "text_encoders",
+            "ultralytics",
+            "model_patches",
+            "style_models",
+            "ipadapter",
+            "clip_vision",
+        ] {
+            let dirs =
+                crate::commands::api::model_install_dirs_for_config("", Some(root), category)
+                    .ok()?;
+            for dir in dirs {
+                if !seen.insert((category, dir.path.to_lowercase())) {
+                    continue;
+                }
+                index += 1;
+                // JSON strings are valid YAML scalars and safely escape Windows
+                // drive colons, backslashes, quotes and control characters.
+                let quoted = serde_json::to_string(&dir.path).ok()?;
+                yaml_content.push_str(&format!(
+                    "mooshieui_{index}:\n  base_path: {quoted}\n  {category}: \".\"\n",
+                ));
+            }
         }
     }
     Some((yaml_content, count))
