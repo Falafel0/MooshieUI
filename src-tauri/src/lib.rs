@@ -1,5 +1,6 @@
 pub mod attention;
 pub mod auth;
+pub mod booru;
 pub mod comfyui;
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub mod comfyui_version;
@@ -600,6 +601,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::server::start_comfyui,
             commands::server::stop_comfyui,
+            commands::server::stop_all_managed_processes,
             commands::server::kill_port_process,
             commands::server::check_server_health,
             commands::api::get_models,
@@ -655,6 +657,10 @@ pub fn run() {
             commands::api::cdn_proxy_fetch_bytes,
             commands::api::animadex_proxy_fetch,
             commands::api::danbooru_search,
+            commands::api::booru_tag_search,
+            commands::api::booru_tag_groups,
+            commands::api::booru_tag_group,
+            commands::api::booru_credentials_update,
             commands::api::anima_catalog,
             commands::api::anima_source_image,
             commands::api::civitai_search_models,
@@ -791,33 +797,56 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } = event {
-            let state = app_handle.state::<Arc<AppState>>();
-            tauri::async_runtime::block_on(async {
+    let exit_phase = Arc::new(std::sync::atomic::AtomicU8::new(0));
+    app.run(move |app_handle, event| {
+        if let RunEvent::ExitRequested { api, .. } = event {
+            use std::sync::atomic::Ordering;
+
+            // ExitRequested runs on Tauri's event thread. Do not block it while
+            // stopping child processes; keep the window responsive, then exit
+            // once asynchronous cleanup finishes.
+            if exit_phase.load(Ordering::SeqCst) == 2 {
+                return;
+            }
+            api.prevent_exit();
+            if exit_phase
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return;
+            }
+
+            let state = Arc::clone(app_handle.state::<Arc<AppState>>().inner());
+            let app_handle = app_handle.clone();
+            let exit_phase = Arc::clone(&exit_phase);
+            tauri::async_runtime::spawn(async move {
                 media_tools::shutdown(&state).await;
                 prompt_assistant::companion::shutdown().await;
                 commands::music_link::shutdown(&state).await;
                 commands::music_audio_style::shutdown(&state).await;
+                state.output_owners.flush();
+
+                let (keep_alive, patchy_keep_alive) = {
+                    let config = state.config.read().await;
+                    (config.keep_alive, config.patchy_keep_alive)
+                };
+                if !keep_alive {
+                    if let Err(error) = crate::comfyui::process::stop_comfyui_process(&state).await
+                    {
+                        log::warn!("Could not stop managed ComfyUI on exit: {error}");
+                    }
+                } else {
+                    log::info!("Keeping ComfyUI running (keep_alive=true)");
+                }
+                if !patchy_keep_alive && commands::patchy::stop_launched_patchy() {
+                    log::info!("Closed the Patchy editor started by this app");
+                }
+                // Always stop the local prompt-assistant server on exit.
+                state.prompt_assistant.server.unload().await;
+
+                exit_phase.store(2, Ordering::SeqCst);
+                app_handle.exit(0);
             });
-            state.output_owners.flush();
-            let (keep_alive, patchy_keep_alive) = {
-                let config = state.config.blocking_read();
-                (config.keep_alive, config.patchy_keep_alive)
-            };
-            if !keep_alive {
-                crate::comfyui::process::stop_comfyui_process_blocking(&state);
-            } else {
-                log::info!("Keeping ComfyUI running (keep_alive=true)");
-            }
-            if !patchy_keep_alive && commands::patchy::stop_launched_patchy() {
-                // Only the editor this app started is closed; an instance the
-                // user opened themselves is left alone.
-                log::info!("Closed the Patchy editor started by this app");
-            }
-            // Always stop the prompt-assistant llama-server on exit — it is never
-            // meant to outlive the app, regardless of keep_alive.
-            tauri::async_runtime::block_on(state.prompt_assistant.server.unload());
         }
     });
 }

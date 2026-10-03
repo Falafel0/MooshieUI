@@ -16,6 +16,9 @@ use crate::comfyui::types::*;
 use crate::error::AppError;
 use crate::state::AppState;
 
+pub(crate) const CIVITAI_USER_AGENT: &str =
+    "MooshieUI/2.3.8 (Prompt Studio; +https://github.com/Falafel0/MooshieUI)";
+
 /// Compute the full SHA256 hash of a file (uppercase hex).
 /// Compatible with CivitAI's hash database.
 /// For large model files (2-10 GB) this can take a few seconds.
@@ -514,6 +517,14 @@ fn classify_flat_model_dir(path: &std::path::Path) -> &'static str {
         "embeddings"
     } else if name.contains("ultralytic") || name.contains("face") {
         "ultralytics"
+    } else if name.contains("model_patch") || name.contains("modelpatch") {
+        "model_patches"
+    } else if name.contains("clip_vision") || name.contains("clipvision") {
+        "clip_vision"
+    } else if name.contains("ipadapter") || name.contains("ip_adapter") {
+        "ipadapter"
+    } else if name.contains("style_model") || name.contains("stylemodel") {
+        "style_models"
     } else if name.contains("clip")
         || name.contains("text_encoder")
         || name.contains("text-encoder")
@@ -627,7 +638,19 @@ pub(crate) fn model_install_dirs_for_config(
             .file_name()
             .map(|n| format!("App ({})", n.to_string_lossy()))
             .unwrap_or_else(|| "App".to_string());
-        push_model_install_dir(&mut dirs, &mut seen, primary, label);
+        push_model_install_dir(&mut dirs, &mut seen, primary, label.clone());
+        if matches!(
+            category,
+            "diffusion_models" | "unet" | "text_encoders" | "clip"
+        ) {
+            let models = std::path::Path::new(comfyui_path).join("models");
+            for subdir in category_subdirs(category) {
+                let candidate = models.join(subdir);
+                if !subdir.contains('/') && candidate.is_dir() {
+                    push_model_install_dir(&mut dirs, &mut seen, candidate, label.clone());
+                }
+            }
+        }
     }
 
     if let Some(extra) = extra_model_paths {
@@ -638,7 +661,24 @@ pub(crate) fn model_install_dirs_for_config(
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| line.to_string());
 
-            if is_structured_model_dir(&base) {
+            let explicit_category =
+                base.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        known_model_subdirs().iter().any(|subdir| {
+                            !subdir.contains('/') && name.eq_ignore_ascii_case(subdir)
+                        })
+                    });
+            if explicit_category {
+                let classified = classify_flat_model_dir(&base);
+                let matches = classified == category
+                    || (classified == "text_encoders" && category == "clip")
+                    || (classified == "diffusion_models" && category == "unet");
+                if matches {
+                    push_model_install_dir(&mut dirs, &mut seen, base, base_label);
+                }
+            } else if is_structured_model_dir(&base) {
+                let mut found_category_dir = false;
                 for subdir in category_subdirs(category) {
                     let candidate = base.join(subdir);
                     if candidate.is_dir() {
@@ -648,9 +688,25 @@ pub(crate) fn model_install_dirs_for_config(
                             base_label.clone()
                         };
                         push_model_install_dir(&mut dirs, &mut seen, candidate, label);
+                        found_category_dir = true;
                     }
                 }
-            } else if classify_flat_model_dir(&base) == category {
+                // A structured shared root may not have a folder for every
+                // category yet. Offer the canonical folder so downloads and
+                // the model manager can create it instead of silently
+                // discarding the user's configured root.
+                if !found_category_dir {
+                    push_model_install_dir(
+                        &mut dirs,
+                        &mut seen,
+                        base.join(category),
+                        format!("{} / {}", base_label, category),
+                    );
+                }
+            } else if classify_flat_model_dir(&base) == category
+                || (classify_flat_model_dir(&base) == "text_encoders" && category == "clip")
+                || (classify_flat_model_dir(&base) == "diffusion_models" && category == "unet")
+            {
                 push_model_install_dir(&mut dirs, &mut seen, base.to_path_buf(), base_label);
             }
         }
@@ -1350,13 +1406,27 @@ pub async fn danbooru_search_impl(
         .append_pair("tags", &query)
         .append_pair("page", &page.max(1).to_string())
         .append_pair("limit", &limit.clamp(1, 40).to_string());
-    let response = state
+    let credentials = booru_credentials(state).await;
+    let auth = if source.as_deref().unwrap_or("danbooru") == "danbooru" {
+        credentials
+            .danbooru_login
+            .as_deref()
+            .zip(credentials.danbooru_api_key.as_deref())
+    } else {
+        None
+    };
+    crate::booru::throttle("danbooru", auth.is_some()).await;
+    let mut request = state
         .http_client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "MooshieUI/AnimaPromptStudio")
+        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT);
+    if let Some((login, key)) = auth {
+        request = request.basic_auth(login, Some(key));
+    }
+    let response = request
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Danbooru search failed: {e}")))?;
+        .map_err(|e| AppError::Other(format!("Danbooru search failed: {}", e.without_url())))?;
     if !response.status().is_success() {
         return Err(AppError::ApiError {
             status: response.status().as_u16(),
@@ -1410,6 +1480,145 @@ pub async fn danbooru_search(
     danbooru_search_impl(state.as_ref(), tags, page, limit, safe_mode, source).await
 }
 
+/// Credentials for the booru tag sources, read out of the owner-only config.
+async fn booru_credentials(state: &AppState) -> crate::booru::Credentials {
+    let config = state.config.read().await;
+    crate::booru::Credentials::from_config(&config)
+}
+
+/// Live tag search across Danbooru, Gelbooru and e621 in one shape.
+pub async fn booru_tag_search_impl(
+    state: &AppState,
+    source: String,
+    query: String,
+    limit: u32,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_search_page_impl(state, source, query, limit, 1).await
+}
+
+pub async fn booru_tag_search_page_impl(
+    state: &AppState,
+    source: String,
+    query: String,
+    limit: u32,
+    page: u32,
+) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let tags = crate::booru::tag_search_page(
+        &state.http_client,
+        &credentials,
+        &source,
+        &query,
+        limit,
+        page,
+    )
+    .await
+    .map_err(AppError::Other)?;
+    serde_json::to_value(tags).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Danbooru's curated `tag_groups` tree (section → group).
+pub async fn booru_tag_groups_impl(state: &AppState) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let sections = crate::booru::group_index(&state.http_client, &credentials)
+        .await
+        .map_err(AppError::Other)?;
+    serde_json::to_value(sections).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// The tag list behind one curated group, e.g. `tag group:hair color`.
+pub async fn booru_tag_group_impl(
+    state: &AppState,
+    title: String,
+) -> Result<serde_json::Value, AppError> {
+    let credentials = booru_credentials(state).await;
+    let page = crate::booru::group_page(&state.http_client, &credentials, &title)
+        .await
+        .map_err(AppError::Other)?;
+    serde_json::to_value(page).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Write-only settings path for booru credentials. The regular config response
+/// never needs to send these values back to the browser.
+pub async fn booru_credentials_update_impl(
+    state: &AppState,
+    mut credentials: crate::booru::Credentials,
+    clear: bool,
+) -> Result<(), AppError> {
+    credentials.normalize();
+    let mut config = state.config.write().await;
+    let mut updated = config.clone();
+    if clear {
+        updated.danbooru_login = None;
+        updated.danbooru_api_key = None;
+        updated.gelbooru_user_id = None;
+        updated.gelbooru_api_key = None;
+        updated.e621_login = None;
+        updated.e621_api_key = None;
+    } else {
+        if credentials.danbooru_login.is_some() {
+            updated.danbooru_login = credentials.danbooru_login;
+        }
+        if credentials.danbooru_api_key.is_some() {
+            updated.danbooru_api_key = credentials.danbooru_api_key;
+        }
+        if credentials.gelbooru_user_id.is_some() {
+            updated.gelbooru_user_id = credentials.gelbooru_user_id;
+        }
+        if credentials.gelbooru_api_key.is_some() {
+            updated.gelbooru_api_key = credentials.gelbooru_api_key;
+        }
+        if credentials.e621_login.is_some() {
+            updated.e621_login = credentials.e621_login;
+        }
+        if credentials.e621_api_key.is_some() {
+            updated.e621_api_key = credentials.e621_api_key;
+        }
+    }
+    crate::config::save_config(&updated).map_err(AppError::Other)?;
+    *config = updated;
+    Ok(())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_search(
+    state: State<'_, Arc<AppState>>,
+    source: String,
+    query: String,
+    limit: u32,
+    page: Option<u32>,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_search_page_impl(state.as_ref(), source, query, limit, page.unwrap_or(1)).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_groups(
+    state: State<'_, Arc<AppState>>,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_groups_impl(state.as_ref()).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_tag_group(
+    state: State<'_, Arc<AppState>>,
+    title: String,
+) -> Result<serde_json::Value, AppError> {
+    booru_tag_group_impl(state.as_ref(), title).await
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn booru_credentials_update(
+    state: State<'_, Arc<AppState>>,
+    credentials: crate::booru::Credentials,
+    clear: bool,
+) -> Result<(), AppError> {
+    booru_credentials_update_impl(state.as_ref(), credentials, clear).await
+}
+
 /// Read upstream catalog data as JSON; never execute the JavaScript wrapper.
 pub async fn anima_catalog_impl(
     state: &AppState,
@@ -1430,6 +1639,7 @@ pub async fn anima_catalog_impl(
         .get(format!(
             "https://raw.githubusercontent.com/nregret/Comfyui-Anima-Tools/main/js/{file}"
         ))
+        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT)
         .send()
         .await?
         .error_for_status()?;
@@ -1453,6 +1663,9 @@ pub async fn anima_source_image_impl(state: &AppState, url: &str) -> Result<Vec<
     let url = reqwest::Url::parse(url).map_err(|e| AppError::Other(e.to_string()))?;
     let host = url.host_str().unwrap_or("");
     if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
         || !(host == "cdn.jsdelivr.net" || host == "donmai.us" || host.ends_with(".donmai.us"))
     {
         return Err(AppError::Other("Unsupported source image host".into()));
@@ -1460,11 +1673,27 @@ pub async fn anima_source_image_impl(state: &AppState, url: &str) -> Result<Vec<
     let mut response = state
         .http_client_no_redirect
         .get(url)
+        .header(reqwest::header::USER_AGENT, CIVITAI_USER_AGENT)
         .send()
         .await?
         .error_for_status()?;
     if response.status().is_redirection() {
         return Err(AppError::Other("Image redirect is not supported".into()));
+    }
+    let mime = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .unwrap_or("")
+        .trim();
+    if !matches!(
+        mime,
+        "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+    ) {
+        return Err(AppError::Other(
+            "Source did not return a supported image".into(),
+        ));
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
@@ -4077,7 +4306,7 @@ async fn civitai_lookup_hash_value(state: &Arc<AppState>, hash: &str) -> Result<
     let mut req = state
         .http_client
         .get(&url)
-        .header("User-Agent", "MooshieUI/0.3.9");
+        .header("User-Agent", CIVITAI_USER_AGENT);
     if let Some(key) = api_key.filter(|v| !v.trim().is_empty()) {
         req = req.bearer_auth(key);
     }
@@ -4103,22 +4332,25 @@ async fn civitai_lookup_hash_value(state: &Arc<AppState>, hash: &str) -> Result<
     Ok(data)
 }
 
-/// Parse a CivitAI image id from a numeric string or `https://civitai.com/images/{id}` URL.
-pub(crate) fn parse_civitai_image_id_pub(image_ref: &str) -> Result<u64, AppError> {
-    parse_civitai_image_id(image_ref)
-}
-
+/// Parse a positive image id or an HTTPS .com/.red image-page URL.
 fn parse_civitai_image_id(image_ref: &str) -> Result<u64, AppError> {
     let trimmed = image_ref.trim();
-    if let Ok(id) = trimmed.parse::<u64>() {
-        return Ok(id);
+    if !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        if let Ok(id) = trimmed.parse::<u64>() {
+            if id > 0 {
+                return Ok(id);
+            }
+        }
     }
-    const MARKER: &str = "/images/";
-    if let Some(pos) = trimmed.find(MARKER) {
-        let rest = &trimmed[pos + MARKER.len()..];
-        let id_str = rest.split(&['/', '?', '#'][..]).next().unwrap_or("").trim();
-        if let Ok(id) = id_str.parse::<u64>() {
-            return Ok(id);
+    let parsed = parse_civitai_image_url(trimmed)?;
+    if let Some(rest) = parsed.path().strip_prefix("/images/") {
+        let id_str = rest.split('/').next().unwrap_or("");
+        if !id_str.is_empty() && id_str.bytes().all(|b| b.is_ascii_digit()) {
+            if let Ok(id) = id_str.parse::<u64>() {
+                if id > 0 {
+                    return Ok(id);
+                }
+            }
         }
     }
     Err(AppError::Other(format!(
@@ -4127,12 +4359,25 @@ fn parse_civitai_image_id(image_ref: &str) -> Result<u64, AppError> {
     )))
 }
 
-fn is_allowed_civitai_image_host(host: &str) -> bool {
-    // Accept civitai.com and any of its subdomains (image.civitai.com,
-    // cdn.civitai.com, and any future image host CivitAI introduces). The
-    // trailing-dot match keeps look-alikes like "civitai.com.evil.test" out.
+pub(crate) fn is_allowed_civitai_image_host(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
-    host == "civitai.com" || host.ends_with(".civitai.com")
+    ["civitai.com", "civitai.red"]
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+/// Both public sites expose v1 images. Preserve the selected site; numeric IDs
+/// default to .com. Never derive an API authority from arbitrary user input.
+pub(crate) fn civitai_image_lookup_url(image_ref: &str) -> Result<String, AppError> {
+    let id = parse_civitai_image_id(image_ref)?;
+    let is_red = reqwest::Url::parse(image_ref.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .is_some_and(|host| host == "civitai.red" || host.ends_with(".civitai.red"));
+    let host = if is_red { "civitai.red" } else { "civitai.com" };
+    Ok(format!(
+        "https://{host}/api/v1/images?imageId={id}&withMeta=true"
+    ))
 }
 
 pub(crate) fn parse_civitai_image_url(url: &str) -> Result<reqwest::Url, AppError> {
@@ -4144,6 +4389,11 @@ pub(crate) fn parse_civitai_image_url(url: &str) -> Result<reqwest::Url, AppErro
     let host = parsed
         .host_str()
         .ok_or_else(|| AppError::Other("CivitAI image URL is missing a host".into()))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() || parsed.port().is_some() {
+        return Err(AppError::Other(
+            "CivitAI image URL must not contain credentials or a custom port".into(),
+        ));
+    }
     if !is_allowed_civitai_image_host(host) {
         return Err(AppError::Other(
             "Only CivitAI image URLs can be used as sidecar thumbnails".into(),
@@ -4169,13 +4419,10 @@ pub(crate) async fn fetch_civitai_image_bytes(
         // CivitAI redirects image requests to its CDN, which is not on a
         // civitai.com host. Only attach the user's token while we are still on a
         // CivitAI host so it can never leak to the CDN or any other origin.
-        let on_civitai_host = current
-            .host_str()
-            .map(is_allowed_civitai_image_host)
-            .unwrap_or(false);
+        let on_civitai_host = parse_civitai_image_url(current.as_str()).is_ok();
         let mut req = client
             .get(current.clone())
-            .header("User-Agent", "MooshieUI/0.5.7");
+            .header("User-Agent", CIVITAI_USER_AGENT);
         if on_civitai_host {
             if let Some(key) = civitai_api_key.as_ref().filter(|v| !v.trim().is_empty()) {
                 req = req.bearer_auth(key);
@@ -4260,16 +4507,12 @@ pub async fn civitai_lookup_image(
     state: State<'_, Arc<AppState>>,
     image_ref: String,
 ) -> Result<Value, AppError> {
-    let image_id = parse_civitai_image_id(&image_ref)?;
+    let url = civitai_image_lookup_url(&image_ref)?;
     let api_key = state.config.read().await.civitai_api_key.clone();
-    let url = format!(
-        "https://civitai.com/api/v1/images?imageId={}&withMeta=true",
-        image_id
-    );
     let mut req = state
         .http_client
         .get(&url)
-        .header("User-Agent", "MooshieUI/0.5.7");
+        .header("User-Agent", CIVITAI_USER_AGENT);
     if let Some(key) = api_key.filter(|v| !v.trim().is_empty()) {
         req = req.bearer_auth(key);
     }
@@ -5286,7 +5529,7 @@ pub async fn civitai_search_models_internal(
         .http_client
         .get(&url)
         .header("Accept", "application/json")
-        .header("User-Agent", "MooshieUI/0.3.9");
+        .header("User-Agent", CIVITAI_USER_AGENT);
 
     if let Some(key) = civitai_key_with_fallback(state, params.api_key).await {
         req = req.bearer_auth(key);
@@ -5333,7 +5576,7 @@ pub async fn civitai_get_model_internal(
         .http_client
         .get(&url)
         .header("Accept", "application/json")
-        .header("User-Agent", "MooshieUI/0.3.9");
+        .header("User-Agent", CIVITAI_USER_AGENT);
 
     if let Some(key) = civitai_key_with_fallback(state, api_key).await {
         req = req.bearer_auth(key);
@@ -5443,7 +5686,7 @@ pub async fn civitai_list_architectures(
             .http_client
             .get("https://civitai.com/api/v1/models")
             .header("Accept", "application/json")
-            .header("User-Agent", "MooshieUI/0.3.9")
+            .header("User-Agent", CIVITAI_USER_AGENT)
             .query(&[("limit", "100")]);
 
         if let Some(ref c) = cursor {
@@ -5550,7 +5793,7 @@ pub(crate) async fn read_modelspec_internal(
     // metadata, and hash lookups still apply. Without them a GGUF diffusion
     // model (e.g. Krea-2-Turbo-Q5_K_S.gguf) stays family "unknown" and the
     // split-model text-encoder type is never resolved.
-    let is_safetensors = filename.ends_with(".safetensors");
+    let is_safetensors = filename.to_ascii_lowercase().ends_with(".safetensors");
     let is_gguf = filename.to_ascii_lowercase().ends_with(".gguf");
     if !is_safetensors && !is_gguf {
         return Ok(None);
@@ -6535,6 +6778,7 @@ pub(crate) fn category_subdirs(category: &str) -> &'static [&'static str] {
             "models/Stable-diffusion",
             "Models/Stable-Diffusion",
             "Models/StableDiffusion",
+            "dlbackend/comfyui/models/checkpoints",
         ],
         "loras" => &[
             "loras",
@@ -6552,8 +6796,15 @@ pub(crate) fn category_subdirs(category: &str) -> &'static [&'static str] {
             "Models/Lora",
             "Models/loras",
             "Models/LyCORIS",
+            "dlbackend/comfyui/models/loras",
         ],
-        "vae" => &["vae", "VAE", "models/VAE", "Models/VAE"],
+        "vae" => &[
+            "vae",
+            "VAE",
+            "models/VAE",
+            "Models/VAE",
+            "dlbackend/comfyui/models/vae",
+        ],
         "upscale_models" => &[
             "upscale_models",
             "ESRGAN",
@@ -6561,21 +6812,40 @@ pub(crate) fn category_subdirs(category: &str) -> &'static [&'static str] {
             "models/RealESRGAN",
             "Models/ESRGAN",
             "Models/RealESRGAN",
+            "dlbackend/comfyui/models/upscale_models",
         ],
         "embeddings" => &[
             "embeddings",
             "models/TextualInversion",
             "Models/TextualInversion",
+            "dlbackend/comfyui/models/embeddings",
         ],
         "controlnet" => &[
             "controlnet",
             "ControlNet",
             "models/ControlNet",
             "Models/ControlNet",
+            "dlbackend/comfyui/models/controlnet",
         ],
-        "clip" => &["clip", "models/clip", "Models/clip"],
-        "unet" => &["unet", "models/unet", "Models/unet"],
-        "diffusion_models" => &[
+        "clip" | "text_encoders" => &[
+            "text_encoders",
+            "TextEncoders",
+            "clip",
+            "models/text_encoders",
+            "models/TextEncoders",
+            "Models/text_encoders",
+            "Models/TextEncoders",
+            "models/clip",
+            "Models/clip",
+            "dlbackend/comfyui/models/text_encoders",
+            "dlbackend/comfyui/models/clip",
+        ],
+        "unet" | "diffusion_models" => &[
+            "unet",
+            "models/unet",
+            "Models/unet",
+            "dlbackend/comfyui/models/unet",
+            "dlbackend/comfyui/models/diffusion_models",
             "diffusion_models",
             "DiffusionModels",
             "models/diffusion_models",
@@ -6583,26 +6853,25 @@ pub(crate) fn category_subdirs(category: &str) -> &'static [&'static str] {
             "Models/diffusion_models",
             "Models/DiffusionModels",
         ],
-        "text_encoders" => &[
-            "text_encoders",
-            "TextEncoders",
-            "models/text_encoders",
-            "models/TextEncoders",
-            "Models/text_encoders",
-            "Models/TextEncoders",
+        "ultralytics" => &[
+            "ultralytics",
+            "models/ultralytics",
+            "Models/ultralytics",
+            "dlbackend/comfyui/models/ultralytics",
         ],
-        "ultralytics" => &["ultralytics", "models/ultralytics", "Models/ultralytics"],
         "model_patches" => &[
             "model_patches",
             "ModelPatches",
             "models/model_patches",
             "Models/model_patches",
+            "dlbackend/comfyui/models/model_patches",
         ],
         "style_models" => &[
             "style_models",
             "StyleModels",
             "models/style_models",
             "Models/style_models",
+            "dlbackend/comfyui/models/style_models",
         ],
         "ipadapter" => &[
             "ipadapter",
@@ -6610,12 +6879,14 @@ pub(crate) fn category_subdirs(category: &str) -> &'static [&'static str] {
             "ip_adapter",
             "models/ipadapter",
             "Models/ipadapter",
+            "dlbackend/comfyui/models/ipadapter",
         ],
         "clip_vision" => &[
             "clip_vision",
             "CLIPVision",
             "models/clip_vision",
             "Models/clip_vision",
+            "dlbackend/comfyui/models/clip_vision",
         ],
         _ => &[],
     }
@@ -6636,35 +6907,11 @@ pub(crate) fn resolve_model_path(
         return None;
     }
 
-    // Primary ComfyUI directory always uses the canonical category name
-    let primary = std::path::Path::new(comfyui_path)
-        .join("models")
-        .join(category)
-        .join(filename);
-    if primary.exists() {
-        return Some(primary);
-    }
-
-    if let Some(extra) = extra_model_paths {
-        let subdirs = category_subdirs(category);
-        for dir in extra
-            .split('\n')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            let base = resolve_extra_model_root(std::path::Path::new(dir));
-            // Try all known subdirectory variants for this category
-            for subdir in subdirs {
-                let candidate = base.join(subdir).join(filename);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
-            }
-            // Flat directory: file directly in the root
-            let flat = base.join(filename);
-            if flat.exists() {
-                return Some(flat);
-            }
+    let dirs = model_install_dirs_for_config(comfyui_path, extra_model_paths, category).ok()?;
+    for dir in dirs {
+        let candidate = std::path::Path::new(&dir.path).join(filename);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None
@@ -6819,7 +7066,7 @@ pub async fn get_lora_civitai_info(
     let mut civitai_req = state
         .http_client
         .get(&civitai_url)
-        .header("User-Agent", "MooshieUI/0.3.9");
+        .header("User-Agent", CIVITAI_USER_AGENT);
     if let Some(key) = civitai_api_key.filter(|v| !v.trim().is_empty()) {
         civitai_req = civitai_req.bearer_auth(key);
     }
@@ -7049,7 +7296,7 @@ pub async fn get_checkpoint_civitai_info(
     let mut civitai_req = state
         .http_client
         .get(&civitai_url)
-        .header("User-Agent", "MooshieUI/0.3.9");
+        .header("User-Agent", CIVITAI_USER_AGENT);
     if let Some(key) = civitai_api_key.filter(|v| !v.trim().is_empty()) {
         civitai_req = civitai_req.bearer_auth(key);
     }

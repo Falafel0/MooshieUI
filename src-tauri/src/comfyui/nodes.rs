@@ -252,6 +252,8 @@ const IPADAPTER_PLUS_PACKAGES: &[RequiredCustomNodePackage] = &[RequiredCustomNo
 }];
 
 const REQUIRED_MOOSHIE_NODE_CLASSES: &[&str] = &[
+    "MooshieAlternatingTextEncode",
+    "MooshiePromptAlternation",
     "MooshieRegionalMask",
     "MooshieInpaintPrepare",
     "MooshieInpaintControl",

@@ -12,6 +12,7 @@
   import CompareViewer from "./lib/components/gallery/CompareViewer.svelte";
   import ModelHubPage from "./lib/components/modelhub/ModelHubPage.svelte";
   import { ArtistGalleryPage } from "./lib/artist-gallery/index.js";
+  import PromptStudio from "./lib/components/prompt-studio/PromptStudio.svelte";
   import { connection } from "./lib/stores/connection.svelte.js";
   import { startup } from "./lib/stores/startup.svelte.js";
   import { progress } from "./lib/stores/progress.svelte.js";
@@ -27,6 +28,7 @@
   import { prepareOutputImageForEditMode } from "./lib/utils/editImagePreparation.js";
   import { shouldSuppressRegionalChainGallerySave, clearRegionalChainGallerySuppress } from "./lib/utils/regionalChainGallery.js";
   import { generation } from "./lib/stores/generation.svelte.js";
+  import { studio } from "./lib/prompt-studio/studio.svelte.js";
   import { music } from "./lib/stores/music.svelte.js";
   import { musicCover } from "./lib/stores/musicCover.svelte.js";
   import { stopScorePreview } from "./lib/utils/musicPreview.js";
@@ -184,7 +186,7 @@
   const FETCH_TIMEOUT_MS = 45_000;
   const GENERATION_DONE_TOAST_VISIBLE_MS = 6_000;
   const GENERATION_DONE_TOAST_EXIT_MS = 220;
-  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "settings";
+  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "studio" | "settings";
   type GenerationDoneToast = {
     id: number;
     imageUrl: string;
@@ -3935,8 +3937,37 @@
           ><path d="M12 19l7-7 3 3-7 7-3-3z" /><path
             d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"
           /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" /></svg
-        >
-      </button>
+          >
+          </button>
+          <button
+          class="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage === 'studio'
+            ? 'bg-indigo-600 text-white'
+            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+          onclick={() => (currentPage = "studio")}
+          title={locale.t('nav.prompt_studio')}
+          aria-label={locale.t('nav.prompt_studio')}
+          aria-current={currentPage === "studio" ? "page" : undefined}
+          >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="w-4.5 h-4.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M12 3v4" /><path d="M12 17v4" /><path d="M3 12h4" /><path d="M17 12h4" /><path
+              d="m5.6 5.6 2.8 2.8"
+            /><path d="m15.6 15.6 2.8 2.8" /><path d="m18.4 5.6-2.8 2.8" /><path d="m8.4 15.6-2.8 2.8" /></svg
+          >
+          {#if studio.selected.length}
+            <span
+              class="absolute -top-1 -right-1 min-w-4 h-4 rounded-full bg-indigo-400 px-0.5 text-[9px] font-bold text-white flex items-center justify-center pointer-events-none"
+              >{studio.selected.length}</span
+            >
+          {/if}
+          </button>
       {#if progress.isGenerating && progress.currentMode !== "video"}
         <div
           class="absolute -top-1 -right-1 min-w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center px-0.5 pointer-events-none
@@ -4293,6 +4324,8 @@
         ongeneratePreview={handleArtistGeneratePreview}
         previewStatus={artistPreviewStatus}
       />
+    {:else if currentPage === "studio"}
+      <PromptStudio onApply={() => (currentPage = "generate")} />
     {:else if currentPage === "settings"}
       <SettingsPage {userRole} section={settingsSection} />
     {/if}

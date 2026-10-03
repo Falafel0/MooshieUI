@@ -1,5 +1,30 @@
 # Changelog
 
+## What's New in v2.3.8-fork.3
+
+### Native Prompt Studio
+- Adds a dedicated prompt-building workspace with local and live tag search, weighted tags, relation handling, conflict resolution, undo/redo, random artist tags and a ban list.
+- Adds live Danbooru, Gelbooru and e621 sources, Danbooru tag-group browsing, and Atelier-compatible preset import/export.
+- Adds admin-only booru credential settings. Credential values are write-only and never returned to the UI; clients receive configured flags only.
+- Adds a persistent native-tab layout, editable prompt output that preserves the constructor draft, safer preset replacement, import/export and generation-preset saving.
+- Expands and sorts the tag catalogue, adds progressively loaded live results, and caches verified general-rated Danbooru thumbnails locally for seven days (24 MB / 64 entries).
+
+### Prompt alternation
+- Adds every-step `[red|blue]` and `[red|blue|green]` conditioning for supported ComfyUI image models and fixed-step samplers, with escaped literals and weighted branches.
+- Reports unsupported sampler/model combinations, prediction caching, structured Anima composer/mixer and pause/resume instead of silently ignoring alternation. Restart app-managed ComfyUI to install the updated nodes.
+
+### Model and source reliability
+- Uses one directory resolver for model discovery, metadata lookup and ComfyUI extra-path configuration, including explicitly configured folders on other Windows drives and legacy encoder/diffusion aliases.
+- Resolves split-model text encoder types independently of optional recommended filenames and clears stale metadata loading state.
+- Recognizes CivitAI `.com` and `.red` model/image/download links and rejects stale search responses.
+- Fixes Danbooru, Gelbooru and e621 tag pagination, duplicate responses and concurrent request throttling. Saved Danbooru credentials are applied by the backend without exposing them to the UI.
+- Adds managed-service stop controls and asynchronous exit cleanup while preserving existing keep-alive preferences.
+
+### Validation notes
+- Desktop/server compile checks, frontend build, type checks and live authorized source/thumbnail requests were exercised. No automated test suites or real-checkpoint GPU render were run for this update.
+
+---
+
 ## What's New in v2.3.8-fork.2
 
 ### Anima Prompt Studio

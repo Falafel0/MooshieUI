@@ -5,6 +5,7 @@ import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js"
 import {
   parseRegionalPrompt,
   parseScheduledPrompt,
+  preservePromptAlternation,
 } from "../utils/promptSchedule.js";
 import { parseSegmentDetailPrompt } from "../utils/promptSegmentDetail.js";
 import {
@@ -398,7 +399,10 @@ function translateInvokeAiWeightSyntax(prompt: string): string {
 
 /** Apply InvokeAI translation, then NAI translation, to a prompt string. */
 function translatePromptWeightSyntax(prompt: string): string {
-  return translateNaiWeightSyntax(translateInvokeAiWeightSyntax(prompt));
+  return preservePromptAlternation(
+    prompt,
+    (text) => translateNaiWeightSyntax(translateInvokeAiWeightSyntax(text)),
+  );
 }
 
 type StylePresetId = "none" | "anime" | "cinematic" | "photoreal" | "digital_art" | "line_art";
@@ -1685,7 +1689,7 @@ class GenerationStore {
     // GGUF carries no safetensors header, but the backend still resolves
     // family/turbo/recommended-encoder info from the filename and sidecars.
     const supportsSpec =
-      filename.endsWith(".safetensors") || filename.toLowerCase().endsWith(".gguf");
+      filename.toLowerCase().endsWith(".safetensors") || filename.toLowerCase().endsWith(".gguf");
     if (!filename || !supportsSpec) {
       this.clearModelMetadata();
       return;
@@ -1700,11 +1704,16 @@ class GenerationStore {
         modelFamily: manualOverride,
         modelIsSdxlLike: familyIsSdxlLike(manualOverride),
       });
+      this.ensureRecommendedSplitClip(models.textEncoders);
       this.applyModelSpecificPreset();
       return;
     }
 
-    if (metadataKey === this._loadedModelMetadataKey && this.modelFamily !== "unknown") return;
+    if (metadataKey === this._loadedModelMetadataKey && this.modelFamily !== "unknown") {
+      this.ensureRecommendedSplitClip(models.textEncoders);
+      this.ensureRecommendedSplitVae(models.vaes);
+      return;
+    }
 
     const requestId = ++this._latestModelMetadataRequestId;
     this.isModelMetadataLoading = true;
@@ -1745,6 +1754,10 @@ class GenerationStore {
       this.modelSpec = null;
       this.modelSpecUnavailable = true;
       this.applyModelMetadata(UNKNOWN_MODEL_METADATA);
+    } finally {
+      if (requestId === this._latestModelMetadataRequestId) {
+        this.isModelMetadataLoading = false;
+      }
     }
   }
 
@@ -1795,18 +1808,35 @@ class GenerationStore {
     if (!this.useSplitModel) return;
 
     const recommendedModel = this.modelRecommendedClipModel?.trim();
-    const recommendedType = this.modelRecommendedClipType?.trim();
-    if (!recommendedModel || !recommendedType) return;
+    // The backend deliberately omits the model when no compatible encoder is
+    // installed. Its loader type is still valid and must not be discarded.
+    // Family-only overrides also need a type without inventing an encoder.
+    const familyTypes: Partial<Record<ModelFamily, string>> = {
+      anima: "wan", wan: "wan", qwen: "qwen_image",
+      qwen_edit: "qwen_image", qwen_edit_plus: "qwen_image",
+      flux: "chroma", flux1d: "chroma", flux1s: "chroma",
+      flux1krea: "chroma", flux1kontext: "chroma", chroma: "chroma",
+      flux2d: "flux2", flux2klein9b: "flux2", flux2klein9bbase: "flux2",
+      flux2klein4b: "flux2", flux2klein4bbase: "flux2",
+      zib: "lumina2", zit: "lumina2", krea2: "krea2", ideogram4: "ideogram4",
+    };
+    const recommendedType = this.modelRecommendedClipType?.trim() || familyTypes[this.modelFamily];
+    if (!recommendedType) return;
 
     const currentModel = this.clipModel?.trim() ?? "";
     const currentType = this.clipType?.trim() ?? "";
-    const currentMissing = !!currentModel && !encoders.includes(currentModel);
-
-    if (!currentModel || currentMissing || currentType !== recommendedType) {
-      this.clipModel = recommendedModel;
+    const currentMissing = encoders.length > 0 && !!currentModel && !encoders.includes(currentModel);
+    let changed = false;
+    if (currentType !== recommendedType) {
       this.clipType = recommendedType;
-      if (save) this.saveSettings();
+      changed = true;
     }
+    if (recommendedModel && encoders.includes(recommendedModel)
+      && (!currentModel || currentMissing || currentType !== recommendedType)) {
+      this.clipModel = recommendedModel;
+      changed = true;
+    }
+    if (changed && save) this.saveSettings();
   }
 
   ensureRecommendedSplitVae(vaes: string[], save = false): void {
@@ -3484,6 +3514,7 @@ class GenerationStore {
     const isVideo = this._mode === "video";
 
     if (!isVideo && this.useSplitModel) {
+      this.ensureRecommendedSplitClip(models.textEncoders);
       if (!this.diffusionModel) {
         throw new Error("Split model is selected, but no diffusion model is resolved yet.");
       }
@@ -3491,7 +3522,9 @@ class GenerationStore {
         throw new Error("Split model text encoder is still loading.");
       }
       if (!this.clipType) {
-        throw new Error("Split model text encoder type is still loading.");
+        throw new Error(this.isModelMetadataLoading
+          ? "Split model text encoder type is still loading."
+          : "Could not determine the split model text encoder type. Select the model family or a supported diffusion model.");
       }
       if (!this.vae) {
         throw new Error("Split model VAE is still loading.");

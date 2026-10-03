@@ -21,6 +21,12 @@ fn default_true() -> bool {
     true
 }
 
+const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
+
+fn current_config_schema_version() -> u32 {
+    CURRENT_CONFIG_SCHEMA_VERSION
+}
+
 /// A user-supplied ONNX tagger folder registered as a custom model.
 /// MooshieUI never downloads or deletes these files; the user manages them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,8 +90,11 @@ pub struct AppConfig {
     pub extra_args: Vec<String>,
     /// VRAM management mode: "auto", "high", "normal", "low", "none"
     pub vram_mode: String,
-    /// Keep ComfyUI running after the app closes (default: false)
+    /// Keep ComfyUI running after the app closes (default: true)
     pub keep_alive: bool,
+    /// Internal config migration marker.
+    #[serde(default = "current_config_schema_version")]
+    pub config_schema_version: u32,
     /// Automatically start ComfyUI when the app launches (default: true)
     pub auto_start: bool,
     /// Download and install Patchy automatically when an edit needs it
@@ -131,6 +140,24 @@ pub struct AppConfig {
     /// Optional NovelAI API key. Required before any NovelAI model can be used.
     #[serde(default)]
     pub novelai_api_key: Option<String>,
+    /// Danbooru credentials (`login` + profile API key). Tag search and the
+    /// curated tag-group wikis work anonymously; a key only raises the rate
+    /// limit, so an empty value costs throughput, not access.
+    #[serde(default)]
+    pub danbooru_login: Option<String>,
+    #[serde(default)]
+    pub danbooru_api_key: Option<String>,
+    /// Gelbooru needs both halves: the tag index rejects anonymous calls.
+    #[serde(default)]
+    pub gelbooru_user_id: Option<String>,
+    #[serde(default)]
+    pub gelbooru_api_key: Option<String>,
+    /// e621 is read anonymously but accepts `login` + `api_key` for a higher
+    /// rate limit.
+    #[serde(default)]
+    pub e621_login: Option<String>,
+    #[serde(default)]
+    pub e621_api_key: Option<String>,
     /// Custom gallery directory. When `None`, defaults to `{app_data_dir}/gallery`.
     pub gallery_path: Option<String>,
     /// Run the UI in the default web browser instead of the Tauri window.
@@ -288,7 +315,8 @@ impl Default for AppConfig {
             venv_path: String::new(),
             extra_args: vec![],
             vram_mode: "normal".to_string(),
-            keep_alive: false,
+            keep_alive: true,
+            config_schema_version: CURRENT_CONFIG_SCHEMA_VERSION,
             auto_start: true,
             patchy_auto_install: true,
             patchy_auto_start: false,
@@ -303,6 +331,12 @@ impl Default for AppConfig {
             interrogator_character_threshold: 0.85,
             interrogator_model: crate::interrogator::DEFAULT_INTERROGATOR_MODEL.to_string(),
             interrogator_custom_models: vec![],
+            danbooru_login: None,
+            danbooru_api_key: None,
+            gelbooru_user_id: None,
+            gelbooru_api_key: None,
+            e621_login: None,
+            e621_api_key: None,
             prompt_assistant_model_id: None,
             prompt_assistant_idle_timeout_secs: 30,
             prompt_assistant_setup_done: false,
@@ -351,22 +385,34 @@ impl Default for AppConfig {
 /// webhook with a token in its userinfo or query. Only the instance admin sees
 /// them; every other client gets `null` plus a `{name}_configured` flag.
 /// [`operator_secrets`] must list the same fields in the same order.
-fn operator_secrets_mut(config: &mut AppConfig) -> [(&'static str, &mut Option<String>); 4] {
+fn operator_secrets_mut(config: &mut AppConfig) -> [(&'static str, &mut Option<String>); 10] {
     [
         ("civitai_api_key", &mut config.civitai_api_key),
         ("webhook_url", &mut config.webhook_url),
         ("network_proxy", &mut config.network_proxy),
         ("pip_index_url", &mut config.pip_index_url),
+        ("danbooru_api_key", &mut config.danbooru_api_key),
+        ("gelbooru_api_key", &mut config.gelbooru_api_key),
+        ("gelbooru_user_id", &mut config.gelbooru_user_id),
+        ("e621_api_key", &mut config.e621_api_key),
+        ("danbooru_login", &mut config.danbooru_login),
+        ("e621_login", &mut config.e621_login),
     ]
 }
 
 /// Read-only twin of [`operator_secrets_mut`], same fields in the same order.
-fn operator_secrets(config: &AppConfig) -> [&Option<String>; 4] {
+fn operator_secrets(config: &AppConfig) -> [&Option<String>; 10] {
     [
         &config.civitai_api_key,
         &config.webhook_url,
         &config.network_proxy,
         &config.pip_index_url,
+        &config.danbooru_api_key,
+        &config.gelbooru_api_key,
+        &config.gelbooru_user_id,
+        &config.e621_api_key,
+        &config.danbooru_login,
+        &config.e621_login,
     ]
 }
 
@@ -378,9 +424,8 @@ fn is_set(value: &Option<String>) -> bool {
 ///
 /// `include_secrets` is for the instance admin only (the desktop owner, or a
 /// browser client resolved to `UserRole::Admin`). Everyone else, moderators
-/// included, gets the operator's credential fields blanked: a moderator can
-/// already edit shared settings, but that is no reason to hand them the
-/// owner's CivitAI or NovelAI key, or a proxy URL with a password in it.
+/// included, gets operator credential fields blanked. Booru credentials are
+/// write-only for every client: the UI needs only their configured flags.
 ///
 /// The external-LLM credential never leaves Rust for any role, admin included.
 /// The settings UI reads the key-free `LlmProviderState` projection instead,
@@ -406,10 +451,40 @@ pub fn config_to_client_json(
         configured_flags.push(("novelai_api_key", is_set(&redacted.novelai_api_key)));
         redacted.novelai_api_key = None;
         for (name, field) in operator_secrets_mut(&mut redacted) {
+            if matches!(
+                name,
+                "danbooru_api_key"
+                    | "danbooru_login"
+                    | "gelbooru_api_key"
+                    | "gelbooru_user_id"
+                    | "e621_api_key"
+                    | "e621_login"
+            ) {
+                continue;
+            }
             configured_flags.push((name, is_set(field)));
             *field = None;
         }
     }
+
+    // These credentials have a dedicated write-only update command and are
+    // never needed by UI code, including the desktop settings page.
+    for (name, configured) in [
+        ("danbooru_login", is_set(&config.danbooru_login)),
+        ("danbooru_api_key", is_set(&config.danbooru_api_key)),
+        ("gelbooru_user_id", is_set(&config.gelbooru_user_id)),
+        ("gelbooru_api_key", is_set(&config.gelbooru_api_key)),
+        ("e621_login", is_set(&config.e621_login)),
+        ("e621_api_key", is_set(&config.e621_api_key)),
+    ] {
+        configured_flags.push((name, configured));
+    }
+    redacted.danbooru_login = None;
+    redacted.danbooru_api_key = None;
+    redacted.gelbooru_user_id = None;
+    redacted.gelbooru_api_key = None;
+    redacted.e621_login = None;
+    redacted.e621_api_key = None;
 
     let mut value = serde_json::to_value(&redacted)?;
     if let Some(obj) = value.as_object_mut() {
@@ -545,7 +620,19 @@ pub fn load_persisted_config() -> AppConfig {
         let config_path = dir.join("config.json");
         if let Ok(json) = std::fs::read_to_string(&config_path) {
             match serde_json::from_str::<AppConfig>(&json) {
-                Ok(config) => {
+                Ok(mut config) => {
+                    let saved_schema_version = serde_json::from_str::<serde_json::Value>(&json)
+                        .ok()
+                        .and_then(|value| value.get("config_schema_version")?.as_u64())
+                        .unwrap_or(0) as u32;
+                    if saved_schema_version < CURRENT_CONFIG_SCHEMA_VERSION {
+                        // Keep the persisted preference, including an explicit
+                        // false. The new default only applies to new configs.
+                        config.config_schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
+                        if let Err(error) = save_config(&config) {
+                            log::warn!("Could not persist config migration: {error}");
+                        }
+                    }
                     eprintln!(
                         "Loaded config from {}: comfyui_path={}, venv_path={}",
                         config_path.display(),
@@ -692,6 +779,20 @@ pub(crate) fn preserve_secrets(incoming: &mut AppConfig, current: &AppConfig) {
             .civitai_api_key
             .clone_from(&current.civitai_api_key);
     }
+    // Booru credentials have their own write-only settings command; a full
+    // config save must never replace them with a stale page-load snapshot.
+    incoming.danbooru_login.clone_from(&current.danbooru_login);
+    incoming
+        .danbooru_api_key
+        .clone_from(&current.danbooru_api_key);
+    incoming
+        .gelbooru_user_id
+        .clone_from(&current.gelbooru_user_id);
+    incoming
+        .gelbooru_api_key
+        .clone_from(&current.gelbooru_api_key);
+    incoming.e621_login.clone_from(&current.e621_login);
+    incoming.e621_api_key.clone_from(&current.e621_api_key);
 }
 
 /// Undo the redaction [`config_to_client_json`] applied for a non-admin client.
@@ -820,6 +921,7 @@ fn env_disables_local_trust(value: Option<&str>) -> bool {
 pub fn save_config(config: &AppConfig) -> Result<(), String> {
     let mut config = config.clone();
     normalize_config_fields(&mut config);
+    config.config_schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
     let dir = app_data_dir().ok_or("Failed to determine app data directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
@@ -880,6 +982,12 @@ mod secret_handling_tests {
     const LLM_KEY: &str = "sk-owner-llm";
     const REFRESH: &str = "refresh-owner-token";
     const CLIENT_ID: &str = "client-owner-registration";
+    const DANBOORU_LOGIN: &str = "danbooru-owner-login";
+    const DANBOORU_KEY: &str = "danbooru-owner-key";
+    const GELBOORU_ID: &str = "gelbooru-owner-id";
+    const GELBOORU_KEY: &str = "gelbooru-owner-key";
+    const E621_LOGIN: &str = "e621-owner-login";
+    const E621_KEY: &str = "e621-owner-key";
 
     fn owner_config() -> AppConfig {
         AppConfig {
@@ -888,6 +996,12 @@ mod secret_handling_tests {
             network_proxy: Some(PROXY.into()),
             pip_index_url: Some(PIP.into()),
             novelai_api_key: Some(NOVELAI.into()),
+            danbooru_login: Some(DANBOORU_LOGIN.into()),
+            danbooru_api_key: Some(DANBOORU_KEY.into()),
+            gelbooru_user_id: Some(GELBOORU_ID.into()),
+            gelbooru_api_key: Some(GELBOORU_KEY.into()),
+            e621_login: Some(E621_LOGIN.into()),
+            e621_api_key: Some(E621_KEY.into()),
             llm_provider: "nous".into(),
             llm_external_base_url: "https://inference-api.nousresearch.com/v1".into(),
             llm_external_model: "nousresearch/hermes-4-405b".into(),
@@ -936,6 +1050,12 @@ mod secret_handling_tests {
             LLM_KEY,
             REFRESH,
             CLIENT_ID,
+            DANBOORU_LOGIN,
+            DANBOORU_KEY,
+            GELBOORU_ID,
+            GELBOORU_KEY,
+            E621_LOGIN,
+            E621_KEY,
         ] {
             assert!(
                 !text.contains(secret),
@@ -948,6 +1068,12 @@ mod secret_handling_tests {
             "network_proxy",
             "pip_index_url",
             "novelai_api_key",
+            "danbooru_login",
+            "danbooru_api_key",
+            "gelbooru_user_id",
+            "gelbooru_api_key",
+            "e621_login",
+            "e621_api_key",
         ] {
             assert_eq!(view[name], serde_json::Value::Null, "{name}");
             assert_eq!(view[format!("{name}_configured")], serde_json::json!(true));
@@ -977,6 +1103,25 @@ mod secret_handling_tests {
         assert_eq!(view["network_proxy"], serde_json::json!(PROXY));
         assert_eq!(view["webhook_url"], serde_json::json!(WEBHOOK));
         assert_eq!(view["pip_index_url"], serde_json::json!(PIP));
+        for (name, secret) in [
+            ("danbooru_login", DANBOORU_LOGIN),
+            ("danbooru_api_key", DANBOORU_KEY),
+            ("gelbooru_user_id", GELBOORU_ID),
+            ("gelbooru_api_key", GELBOORU_KEY),
+            ("e621_login", E621_LOGIN),
+            ("e621_api_key", E621_KEY),
+        ] {
+            assert_eq!(
+                view[name],
+                serde_json::Value::Null,
+                "{name} must be write-only"
+            );
+            assert_eq!(view[format!("{name}_configured")], serde_json::json!(true));
+            assert!(
+                !view.to_string().contains(secret),
+                "{secret} leaked to the UI"
+            );
+        }
         let text = view.to_string();
         for secret in [LLM_KEY, REFRESH, CLIENT_ID] {
             assert!(!text.contains(secret), "{secret} left Rust");
@@ -1000,6 +1145,12 @@ mod secret_handling_tests {
         assert_eq!(incoming.network_proxy, current.network_proxy);
         assert_eq!(incoming.pip_index_url, current.pip_index_url);
         assert_eq!(incoming.novelai_api_key, current.novelai_api_key);
+        assert_eq!(incoming.danbooru_login, current.danbooru_login);
+        assert_eq!(incoming.danbooru_api_key, current.danbooru_api_key);
+        assert_eq!(incoming.gelbooru_user_id, current.gelbooru_user_id);
+        assert_eq!(incoming.gelbooru_api_key, current.gelbooru_api_key);
+        assert_eq!(incoming.e621_login, current.e621_login);
+        assert_eq!(incoming.e621_api_key, current.e621_api_key);
         assert_eq!(incoming.llm_external_api_key, LLM_KEY);
         assert_eq!(incoming.llm_oauth_refresh_token, REFRESH);
         assert_eq!(incoming.llm_oauth_client_id, CLIENT_ID);

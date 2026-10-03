@@ -423,227 +423,62 @@ fn apply_attention_flag(cmd: &mut tokio::process::Command, config: &AppConfig) {
     }
 }
 
-/// Returns true if the directory has at least one known model-category subdirectory.
-/// If false, the directory is flat and needs per-category classification instead.
-fn is_structured_model_dir(path: &std::path::Path) -> bool {
-    const KNOWN_SUBDIRS: &[&str] = &[
-        "checkpoints",
-        "Stable-diffusion",
-        "Stable-Diffusion",
-        "StableDiffusion", // StabilityMatrix
-        "loras",
-        "lora",
-        "Lora",
-        "LoRA",
-        "LoRAs",
-        "LORA",
-        "Loras",
-        "LyCORIS",
-        "lycoris",
-        "vae",
-        "VAE",
-        "upscale_models",
-        "ESRGAN",
-        "embeddings",
-        "controlnet",
-        "ControlNet", // StabilityMatrix
-        "clip",
-        "unet",
-        "diffusion_models",
-        "DiffusionModels", // StabilityMatrix
-        "text_encoders",
-        "TextEncoders", // StabilityMatrix
-    ];
-    KNOWN_SUBDIRS.iter().any(|sub| path.join(sub).is_dir())
-}
-
-/// Infer the ComfyUI model category for a flat directory (no known subdirs)
-/// by inspecting the directory name. Defaults to "loras" since that is the
-/// most common fringe case (users pointing at a standalone LoRA collection).
-fn classify_flat_model_dir(path: &std::path::Path) -> &'static str {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    if name.contains("lora") || name.contains("lycoris") {
-        "loras"
-    } else if name.contains("checkpoint")
-        || name.contains("ckpt")
-        || name.contains("stable-diffusion")
-        || name.contains("stablediffusion")
-    {
-        "checkpoints"
-    } else if name.contains("vae") {
-        "vae"
-    } else if name.contains("upscale") || name.contains("esrgan") {
-        "upscale_models"
-    } else if name.contains("controlnet") || name.contains("control_net") {
-        "controlnet"
-    } else if name.contains("embed") || name.contains("textual") {
-        "embeddings"
-    } else if name.contains("clip") {
-        "clip"
-    } else if name.contains("unet") || name.contains("diffusion") {
-        "diffusion_models"
-    } else if name.contains("model_patch") || name.contains("modelpatch") {
-        "model_patches"
-    } else {
-        // Unknown flat directory — default to loras (most common fringe case)
-        "loras"
-    }
-}
-
-/// Build the YAML for ComfyUI's `--extra-model-paths-config` flag from the
-/// configured shared model directories (newline-separated). Returns the YAML
-/// and the number of directories, or `None` when no directory is configured.
-///
-/// Two modes per directory:
-/// 1. **Structured** — directory has recognizable model subdirectories
-///    (e.g. loras/, checkpoints/).  Each category scans named subdirs only.
-/// 2. **Flat** — directory contains .safetensors/.ckpt files directly with
-///    no recognizable subdirectories.  We infer the category from the
-///    directory name and add "." ONLY for that category, preventing cross-
-///    contamination that the old blanket "." caused (fixed in v0.3.4).
+/// Build ComfyUI's extra-path YAML from the same category directories used
+/// by the model manager and metadata resolver, including explicit Windows
+/// folders on another drive. Returns YAML and configured root count.
 fn build_extra_model_paths_yaml(model_dirs_str: &str) -> Option<(String, usize)> {
-    let dirs: Vec<&str> = model_dirs_str
+    let count = model_dirs_str
         .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect();
-    if dirs.is_empty() {
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    if count == 0 {
         return None;
     }
     let mut yaml_content = String::new();
-    for (i, dir) in dirs.iter().enumerate() {
-        let dir_path = crate::commands::api::resolve_extra_model_root(std::path::Path::new(dir));
-        // Escape YAML values: quote paths that contain spaces, colons,
-        // backslashes, or other special characters.
-        let quoted_dir = format!(
-            "\"{}\"",
-            dir_path
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-        );
-
-        // Check if this directory looks structured (has known model subdirs)
-        let is_structured = is_structured_model_dir(&dir_path);
-
-        if is_structured {
-            // Structured directory: scan named subdirectories per category
-            yaml_content.push_str(&format!(
-                concat!(
-                    "mooshieui_{idx}:\n",
-                    "  base_path: {dir}\n",
-                    "  checkpoints: |\n",
-                    "    checkpoints\n",
-                    "    Stable-diffusion\n",
-                    "    Stable-Diffusion\n",
-                    "    StableDiffusion\n",
-                    "    models/Stable-diffusion\n",
-                    "    Models/Stable-Diffusion\n",
-                    "    Models/StableDiffusion\n",
-                    "    dlbackend/comfyui/models/checkpoints\n",
-                    "  vae: |\n",
-                    "    vae\n",
-                    "    VAE\n",
-                    "    models/VAE\n",
-                    "    Models/VAE\n",
-                    "    dlbackend/comfyui/models/vae\n",
-                    "  loras: |\n",
-                    "    loras\n",
-                    "    lora\n",
-                    "    Lora\n",
-                    "    LoRA\n",
-                    "    LoRAs\n",
-                    "    LORA\n",
-                    "    Loras\n",
-                    "    LyCORIS\n",
-                    "    lycoris\n",
-                    "    models/Lora\n",
-                    "    models/loras\n",
-                    "    models/LyCORIS\n",
-                    "    Models/Lora\n",
-                    "    Models/loras\n",
-                    "    Models/LyCORIS\n",
-                    "    dlbackend/comfyui/models/loras\n",
-                    "  upscale_models: |\n",
-                    "    upscale_models\n",
-                    "    ESRGAN\n",
-                    "    models/ESRGAN\n",
-                    "    models/RealESRGAN\n",
-                    "    Models/ESRGAN\n",
-                    "    Models/RealESRGAN\n",
-                    "    dlbackend/comfyui/models/upscale_models\n",
-                    "  embeddings: |\n",
-                    "    embeddings\n",
-                    "    models/TextualInversion\n",
-                    "    Models/TextualInversion\n",
-                    "    dlbackend/comfyui/models/embeddings\n",
-                    "  controlnet: |\n",
-                    "    controlnet\n",
-                    "    ControlNet\n",
-                    "    models/ControlNet\n",
-                    "    Models/ControlNet\n",
-                    "    dlbackend/comfyui/models/controlnet\n",
-                    "  clip: |\n",
-                    "    clip\n",
-                    "    models/clip\n",
-                    "    Models/clip\n",
-                    "    dlbackend/comfyui/models/clip\n",
-                    "  unet: |\n",
-                    "    unet\n",
-                    "    models/unet\n",
-                    "    Models/unet\n",
-                    "    dlbackend/comfyui/models/unet\n",
-                    "  diffusion_models: |\n",
-                    "    diffusion_models\n",
-                    "    DiffusionModels\n",
-                    "    models/diffusion_models\n",
-                    "    models/DiffusionModels\n",
-                    "    Models/diffusion_models\n",
-                    "    Models/DiffusionModels\n",
-                    "    dlbackend/comfyui/models/diffusion_models\n",
-                    "  text_encoders: |\n",
-                    "    text_encoders\n",
-                    "    TextEncoders\n",
-                    "    models/text_encoders\n",
-                    "    models/TextEncoders\n",
-                    "    Models/text_encoders\n",
-                    "    Models/TextEncoders\n",
-                    "    dlbackend/comfyui/models/text_encoders\n",
-                    // Anima ControlNet-LLLite weights load through core's
-                    // ModelPatchLoader, which reads this folder (not controlnet).
-                    "  model_patches: |\n",
-                    "    model_patches\n",
-                    "    ModelPatches\n",
-                    "    models/model_patches\n",
-                    "    Models/model_patches\n",
-                    "    dlbackend/comfyui/models/model_patches\n",
-                ),
-                idx = i + 1,
-                dir = quoted_dir
-            ));
-        } else {
-            // Flat directory: infer category from directory name and only
-            // expose "." for that single category to avoid cross-contamination.
-            let category = classify_flat_model_dir(&dir_path);
-            log::info!(
-                "Flat model directory {:?} classified as {:?}",
-                dir,
-                category
-            );
-            yaml_content.push_str(&format!(
-                "mooshieui_{idx}:\n  base_path: {dir}\n  {cat}: \".\"\n",
-                idx = i + 1,
-                dir = quoted_dir,
-                cat = category,
-            ));
+    let mut index = 0;
+    let mut seen = std::collections::BTreeSet::new();
+    // Preserve configured root order, including flat category folders, while
+    // sharing discovery rules with the model manager and deduplicating aliases.
+    for root in model_dirs_str
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        for category in [
+            "checkpoints",
+            "vae",
+            "loras",
+            "upscale_models",
+            "embeddings",
+            "controlnet",
+            "clip",
+            "unet",
+            "diffusion_models",
+            "text_encoders",
+            "ultralytics",
+            "model_patches",
+            "style_models",
+            "ipadapter",
+            "clip_vision",
+        ] {
+            let dirs =
+                crate::commands::api::model_install_dirs_for_config("", Some(root), category)
+                    .ok()?;
+            for dir in dirs {
+                if !seen.insert((category, dir.path.to_lowercase())) {
+                    continue;
+                }
+                index += 1;
+                // JSON strings are valid YAML scalars and safely escape Windows
+                // drive colons, backslashes, quotes and control characters.
+                let quoted = serde_json::to_string(&dir.path).ok()?;
+                yaml_content.push_str(&format!(
+                    "mooshieui_{index}:\n  base_path: {quoted}\n  {category}: \".\"\n",
+                ));
+            }
         }
     }
-    Some((yaml_content, dirs.len()))
+    Some((yaml_content, count))
 }
 
 /// Per-user directory for files MooshieUI generates for the ComfyUI processes

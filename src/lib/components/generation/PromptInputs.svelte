@@ -21,6 +21,7 @@
   import PromptAssistantSetupModal from "./PromptAssistantSetupModal.svelte";
   import PromptComposeModal from "./PromptComposeModal.svelte";
   import AnimaPromptStudio from "./AnimaPromptStudio.svelte";
+
   import H3PromptGuide from "../video/H3PromptGuide.svelte";
   import { buildH3Context } from "../../utils/h3Prompt.js";
   import { naiV5Variant } from "../../utils/novelaiModels.js";
@@ -456,18 +457,6 @@
       <div class="flex items-center gap-1.5">
         {#if !isVideoMode}
           <PromptChunkPicker />
-          {#if generation.isAnima}
-            <button
-              type="button"
-              onclick={() => (animaStudioOpen = true)}
-              class="rounded-lg border px-2 py-0.5 text-[10px] transition-colors {generation.animaTools.enabled
-                ? 'border-amber-500/70 bg-amber-500/10 text-amber-200'
-                : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-amber-500 hover:text-amber-200'}"
-              title={locale.t("anima_studio.subtitle")}
-            >
-              ◈ {locale.t("anima_studio.button")}
-            </button>
-          {/if}
         {/if}
         <!-- NovelAI has no regional conditioning at all, so the button is gone
              there rather than shown disabled with an "unsupported" toast. -->
