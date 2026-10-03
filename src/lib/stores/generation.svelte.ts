@@ -87,6 +87,7 @@ import type {
 import {
   defaultAnimaArtistMixer,
   defaultAnimaTools,
+  generationAnimaTools,
   normalizeAnimaArtistMixer,
   normalizeAnimaTools,
 } from "../utils/animaIntegration.js";
@@ -3964,7 +3965,7 @@ class GenerationStore {
           }
         : null,
       // Retired controls must not inject invisible groups from older saved settings.
-      anima_tools: null,
+      anima_tools: this.isAnima ? generationAnimaTools(this.animaTools) : null,
       edit_reference_images: this.editReferenceImages.filter((v): v is string => !!v),
       edit_reference_strength: this.editReferenceStrength,
       edit_split_screen: this.editSplitScreen,

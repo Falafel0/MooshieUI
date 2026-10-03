@@ -93,7 +93,15 @@ assert.ok(studio.prompt.endsWith('manual prose'));
 assert.equal(customCatalog.import({kind:'mooshie-tag-pack',version:99,categories:[],entries:[]}),false);
 assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'legacy',tag:'saved_tag',subId:'old_bucket',preview}]}),true);
 assert.ok(customCatalog.categories.some(row=>row.id==='old_bucket'));
-assert.match(fs.readFileSync(new URL('src/lib/stores/generation.svelte.ts', root), 'utf8'), /anima_tools: null/, 'Retired Anima controls cannot inject hidden saved groups');
+const { generationAnimaTools, defaultAnimaTools } = load('src/lib/utils/animaIntegration.ts');
+const retired = {...defaultAnimaTools(),enabled:true,composer_enabled:true,quality_prompt:'hidden quality',character_tags:'hidden character'};
+assert.equal(generationAnimaTools(retired),null,'Retired controls cannot inject hidden saved groups');
+const multiLora = generationAnimaTools({...retired,multi_lora_enabled:true});
+assert.equal(multiLora.enabled,true);
+assert.equal(multiLora.multi_lora_enabled,true);
+assert.equal(multiLora.composer_enabled,false);
+assert.equal(multiLora.quality_prompt,'');
+assert.equal(multiLora.character_tags,'');
 console.log('Local catalog, user contexts, portable packs, legacy import and prompt history cases passed.');
 
 // Drive real store reads and writes through deferred IndexedDB boundary calls.
