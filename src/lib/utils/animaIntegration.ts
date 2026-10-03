@@ -104,3 +104,10 @@ export function updateTagList(value: string, tag: string, remove = false): strin
   if (!remove && key) filtered.push(tag.trim());
   return filtered.join(", ");
 }
+
+/** Expand the same named macros as the main prompt without mutating saved groups. */
+export function resolveAnimaPromptGroups(params: AnimaToolsParams, resolve: (text: string) => string): AnimaToolsParams {
+  const result = { ...params };
+  for (const group of ANIMA_PROMPT_GROUPS) result[group] = resolve(params[group]);
+  return result;
+}

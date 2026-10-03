@@ -53,6 +53,9 @@ jobs:
       - name: Frontend build
         run: npm run build
 
+      - name: Prompt Studio workspace regressions
+        run: node scripts/test-prompt-studio-workspace.mjs
+
       - name: i18n parity
         run: node scripts/check-i18n-parity.mjs
 

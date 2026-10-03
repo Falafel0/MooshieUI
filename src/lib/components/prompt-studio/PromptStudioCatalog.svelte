@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { customCatalog } from "../../prompt-studio/custom-catalog.svelte.js";
   import { studio } from "../../prompt-studio/studio.svelte.js";
   import { autocomplete } from "../../stores/autocomplete.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { DANBOORU_CATEGORIES } from "../../prompt-studio/artists.js";
   import { classifyTag } from "../../prompt-studio/sources.js";
   import PromptStudioPreview from "./PromptStudioPreview.svelte";
-  import PromptStudioLive from "./PromptStudioLive.svelte";
+  import PromptStudioTagImage from "./PromptStudioTagImage.svelte";
   import { Search, Tag } from "@lucide/svelte";
 
   let query = $state("");
@@ -23,7 +24,8 @@
     const out: Hit[] = [];
     for (const category of studio.categories) {
       for (const sub of category.subs) {
-        const pool = sub.variants ? sub.variants.map((v) => ({ name: v.name, tag: v.tag })) : (sub.sliderSteps ?? []).map((s) => ({ name: s.label, tag: s.tag }));
+        const authored = sub.variants ? sub.variants.map((v) => ({ name: v.name, tag: v.tag })) : (sub.sliderSteps ?? []).map((s) => ({ name: s.label, tag: s.tag }));
+        const pool = [...authored, ...customCatalog.entries.filter(entry => entry.subId === sub.id && !authored.some(variant => variant.tag === entry.tag))];
         for (const variant of pool) {
           if (!variant.tag) continue;
           if (variant.name.toLowerCase().includes(needle) || variant.tag.includes(needle) || variant.tag.replaceAll('_', ' ').includes(needle)) {
@@ -101,59 +103,34 @@
   {#if autocomplete.loading}<p role="status" class="text-xs text-neutral-400">{locale.t("prompt_studio.loading")}</p>{/if}
   {#if autocomplete.error}<p role="alert" class="text-xs text-amber-300">{locale.t("prompt_studio.library_error")}</p>{/if}
   {#if previewTag}<PromptStudioPreview tag={previewTag} onClose={() => previewTag = ''} />{/if}
-    {#if catalogueHits.length && (filter === null || filter === 0)}
-      <section class="flex flex-col gap-1.5">
-        <p class="font-mono text-[10px] tracking-[0.16em] text-indigo-400 uppercase">{locale.t("prompt_studio.catalog_studio")}</p>
-        <div class="flex flex-wrap gap-1.5">
-          {#each catalogueHits.slice(0, limit) as hit (hit.tag)}
-            <div class="inline-flex max-w-full items-center gap-1">
-            <button
-              type="button"
-              class="touch-target inline-flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-2 text-[11px] break-all {studio.isChosen(hit.tag)
-                ? 'border-indigo-500 bg-indigo-500/15 text-neutral-100'
-                : 'border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-indigo-500/60'}"
-              aria-pressed={studio.isChosen(hit.tag)}
-              title={hit.where}
-              onclick={() => addCatalogue(hit)}
-            >
-              {hit.name}
-              <span class="font-mono text-[9px] text-neutral-500">{hit.where.split(" · ")[0]}</span>
-            </button>
-            <button type="button" class="touch-target rounded-lg border border-neutral-800 px-2 py-1 text-xs text-indigo-300" aria-label={locale.t("prompt_studio.preview_tag", { tag: hit.tag })} onclick={() => previewTag = hit.tag}>◉</button>
-            </div>
-          {/each}
-        </div>
-      </section>
-    {/if}
-
-    <section class="flex flex-col gap-1.5">
-      <p class="font-mono text-[10px] tracking-[0.16em] text-indigo-400/80 uppercase">{locale.t("prompt_studio.catalog_library")}</p>
-      {#if !libraryHits.length}
-        <p class="text-[11px] text-neutral-500">{locale.t("prompt_studio.nothing_found")}</p>
-      {:else}
-        <div class="flex flex-wrap gap-1.5">
-          {#each libraryHits.slice(0, limit) as entry (entry.n)}
-            {@const target = classifyTag(entry.n, entry.c)}
-            <div class="inline-flex max-w-full items-center gap-1">
-            <button
-              type="button"
-              class="touch-target inline-flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-2 text-[11px] break-all {studio.isChosen(entry.n)
-                ? 'border-indigo-500 bg-indigo-500/15 text-neutral-100'
-                : 'border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-indigo-500/60'}"
-              aria-pressed={studio.isChosen(entry.n)}
-              title={`${target.category.replace('source:', '')} · ${entry.p.toLocaleString(locale.current)} posts`}
-              onclick={() => addLibrary(entry.n, entry.c)}
-            >
-              <Tag size={10} strokeWidth={2} class="text-neutral-500" />
-              {tagName(entry.n)}
-              <span class="font-mono text-[9px] text-neutral-500">{locale.t(`prompt_studio.theme_${target.category.replace("source:", "")}`)}</span>
-            </button>
-            <button type="button" class="touch-target rounded-lg border border-neutral-800 px-2 py-1 text-xs text-indigo-300" aria-label={locale.t("prompt_studio.preview_tag", { tag: entry.n })} onclick={() => previewTag = entry.n}>◉</button>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </section>
-  {#if libraryHits.length > limit || ((filter === null || filter === 0) && catalogueHits.length > limit)}<button type="button" class="touch-target self-center rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300" onclick={() => limit += 80}>{locale.t("prompt_studio.show_more")} · {limit}</button>{/if}
-  <PromptStudioLive />
+  {#if (filter === null || filter === 0) && catalogueHits.length}
+    <h4 class="text-xs text-neutral-400">{locale.t('prompt_studio.catalog_studio')}</h4>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+      {#each catalogueHits.slice(0, limit) as hit (hit.tag)}
+        <article class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900">
+          <PromptStudioTagImage tag={hit.tag} subId={hit.subId} />
+          <div class="flex flex-1 flex-col gap-2 p-3">
+            <h4 class="break-words text-xs text-sky-300">{hit.name}</h4><p class="text-[10px] text-neutral-500">{hit.where}</p>
+            <button type="button" class="touch-target mt-auto rounded border border-neutral-700 px-2 py-2 text-xs text-neutral-300" aria-pressed={studio.isChosen(hit.tag)} onclick={() => addCatalogue(hit)}>{locale.t(studio.isChosen(hit.tag) ? 'prompt_studio.remove_tag' : 'prompt_studio.add_tag')}</button>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {/if}
+  {#if libraryHits.length}
+    <h4 class="text-xs text-neutral-400">{locale.t('prompt_studio.catalog_library')}</h4>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+      {#each libraryHits.slice(0, limit) as hit (hit.n)}
+        <article class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900">
+          <PromptStudioTagImage tag={hit.n} />
+          <div class="flex flex-1 flex-col gap-2 p-3">
+            <h4 class="break-words text-xs {hit.c === 1 ? 'text-red-300' : hit.c === 4 ? 'text-green-300' : 'text-sky-300'}">{tagName(hit.n)}</h4><p class="text-[10px] text-neutral-500">{hit.p.toLocaleString(locale.current)}</p>
+            <button type="button" class="touch-target mt-auto rounded border border-neutral-700 px-2 py-2 text-xs text-neutral-300" aria-pressed={studio.isChosen(hit.n)} onclick={() => addLibrary(hit.n, hit.c)}>{locale.t(studio.isChosen(hit.n) ? 'prompt_studio.remove_tag' : 'prompt_studio.add_tag')}</button>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {/if}
+  {#if !catalogueHits.length && !libraryHits.length}<p role="status" class="text-sm text-neutral-500">{locale.t('prompt_studio.nothing_found')}</p>{/if}
+  {#if catalogueHits.length > limit || libraryHits.length > limit}<button type="button" class="touch-target self-center rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300" onclick={() => limit += 40}>{locale.t('prompt_studio.show_more')}</button>{/if}
 </div>

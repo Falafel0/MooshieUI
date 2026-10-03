@@ -9,6 +9,7 @@ import { classifyTag } from './sources.js';
  */
 export type StudioKind = 'character' | 'wardrobe' | 'scene';
 export type StudioModel = 'NAI' | 'SDXL (NoobAI)' | 'Anima (Cosmos)';
+export type StudioPromptGroup = { id: string; name: string; content: string; enabled: boolean };
 export type SelectionSource = 'user' | 'auto-added' | 'dependency';
 
 export interface StudioSnapshotV1 {
@@ -27,6 +28,7 @@ export interface StudioSnapshotV1 {
   autoTags?: boolean;
   clothed?: boolean;
   rawPrompt?: string;
+  groups?: StudioPromptGroup[];
 }
 
 export const SNAPSHOT_VERSION = 1;
@@ -44,6 +46,7 @@ export interface StudioState {
   autoTags?: boolean;
   clothed?: boolean;
   rawPrompt?: string;
+  groups?: StudioPromptGroup[];
 }
 
 export function toSnapshot(state: StudioState): StudioSnapshotV1 {
@@ -62,6 +65,7 @@ export function toSnapshot(state: StudioState): StudioSnapshotV1 {
       order,
     })),
     details: state.details,
+    groups: state.groups,
     prefix: state.prefix,
     suffix: state.suffix,
     readable: state.readable,
@@ -187,6 +191,7 @@ export function fromSnapshot(value: unknown, fallbackName = 'Imported'): StudioS
     autoTags: typeof data.autoTags === 'boolean' ? data.autoTags : undefined,
     clothed: typeof data.clothed === 'boolean' ? data.clothed : undefined,
     rawPrompt,
+    groups: Array.isArray(data.groups) ? data.groups.filter((v: any) => v && typeof v.id === 'string' && typeof v.content === 'string').map((v: any) => ({ id: v.id, name: typeof v.name === 'string' ? v.name : '', content: v.content, enabled: v.enabled !== false })).filter((v: StudioPromptGroup, i: number, all: StudioPromptGroup[]) => all.findIndex(other => other.id === v.id) === i) : [],
   };
 }
 

@@ -1,5 +1,7 @@
 <script lang="ts">
-  import PromptStudioCachedImage from "./PromptStudioCachedImage.svelte";
+  import { tick } from "svelte";
+  import { savedSources, type SavedSourceEntry } from "../../prompt-studio/saved-sources.svelte.js";
+  import PromptStudioTagImage from "./PromptStudioTagImage.svelte";
   import { studio } from "../../prompt-studio/studio.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { gallery } from "../../stores/gallery.svelte.js";
@@ -23,6 +25,8 @@
   let limit = $state(60);
   let alphabetical = $state(false);
   let requestId = 0;
+  let element: HTMLDivElement | undefined = $state();
+  const views = new Map<SourceId, { query: string; group: string; alphabetical: boolean; limit: number; scroll: number }>();
   const cache = new Map<SourceId, SourceEntry[]>();
 
   const meta = $derived(SOURCES.find((item) => item.id === active) ?? SOURCES[0]);
@@ -41,32 +45,30 @@
   const shown = $derived(sorted.slice(0, limit));
 
   async function open(source: SourceId) {
+    views.set(active, { query, group, alphabetical, limit, scroll: element?.parentElement?.scrollTop ?? 0 });
+    const view = views.get(source);
     const id = ++requestId;
     active = source;
-    query = "";
-    group = "";
+    query = view?.query ?? ''; group = view?.group ?? ''; alphabetical = view?.alphabetical ?? false;
     limit = 60;
     const cached = cache.get(source);
-    if (cached) {
-      loading = false;
-      entries = cached;
-      error = "";
-      return;
-    }
-    loading = true;
-    error = "";
-    entries = [];
+    loading = !cached; error = ''; entries = cached ?? [];
     try {
-      const normalized = normalizeCatalog(source, await loadAnimaCatalog(source));
-      if (!normalized.length) throw new Error(locale.t("prompt_studio.source_empty"));
-      cache.set(source, normalized);
-      if (id === requestId) entries = normalized;
+      if (!cached) {
+        const normalized = normalizeCatalog(source, await loadAnimaCatalog(source));
+        if (!normalized.length) throw new Error(locale.t('prompt_studio.source_empty'));
+        cache.set(source, normalized);
+        if (id === requestId) entries = normalized;
+      }
+      await tick();
+      if (id === requestId) {
+        limit = view?.limit ?? 60;
+        await tick();
+        if (id === requestId && element?.parentElement) element.parentElement.scrollTop = view?.scroll ?? 0;
+      }
     } catch (cause) {
-      if (id !== requestId) return;
-      error = cause instanceof Error ? cause.message : String(cause);
-    } finally {
-      if (id === requestId) loading = false;
-    }
+      if (id === requestId) error = cause instanceof Error ? cause.message : String(cause);
+    } finally { if (id === requestId) loading = false; }
   }
 
   /** The theme — and for Danbooru attire, the exact catalogue slot — a pick lands in. */
@@ -83,6 +85,7 @@
     gallery.showToast(`${entry.name}: ${entry.tags.slice(0, 3).join(", ")}`, "success");
   }
 
+  function bookmark(entry: SourceEntry): SavedSourceEntry { return { id: entry.id, name: entry.name, source: `anima:${active}`, tags: entry.tags, preview: entry.preview }; }
   function groupName(value: string): string {
     const key = `prompt_studio.${value}`;
     const translated = locale.t(key);
@@ -101,8 +104,8 @@
   $effect(() => { if (!entries.length && !loading && !error) void open(active); });
 </script>
 
-<div class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-  <header class="flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2">
+<div bind:this={element} class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+  <header class="sticky top-0 z-10 flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2">
     {#each SOURCES as source (source.id)}
       <button
         type="button"
@@ -153,6 +156,7 @@
     <span role="status" class="font-mono text-[10px] text-neutral-500">{filtered.length}</span>
   </div>
 
+  <button type="button" disabled={!shown.length} class="touch-target self-start rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => savedSources.add(filtered.map(bookmark))}>{locale.t('prompt_studio.save_catalogue')} ({filtered.length})</button>
   <p class="text-[10px] leading-relaxed text-neutral-500">
     {locale.t("prompt_studio.source_theme")}: <span class="text-indigo-300">{locale.t(`prompt_studio.theme_${meta.theme}`)}</span>
     {#if attire}· {locale.t("prompt_studio.slot_theme")}{/if}
@@ -165,7 +169,7 @@
   {:else if error}
     <div class="flex flex-col gap-2 rounded-xl border border-red-900/50 bg-red-950/30 p-4 text-xs text-red-300">
       <p class="font-semibold text-red-200">{locale.t("prompt_studio.source_error")}</p>
-      <p class="text-[11px]">{locale.t("prompt_studio.source_error")}</p>
+      <p class="break-words text-[11px]">{error}</p>
       <button
         type="button"
         class="self-start rounded-lg border border-red-800/60 px-2.5 py-1 hover:bg-red-900/30"
@@ -176,60 +180,20 @@
     </div>
   {:else if !filtered.length}
     <p role="status" class="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">{locale.t("prompt_studio.nothing_found")}</p>
-  {:else if attire}
-    <div class="flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2.5">
-      {#each shown as entry (entry.id)}
-        {@const slot = ATTIRE_SLOTS.find((item) => item.slot === entry.categories[0])}
-        <button
-          type="button"
-          class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors {studio.isChosen(entry.tags[0])
-            ? 'border-indigo-500 bg-indigo-500/15 text-neutral-100'
-            : 'border-neutral-700 bg-neutral-950 text-neutral-300 hover:border-indigo-500/60'}"
-          title={slot?.sub ? `${groupName(entry.categories[0])} → ${subName(slot.sub)}` : groupName(entry.categories[0])}
-          onclick={() => add(entry)}
-        >
-          {entry.name.replaceAll("_", " ")}
-          {#if studio.isChosen(entry.tags[0])}<Check size={10} strokeWidth={2.5} class="text-indigo-400" />{/if}
-        </button>
-      {/each}
-    </div>
   {:else}
-    <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {#each shown as entry (entry.id)}
-        {@const taken = entry.tags.every((tag) => studio.isChosen(tag))}
-        <div class="flex gap-2.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2.5">
-          {#if entry.preview}
-            <PromptStudioCachedImage src={entry.preview} alt={entry.name} />
-          {/if}
-          <div class="flex min-w-0 flex-1 flex-col gap-1">
-            <div class="flex items-start gap-1.5">
-              <span class="min-w-0 flex-1 truncate text-xs font-medium text-neutral-100" title={entry.name}>{entry.name}</span>
-              <span class="shrink-0 rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[9px] text-neutral-400">
-                {groupName(entry.categories[0] ?? "")}
-              </span>
-            </div>
-            <p class="line-clamp-2 text-[10px] leading-relaxed text-neutral-400">
-              {entry.tags.slice(0, 6).join(", ")}{entry.tags.length > 6 ? " …" : ""}
-            </p>
-            {#if entry.traits.length}
-              <p class="flex flex-wrap gap-1">
-                {#each entry.traits.slice(0, 3) as trait (trait)}
-                  <span class="rounded border border-neutral-800 px-1 py-0.5 text-[9px] text-neutral-500">{trait}</span>
-                {/each}
-              </p>
-            {/if}
-            <button
-              type="button"
-              class="mt-auto self-start rounded-lg border px-2 py-0.5 text-[10px] transition-colors {taken
-                ? 'border-indigo-500/60 text-indigo-300'
-                : 'border-neutral-700 text-neutral-300 hover:border-indigo-500 hover:text-indigo-300'}"
-              disabled={taken}
-              onclick={() => add(entry)}
-            >
-              {taken ? locale.t("prompt_studio.added") : `+ ${entry.tags.length}`}
-            </button>
+        {@const taken = entry.tags.every(tag => studio.isChosen(tag))}
+        <article class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900">
+          <PromptStudioTagImage tag={entry.tags[0]} src={entry.preview} />
+          <div class="flex flex-1 flex-col gap-2 p-3">
+            <h4 class="break-words text-sm font-medium text-neutral-200">{entry.name.replaceAll('_', ' ')}</h4>
+            <p class="text-[10px] text-indigo-300">{groupName(entry.categories[0] ?? '')}</p>
+            <p class="line-clamp-3 text-xs leading-relaxed text-neutral-500" title={entry.tags.join(', ')}>{entry.tags.join(', ')}</p>
+            <button type="button" disabled={taken} class="touch-target mt-auto rounded border border-neutral-700 px-2 py-2 text-xs text-neutral-200 disabled:border-indigo-500/50 disabled:text-indigo-300" onclick={() => add(entry)}>{taken ? locale.t('prompt_studio.added') : locale.t('prompt_studio.add_recipe', { count: entry.tags.length })}</button>
+            <button type="button" aria-pressed={savedSources.has(entry.id, `anima:${active}`)} class="touch-target rounded px-2 py-1 text-xs text-neutral-400" onclick={() => savedSources.has(entry.id, `anima:${active}`) ? savedSources.remove(entry.id, `anima:${active}`) : savedSources.add([bookmark(entry)])}>{locale.t(savedSources.has(entry.id, `anima:${active}`) ? 'prompt_studio.bookmarked' : 'prompt_studio.bookmark')}</button>
           </div>
-        </div>
+        </article>
       {/each}
     </div>
   {/if}

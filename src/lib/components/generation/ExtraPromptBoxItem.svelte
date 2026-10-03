@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ArrowUp, ArrowDown } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import PromptTextarea from "./PromptTextarea.svelte";
   import NovelAiTokenBar from "./NovelAiTokenBar.svelte";
@@ -55,7 +56,7 @@
     debounceTimer = setTimeout(() => commitContent(next), 400);
   });
 
-  onDestroy(() => clearTimeout(debounceTimer));
+  onDestroy(() => { clearTimeout(debounceTimer); if (localContent !== lastSynced) commitContent(localContent); });
 
   function commitName(value: string) {
     if (side === "positive") generation.updatePositiveBox(id, { name: value });
@@ -93,6 +94,8 @@
       placeholder={locale.t("generation.prompts.extra_box_name_placeholder")}
       class="min-w-0 flex-1 border-b border-neutral-700 bg-transparent px-0.5 py-0 text-xs text-neutral-300 placeholder:text-neutral-600 transition-colors focus:border-indigo-500 focus:outline-none"
     />
+    <button type="button" class="touch-target shrink-0 rounded p-1 text-neutral-400 disabled:opacity-30" disabled={index === 1} aria-label={locale.t('prompt_studio.group_up')} onclick={() => generation.movePromptBox(side, id, -1)}><ArrowUp size={14} /></button>
+    <button type="button" class="touch-target shrink-0 rounded p-1 text-neutral-400 disabled:opacity-30" disabled={index === (side === 'positive' ? generation.extraPositiveBoxes.length : generation.extraNegativeBoxes.length)} aria-label={locale.t('prompt_studio.group_down')} onclick={() => generation.movePromptBox(side, id, 1)}><ArrowDown size={14} /></button>
     <button
       type="button"
       onclick={saveAsPreset}

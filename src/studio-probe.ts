@@ -11,7 +11,7 @@ import { locale } from "./lib/stores/locale.svelte.js";
 locale.current = "ru";
 
 const note = document.createElement("div");
-note.textContent = "Стенд Prompt Studio — без ComfyUI и бэкенда. «В генерацию» кладёт промпт в generation.positivePrompt (видно в консоли).";
+note.textContent = "Стенд Prompt Studio — без ComfyUI и бэкенда. «В генерацию» открывает выбор режима, поля и способа вставки (результат виден в консоли).";
 note.setAttribute(
   "style",
   "position:fixed;left:0;right:0;bottom:0;z-index:9999;padding:6px 12px;" +
