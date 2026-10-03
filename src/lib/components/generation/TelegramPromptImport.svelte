@@ -1,9 +1,7 @@
 <script lang="ts">
   import { generation } from "../../stores/generation.svelte.js";
-  import { autocomplete } from "../../stores/autocomplete.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { parseTelegramExport, type TelegramPromptRecipe } from "../../utils/telegramPromptImport.js";
-  import { groupAnimaTags, parseTagList, updateTagList, type AnimaPromptGroup } from "../../utils/animaIntegration.js";
   let recipes = $state<TelegramPromptRecipe[]>([]);
   let error = $state("");
   let busy = $state(false);
@@ -20,15 +18,8 @@
     } catch (cause) { recipes = []; error = `${locale.t("anima_studio.telegram.error")}: ${String(cause)}`; }
     finally { busy = false; }
   }
-  function apply(recipe: TelegramPromptRecipe, mode: "replace" | "append" | "groups") {
-    if (mode === 'groups') {
-      const groups = groupAnimaTags(parseTagList(recipe.positive), autocomplete.tags);
-      for (const [key, tags] of Object.entries(groups)) {
-        const group = key as AnimaPromptGroup;
-        for (const tag of tags) generation.animaTools[group] = updateTagList(generation.animaTools[group], tag);
-      }
-      generation.animaTools.enabled = true;
-    } else if (mode === 'replace') {
+  function apply(recipe: TelegramPromptRecipe, mode: "replace" | "append") {
+    if (mode === 'replace') {
       generation.positivePrompt = recipe.positive;
       if (recipe.negative) generation.negativePrompt = recipe.negative;
     } else {
@@ -59,7 +50,6 @@
         <p class="mt-2 line-clamp-3 text-xs leading-relaxed text-neutral-400">{recipe.positive}</p>
         {#if recipe.negative}<p class="mt-1 line-clamp-2 text-xs text-neutral-500">− {recipe.negative}</p>{/if}
         <div class="mt-3 flex flex-wrap gap-2">
-          {#if generation.isAnima}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => apply(recipe, 'groups')}>{locale.t("anima_studio.telegram.to_groups")}</button>{/if}
           <button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => apply(recipe, 'append')}>{locale.t("prompt_assistant.append")}</button>
           <button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => { if (generation.positivePrompt.trim() || generation.negativePrompt.trim()) pending = recipe; else apply(recipe, 'replace'); }}>{locale.t("prompt_assistant.replace")}</button>
         </div>
