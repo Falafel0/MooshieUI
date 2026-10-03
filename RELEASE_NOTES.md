@@ -1,3 +1,30 @@
+## What's New in v2.3.8-fork.5
+
+### Prompt Studio and constructors
+- Places assembled tags on the right on desktop and switches between constructor and assembled panels on narrow screens. Keeps copy/send visible and groups less-used controls under Prompt helpers.
+- Adds unique prompt-group names, adjacent independent duplication and bulk enable/disable with undo/redo.
+- Edits item-specific contextual details directly in the generation prompt editor. Shows the resulting weighted phrase and resets one item's details without removing the item or changing its weight.
+- Keeps local-library selections in the active constructor category so clothing and character detail controls remain available.
+
+### Catalogs and image references
+- Saves a selected art reference directly into a chosen constructor category with an editable display name, prompt fragment and optional permanent preview. Catalog export/import includes chosen images.
+- Adds name/tag filtering to the custom catalog, retries after storage errors and disables editing until catalog loading completes.
+- Prevents stale account reads from replacing current entries, keeps queued saves scoped to their account, and repairs duplicate catalog IDs while preserving previews.
+- Loads reference images through the backend and displays local blob URLs, including with the desktop Content Security Policy. Thumbnail loading uses the existing bounded preview cache.
+- Cancels late reference decoding, raster insertion and img2img upload handoffs when the reference browser closes.
+
+### Anima tools and imports
+- Moves tag groups and Prompt Composer alongside generation prompts, Artist Mixer into Styles, Multi-LoRA into the LoRA panel and Telegram export import into the preset library. Removes the obsolete Anima modal and Advanced tab.
+- Uses the shared generation editor for Anima tag groups. Tag actions preserve macro IDs, LoRA names, weighted phrases, schedules and regional blocks with internal commas and newlines.
+- Keeps image-reference actions separate from the Studio draft and resets reference results when changing the general-rated filter.
+- Adds translations for the new catalog, group and item-editing controls in every supported language.
+
+### Release preparation
+- Publishes Windows x86_64 NSIS installers, the updater manifest and checksums through the release packaging workflow.
+- Prepared via the requested quick-release path without fresh local test, type, translation or manual ComfyUI-generation checks.
+
+---
+
 ## What's New in v2.3.8-fork.4
 
 ### Prompt Studio workspace

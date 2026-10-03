@@ -70,7 +70,7 @@ Run `node --test tests/reference-browser.test.mjs` for image handoff cancellatio
 
 `studio-probe.html` is a Vite-only manual test page. It is not included in the packaged application. Constructor, group and insertion controls can be exercised without ComfyUI; live remote sources require the backend.
 
-## Development handoff (2026-10-03)
+## Development checkpoint history (2026-10-03)
 
 The current UI polish is saved on `release/v2.3.8-fork.5`, based on published `v2.3.8-fork.4` (commit `abb70c8`). This is a development checkpoint, not a released version. Version files still contain `2.3.8-fork.4`; no new release tag has been created.
 
@@ -102,3 +102,9 @@ Validation in the Linux workspace: production build passed; Svelte checking repo
 At the user's request, the next continuation adds reference-to-catalog saving with chosen previews and category selection; direct contextual-detail editing, item phrase previews and per-item reset; unique group names, duplication and bulk enable/disable. New labels are provided in all supported locales. These changes are saved on the same branch and PR #30.
 
 No build, type, regression, translation or CI checks were run for this continuation. Earlier passing results above apply only to the preceding checkpoint. The commit uses `[skip ci]` to honor the request to continue without checks. The release version remains unchanged.
+
+### Release v2.3.8-fork.5
+
+The continuation is packaged as `2.3.8-fork.5`. Version fields in the frontend, npm lockfile, Rust package/lockfile and Tauri config are updated together. Reference images use backend-loaded blob URLs to work with the desktop CSP; thumbnails reuse the bounded preview cache. Release notes describe the complete fork.5 change set.
+
+Per the user's instructions, this release uses the quick-release path without fresh local validation or a real ComfyUI generation. Earlier passing results remain checkpoint-specific. Merging this fork's release PR starts Windows packaging on the merged commit; publication creates the release tag on that commit and uploads the installer, updater metadata and checksums. The tag-triggered and manual-dispatch release paths remain available for later releases and retries.

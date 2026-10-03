@@ -7,6 +7,7 @@
   import { loadAnimaCatalog, loadAnimaSourceImage, searchDanbooru, uploadImageBytes } from "../../utils/api.js";
   import { groupAnimaTags, parseTagList, updateTagList, type AnimaPromptGroup } from "../../utils/animaIntegration.js";
   import ReferenceCatalogSave from './ReferenceCatalogSave.svelte';
+  import SourceReferenceImage from './SourceReferenceImage.svelte';
 
   let { onUseGeneration }: { onUseGeneration?: () => void } = $props();
 
@@ -132,7 +133,7 @@
   {#if imported}<p role="status" class="text-xs text-neutral-300">{locale.t("anima_sources.imported")}</p>{/if}
   {#if selected}
     <section class="grid gap-3 rounded-xl border border-neutral-700 bg-neutral-900 p-3 md:grid-cols-2">
-      {#if selected.image}<img src={selected.image} alt={selected.name} class="max-h-[55vh] w-full object-contain" referrerpolicy="no-referrer" />{/if}
+      {#if selected.image}<SourceReferenceImage src={selected.image} alt={selected.name} class="max-h-[55vh] w-full object-contain" />{/if}
       <div class="space-y-3"><h3 class="text-neutral-200">{selected.name}</h3><p class="max-h-52 overflow-auto font-mono text-xs text-neutral-400">{selected.tags}</p>
         <div class="flex flex-wrap gap-2">
           {#if !online}<button type="button" disabled={busy} class="touch-target rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" onclick={() => { query = parseTagList(selected!.tags)[0]?.replace(/\\([()])/g, "$1").replace(/ /g, "_") ?? ""; source = "danbooru"; void search(); }}>{locale.t("anima_studio.search")} · Danbooru</button>{/if}
@@ -149,10 +150,10 @@
   {/if}
   <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
     {#each visible as entry (entry.id)}
-      <button type="button" disabled={busy} class="touch-target overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-left hover:border-indigo-500" onclick={() => { selected = entry; imported = false; }}>
-        {#if entry.preview}<img src={entry.preview} alt={entry.name} class="aspect-square w-full object-cover" loading="lazy" referrerpolicy="no-referrer" />{/if}
-        <div class="p-2"><p class="truncate text-xs text-neutral-200">{entry.name}</p><p class="line-clamp-2 text-[10px] text-neutral-500">{entry.tags}</p></div>
-      </button>
+      <article class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 hover:border-indigo-500">
+        {#if entry.preview}<SourceReferenceImage src={entry.preview} alt={entry.name} thumbnail class="aspect-square w-full object-cover" onOpen={busy ? undefined : () => { selected = entry; imported = false; }} />{/if}
+        <button type="button" disabled={busy} class="touch-target min-w-0 flex-1 p-2 text-left disabled:opacity-40" onclick={() => { selected = entry; imported = false; }}><span class="block truncate text-xs text-neutral-200">{entry.name}</span><span class="line-clamp-2 text-[10px] text-neutral-500">{entry.tags}</span></button>
+      </article>
     {/each}
   </div>
   {#if entries.length}<div class="flex items-center justify-center gap-4 text-neutral-300"><button type="button" class="touch-target" aria-label={locale.t("common.prev")} disabled={page <= 1 || busy} onclick={() => online ? search(page - 1) : page--}>←</button><span class="text-xs">{page}</span><button type="button" class="touch-target" aria-label={locale.t("common.next")} disabled={busy || (online ? entries.length < 40 : page * 48 >= filtered.length)} onclick={() => online ? search(page + 1) : page++}>→</button></div>{/if}
