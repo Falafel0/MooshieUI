@@ -1,5 +1,15 @@
 /** Simplified Chinese translations. */
 const zh: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "启用所有分组",
+  "prompt_studio.groups_disable_all": "禁用所有分组",
+  "prompt_studio.reset_item_details": "重置项目详情",
+  "prompt_studio.reference_save_catalog": "将参考保存到我的目录",
+  "prompt_studio.reference_catalog_hint": "选择构造器类别并编辑要保留的标签。所选预览会随目录保存，并包含在导出文件中。",
+  "prompt_studio.catalog_destination": "目录类别",
+  "prompt_studio.reference_keep_preview": "将此图片保存为预览",
+  "prompt_studio.catalog_update_existing": "此标签已存在于该类别中。保存会更新名称；如果未选择新图片，则保留原有预览。",
+  "prompt_studio.reference_catalog_saved": "已添加到你的目录",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

@@ -6,6 +6,7 @@
   import { autocomplete } from "../../stores/autocomplete.svelte.js";
   import { loadAnimaCatalog, loadAnimaSourceImage, searchDanbooru, uploadImageBytes } from "../../utils/api.js";
   import { groupAnimaTags, parseTagList, updateTagList, type AnimaPromptGroup } from "../../utils/animaIntegration.js";
+  import ReferenceCatalogSave from './ReferenceCatalogSave.svelte';
 
   let { onUseGeneration }: { onUseGeneration?: () => void } = $props();
 
@@ -140,6 +141,9 @@
           {#if selected.image}<button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" disabled={busy} onclick={() => importImage(selected!, false)}>img2img</button><button class="rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-200" disabled={busy} onclick={() => importImage(selected!, true)}>{locale.t("canvas.import_raster")}</button>{/if}
           <button type="button" disabled={busy} class="touch-target rounded border border-neutral-600 px-3 py-2 text-xs text-neutral-400" onclick={() => selected = null}>{locale.t("common.close")}</button>
         </div>
+        {#key selected.id}
+          <ReferenceCatalogSave name={selected.name} tags={selected.tags} preview={selected.preview ?? selected.image} />
+        {/key}
       </div>
     </section>
   {/if}

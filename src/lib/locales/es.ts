@@ -1,5 +1,15 @@
 /** Spanish translations. */
 const es: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "Activar todos los grupos",
+  "prompt_studio.groups_disable_all": "Desactivar todos los grupos",
+  "prompt_studio.reset_item_details": "Restablecer detalles del elemento",
+  "prompt_studio.reference_save_catalog": "Guardar referencia en mi catálogo",
+  "prompt_studio.reference_catalog_hint": "Elige una categoría y edita las etiquetas que quieras conservar. La vista previa se guarda con el catálogo y se incluye al exportarlo.",
+  "prompt_studio.catalog_destination": "Categoría del catálogo",
+  "prompt_studio.reference_keep_preview": "Conservar esta imagen como vista previa",
+  "prompt_studio.catalog_update_existing": "Esta etiqueta ya existe en esta categoría. Al guardar se actualiza el nombre y se conserva la vista previa si no eliges una imagen nueva.",
+  "prompt_studio.reference_catalog_saved": "Añadido a tu catálogo",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

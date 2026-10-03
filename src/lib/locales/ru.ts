@@ -1,5 +1,15 @@
 /** Russian translations. */
 const ru: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "Включить все группы",
+  "prompt_studio.groups_disable_all": "Выключить все группы",
+  "prompt_studio.reset_item_details": "Сбросить детали предмета",
+  "prompt_studio.reference_save_catalog": "Сохранить референс в мой каталог",
+  "prompt_studio.reference_catalog_hint": "Выберите категорию конструктора и отредактируйте сохраняемые теги. Выбранное превью сохранится с каталогом и войдёт в экспорт.",
+  "prompt_studio.catalog_destination": "Категория каталога",
+  "prompt_studio.reference_keep_preview": "Сохранить это изображение как превью",
+  "prompt_studio.catalog_update_existing": "Этот тег уже есть в категории. Сохранение обновит название и оставит прежнее превью, если не выбрано новое.",
+  "prompt_studio.reference_catalog_saved": "Добавлено в ваш каталог",
+
   "prompt_studio.item_details": "Детали: {name}",
   "prompt_studio.search_groups": "Поиск групп Danbooru",
   "prompt_studio.search_macros": "Поиск макросов",

@@ -1,5 +1,15 @@
 /** Japanese translations. */
 const ja: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "すべてのグループを有効にする",
+  "prompt_studio.groups_disable_all": "すべてのグループを無効にする",
+  "prompt_studio.reset_item_details": "項目の詳細をリセット",
+  "prompt_studio.reference_save_catalog": "参照を自分のカタログに保存",
+  "prompt_studio.reference_catalog_hint": "カテゴリを選び、保存するタグを編集してください。選択したプレビューはカタログと一緒に保存され、エクスポートにも含まれます。",
+  "prompt_studio.catalog_destination": "カタログのカテゴリ",
+  "prompt_studio.reference_keep_preview": "この画像をプレビューとして保存",
+  "prompt_studio.catalog_update_existing": "このタグはカテゴリに登録済みです。保存すると名前が更新され、新しい画像を選択しなければ既存のプレビューが維持されます。",
+  "prompt_studio.reference_catalog_saved": "カタログに追加しました",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

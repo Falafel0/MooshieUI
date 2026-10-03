@@ -62,12 +62,13 @@ class CustomCatalog {
     } catch (error) { if (revision === this.revision && key === scopedKey()) this.storageError = true; console.warn('Custom catalogue load:', error); }
   }
   add(entry: Omit<CustomCatalogEntry, 'id'> & { id?: string }) {
-    if (!this.ready || this.loadedKey !== scopedKey()) return;
+    if (!this.ready || this.loadedKey !== scopedKey()) return false;
     const existing = this.entries.find(row => entry.id && row.id === entry.id)
       ?? this.entries.find(row => row.tag === entry.tag.trim() && row.subId === entry.subId.trim());
     const rows = normalized([{ ...existing, ...entry, id: existing?.id ?? crypto.randomUUID() }]);
-    if (!rows.length) return;
+    if (!rows.length) return false;
     this.entries = [...this.entries.filter(row => row.id !== rows[0].id && !(row.tag === rows[0].tag && row.subId === rows[0].subId)), ...rows]; this.save();
+    return true;
   }
   remove(id: string) {
     if (!this.ready || this.loadedKey !== scopedKey()) return;

@@ -5,7 +5,7 @@
   import { promptPresets, inlineChunkToken, type PromptPreset } from '../../stores/promptPresets.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
   import { insertPrompt } from '../../prompt-studio/insertion.js';
-  import { ArrowUp, ArrowDown, Copy, Trash2 } from '@lucide/svelte';
+  import { ArrowUp, ArrowDown, Copy, CopyPlus, Trash2 } from '@lucide/svelte';
   let { onApply, onCopy }: { onApply: () => void; onCopy: () => void } = $props();
   let active = $state('');
   let importing = $state(false);
@@ -47,6 +47,7 @@
       <label class="flex items-center gap-2"><input type="checkbox" checked={group.enabled} onchange={event => studio.updateGroup(group!.id, { enabled: event.currentTarget.checked })} />{locale.t('prompt_studio.group_enabled')}</label>
       <button type="button" class="touch-target rounded p-2 disabled:opacity-30" disabled={studio.groups[0]?.id === group.id} aria-label={locale.t('prompt_studio.group_up')} onclick={() => studio.moveGroup(group!.id, -1)}><ArrowUp size={16} /></button>
       <button type="button" class="touch-target rounded p-2 disabled:opacity-30" disabled={studio.groups.at(-1)?.id === group.id} aria-label={locale.t('prompt_studio.group_down')} onclick={() => studio.moveGroup(group!.id, 1)}><ArrowDown size={16} /></button>
+      <button type="button" class="touch-target rounded p-2 hover:text-neutral-200" aria-label={locale.t('common.duplicate')} title={locale.t('common.duplicate')} onclick={() => active = studio.duplicateGroup(group!.id) ?? active}><CopyPlus size={16} /></button>
       <button type="button" class="touch-target rounded p-2 hover:text-red-300" aria-label={locale.t('prompt_studio.remove')} onclick={() => studio.removeGroup(group!.id)}><Trash2 size={16} /></button>
     </div>
   {:else if studio.rawPrompt !== undefined}
@@ -65,6 +66,10 @@
       <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => active = studio.addGroup(locale.t('prompt_studio.group_name'))}>+ {locale.t('prompt_studio.prompt_groups')}</button>
       <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
       <button type="button" aria-expanded={macros} class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => macros = !macros}>{locale.t('prompt_studio.macros')}</button>
+      {#if studio.groups.length}
+        <button type="button" disabled={studio.groups.every(group => group.enabled)} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => studio.setGroupsEnabled(true)}>{locale.t('prompt_studio.groups_enable_all')}</button>
+        <button type="button" disabled={studio.groups.every(group => !group.enabled)} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => studio.setGroupsEnabled(false)}>{locale.t('prompt_studio.groups_disable_all')}</button>
+      {/if}
     </div>
   </details>
   <button type="button" class="touch-target mt-1 text-xs text-neutral-400" aria-expanded={showPreview} onclick={() => showPreview = !showPreview}>{locale.t('prompt_studio.combined_preview')} · {studio.groups.filter(group => group.enabled).length} {locale.t('prompt_studio.prompt_groups')}</button>

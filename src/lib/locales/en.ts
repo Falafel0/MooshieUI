@@ -1,5 +1,15 @@
 /** English translations — source of truth for all UI strings. */
 const en: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "Enable all groups",
+  "prompt_studio.groups_disable_all": "Disable all groups",
+  "prompt_studio.reset_item_details": "Reset item details",
+  "prompt_studio.reference_save_catalog": "Save reference to my catalog",
+  "prompt_studio.reference_catalog_hint": "Choose a constructor category and edit the tags to keep. The chosen preview is stored with the catalog and included in exports.",
+  "prompt_studio.catalog_destination": "Catalog category",
+  "prompt_studio.reference_keep_preview": "Keep this image as the preview",
+  "prompt_studio.catalog_update_existing": "This tag already exists in this category. Saving updates its name and preserves its preview unless a new image is chosen.",
+  "prompt_studio.reference_catalog_saved": "Added to your catalog",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

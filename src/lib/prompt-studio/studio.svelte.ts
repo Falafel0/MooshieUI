@@ -378,6 +378,20 @@ class Studio {
     if (parts[partName] === tag) delete parts[partName]; else parts[partName] = tag;
     this.setDetail(variantTag, { parts });
   }
+  editPart(variantTag: string, partName: string, value: string) {
+    if (!this.isChosen(variantTag) || (this.detail(variantTag).parts[partName] ?? '') === value) return;
+    const parts = { ...this.detail(variantTag).parts };
+    if (value.trim()) parts[partName] = value; else delete parts[partName];
+    this.setDetail(variantTag, { parts });
+  }
+  resetDetails(variantTag: string) {
+    if (!this.details[variantTag]) return;
+    this.checkpoint();
+    const remaining = { ...this.details };
+    delete remaining[variantTag];
+    this.details = remaining;
+    this.save();
+  }
 
   // ------------------------------------------------------ random and presets
   randomize(wardrobe = false) {
@@ -549,13 +563,36 @@ class Studio {
     this.save();
   }
   addGroup(name: string) {
+    const base = name.trim() || locale.t('prompt_studio.group_name');
+    let unique = base, number = 1;
+    while (this.groups.some(group => group.name === unique)) unique = `${base} (${++number})`;
     this.checkpoint();
-    const group = { id: crypto.randomUUID(), name, content: '', enabled: true };
+    const group = { id: crypto.randomUUID(), name: unique, content: '', enabled: true };
     this.groups = [...this.groups, group]; this.save(); return group.id;
   }
   updateGroup(id: string, patch: Partial<Omit<StudioPromptGroup, 'id'>>) {
+    const current = this.groups.find(group => group.id === id);
+    if (!current || Object.entries(patch).every(([key, value]) => current[key as keyof StudioPromptGroup] === value)) return;
     this.checkpoint();
     this.groups = this.groups.map(group => group.id === id ? { ...group, ...patch } : group); this.save();
+  }
+  duplicateGroup(id: string): string | undefined {
+    const index = this.groups.findIndex(group => group.id === id);
+    if (index < 0) return undefined;
+    const source = this.groups[index];
+    let number = 2;
+    let name = `${source.name} (${number})`;
+    while (this.groups.some(group => group.name === name)) name = `${source.name} (${++number})`;
+    this.checkpoint();
+    const copy = { ...source, id: crypto.randomUUID(), name };
+    this.groups = [...this.groups.slice(0, index + 1), copy, ...this.groups.slice(index + 1)];
+    this.save(); return copy.id;
+  }
+  setGroupsEnabled(enabled: boolean) {
+    if (this.groups.every(group => group.enabled === enabled)) return;
+    this.checkpoint();
+    this.groups = this.groups.map(group => ({ ...group, enabled }));
+    this.save();
   }
   removeGroup(id: string) { this.checkpoint(); this.groups = this.groups.filter(group => group.id !== id); this.save(); }
   moveGroup(id: string, direction: number) {

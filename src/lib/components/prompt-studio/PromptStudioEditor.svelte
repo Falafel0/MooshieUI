@@ -24,14 +24,13 @@
   const category = $derived(studio.currentCategory);
   let focusedTag = $state('');
   let danbooru = $state(false);
-  let extraDetail = $state('');
   const chosenTag = $derived(sub ? (studio.selected.some(v => v.category === sub.id && v.tag === focusedTag) ? focusedTag : studio.chosen(sub.id)?.tag) : undefined);
   function chooseVariant(sub: SubCategory, variant: Variant) { focusedTag = variant.tag; if (!variant.tag) studio.clearSub(sub.id); else studio.chooseVariant(sub, variant); }
 
   const detail = $derived(chosenTag ? studio.detail(chosenTag) : undefined);
   const savedPreview = $derived(customCatalog.entries.find(entry => entry.tag === chosenTag && entry.subId === sub?.id)?.preview);
   const activeVariant = $derived(sub?.variants?.find((v) => v.tag === chosenTag) ?? (chosenTag ? withContextOptions({ id: chosenTag, tag: chosenTag, name: chosenTag.replaceAll('_', ' ') }, sub?.id ?? '') : undefined));
-  $effect(() => { chosenTag; extraDetail = ''; });
+  const itemPrompt = $derived(chosenTag ? studio.format(studio.selected.find(item => item.tag === chosenTag)!) : '');
   const palette = $derived(sub?.paletteKey ? (PALETTES[sub.paletteKey] ?? CLOTHING_PALETTE) : CLOTHING_PALETTE);
   const paletteMap = $derived(new Map(palette.map((entry) => [entry.tag, entry])));
 
@@ -183,7 +182,7 @@
           <h5 class="mt-4 mb-2 text-xs text-neutral-400">{locale.t('prompt_studio.catalog_library')}</h5>
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {#each libraryVariants as entry (entry.n)}
-              <button type="button" class={tileClass(studio.isChosen(entry.n))} aria-pressed={studio.isChosen(entry.n)} onclick={() => { studio.choose(entry.n, entry.n.replaceAll('_', ' '), classifyTag(entry.n).category); }}>{entry.n.replaceAll('_', ' ')}</button>
+              <button type="button" class={tileClass(studio.isChosen(entry.n))} aria-pressed={studio.isChosen(entry.n)} onclick={() => { focusedTag = entry.n; studio.choose(entry.n, entry.n.replaceAll('_', ' '), sub.id, sub.mode === 'single'); }}>{entry.n.replaceAll('_', ' ')}</button>
             {/each}
           </div>
         {/if}
@@ -262,7 +261,11 @@
       {@const variant = activeVariant}
       {#if chosenTag}
         <div class="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-          <p class="font-mono text-[10px] tracking-[0.16em] text-indigo-400 uppercase">{locale.t('prompt_studio.item_details', { name: variant.name })}</p>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs font-medium text-indigo-300">{locale.t('prompt_studio.item_details', { name: variant.name })}</p>
+            <button type="button" disabled={!studio.details[chosenTag]} class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-400 disabled:opacity-40" onclick={() => studio.resetDetails(chosenTag!)}>{locale.t('prompt_studio.reset_item_details')}</button>
+          </div>
+          <p class="whitespace-pre-wrap break-words rounded border border-neutral-800 bg-neutral-950 p-3 text-xs leading-relaxed text-neutral-300">{itemPrompt}</p>
 
           {#if variant.modifiers?.length}
             <div>
@@ -354,9 +357,10 @@
           {/each}
           <div class="border-t border-neutral-800 pt-3">
             <p class="mb-2 text-xs text-neutral-400">{locale.t('prompt_studio.additional_details')}</p>
-            <PromptTextarea bind:value={extraDetail} rows={2} minHeight="min-h-16" placeholder={locale.t('prompt_studio.additional_details_hint')} />
-            <button type="button" disabled={!extraDetail.trim()} class="touch-target mt-2 rounded border border-neutral-700 px-3 py-2 text-xs text-indigo-300 disabled:opacity-40" onclick={() => { studio.setPart(chosenTag!, 'Additional details', [detail?.parts['Additional details'], extraDetail.trim()].filter(Boolean).join(', ')); extraDetail = ''; }}>{locale.t('prompt_studio.add_tag')}</button>
-            {#if detail?.parts['Additional details']}<p class="mt-2 break-words text-xs text-neutral-400">{detail.parts['Additional details']} <button type="button" class="touch-target rounded p-1" onclick={() => studio.setPart(chosenTag!, 'Additional details', detail!.parts['Additional details'])}>{locale.t('prompt_studio.remove')}</button></p>{/if}
+            {#key chosenTag}
+              <PromptTextarea bind:value={() => studio.detail(chosenTag!).parts['Additional details'] ?? '', value => studio.editPart(chosenTag!, 'Additional details', value)} rows={2} minHeight="min-h-16" storageKey={`studio-detail-${sub.id}`} placeholder={locale.t('prompt_studio.additional_details_hint')} />
+            {/key}
+            {#if detail?.parts['Additional details']}<button type="button" class="touch-target mt-2 rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-400" onclick={() => studio.editPart(chosenTag!, 'Additional details', '')}>{locale.t('prompt_studio.remove')}</button>{/if}
           </div>
         </div>
       {/if}

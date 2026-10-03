@@ -1,5 +1,15 @@
 /** Italian translations. */
 const it: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "Attiva tutti i gruppi",
+  "prompt_studio.groups_disable_all": "Disattiva tutti i gruppi",
+  "prompt_studio.reset_item_details": "Ripristina i dettagli",
+  "prompt_studio.reference_save_catalog": "Salva il riferimento nel mio catalogo",
+  "prompt_studio.reference_catalog_hint": "Scegli una categoria e modifica i tag da conservare. L’anteprima viene salvata con il catalogo e inclusa nelle esportazioni.",
+  "prompt_studio.catalog_destination": "Categoria del catalogo",
+  "prompt_studio.reference_keep_preview": "Mantieni questa immagine come anteprima",
+  "prompt_studio.catalog_update_existing": "Questo tag esiste già nella categoria. Il salvataggio aggiorna il nome e mantiene l’anteprima se non scegli una nuova immagine.",
+  "prompt_studio.reference_catalog_saved": "Aggiunto al tuo catalogo",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

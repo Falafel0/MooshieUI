@@ -1,5 +1,15 @@
 /** Traditional Chinese (Taiwan) translations. */
 const zhTw: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "啟用所有群組",
+  "prompt_studio.groups_disable_all": "停用所有群組",
+  "prompt_studio.reset_item_details": "重設項目詳情",
+  "prompt_studio.reference_save_catalog": "將參考儲存至我的目錄",
+  "prompt_studio.reference_catalog_hint": "選擇建構器類別並編輯要保留的標籤。所選預覽會隨目錄儲存，並包含在匯出檔案中。",
+  "prompt_studio.catalog_destination": "目錄類別",
+  "prompt_studio.reference_keep_preview": "將此圖片儲存為預覽",
+  "prompt_studio.catalog_update_existing": "此標籤已存在於該類別中。儲存會更新名稱；若未選擇新圖片，則保留原有預覽。",
+  "prompt_studio.reference_catalog_saved": "已加入你的目錄",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",

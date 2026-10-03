@@ -10,6 +10,8 @@ Choose a category and a variant. The assembled panel groups the selected tags by
 
 Details belong to the selected item. In categories that allow multiple selections, use the item selector to decide which garment or feature to edit. Color, material, fit and other modifiers remain attached to that item. **Additional contextual details** accepts more tags or a phrase and keeps macro, LoRA and scheduling syntax intact.
 
+Additional details are edited directly in the shared prompt editor and saved with the item. The details panel shows the resulting item phrase, including its weight. **Reset item details** clears only that item's modifiers, colors, quantity and extra text; it keeps the selected item and its weight. Both editing and reset support undo and redo. Tags chosen from local search join the active constructor category so their item controls remain available.
+
 With **Readable** enabled, `shirt`, blue, silk and rolled-up sleeves become `blue silk shirt with rolled-up sleeves`. Tag mode keeps the original tag spelling. Weights apply to the complete contextual phrase. Undo and redo include groups and item details.
 
 **All Danbooru tags & groups** searches beyond the built-in catalog. Search `*` to browse tags by popularity or enter a tag name; results load in pages. Search the Danbooru group index to find thematic collections. A live tag can be selected for the active constructor category or added to **Edit my catalog**. Live and custom garments receive the same contextual controls as built-in choices.
@@ -27,6 +29,8 @@ The custom catalog and its images are saved locally for the current account, sep
 ## Prompt groups and macros
 
 The prompt area uses the same editor as generation, including autocomplete, syntax highlighting and weight editing. Keep the constructor output as the base and add named groups for lighting, style, background or other text. Groups can be renamed, enabled or disabled, reordered and deleted. **Prompt helpers** contains group creation, block import and macros; copy and send remain visible. Sending is unavailable until a pending tag conflict is resolved.
+
+New groups receive distinct names. **Duplicate** places an independent copy immediately after the active group and opens it for editing. Copies retain the original text and enabled state. **Enable all groups** and **Disable all groups** each change the complete set in one undoable action without deleting any text.
 
 Editing the constructor output switches it to manual text. **Return to constructor** restores the generated base while keeping the named groups.
 
@@ -51,6 +55,8 @@ Browse live booru tags, Anima source recipes, the local tag library and saved co
 **Art sources** provides image references and upstream catalogs. Selected images can be sent to img2img or inserted as raster canvas layers. Tag actions can append to the generation prompt or populate Anima tag groups. These actions return to generation without overwriting the Studio draft.
 
 Closing the reference browser cancels pending image handoffs. Late image decoding or upload results do not insert a layer or replace the img2img input. Changing the general-rated filter clears the old selection and starts a new search.
+
+Open **Save reference to my catalog** on a selected reference to edit its display name and prompt fragment, choose a constructor category, and optionally keep its image as a permanent preview. Saving an existing category/tag pair updates that entry; leaving the image option off preserves its existing preview. An unavailable image prevents saving with the image option selected; turn the option off to save the tags alone. Saving to the catalog leaves the generation prompt and Studio draft in place.
 
 Save individual entries, loaded search results or a complete Danbooru group to a collection. Filter saved collections, add their tags to the draft, remove entries, or export and import the collection as JSON. Saving loaded search results saves the pages already fetched, not the entire remote database. Ordinary source thumbnails use an expiring cache; permanent chosen images belong to the custom catalog described above.
 
@@ -90,3 +96,9 @@ Local safety backup: a stash named `Prompt Studio polish before integrating fork
 The continuation adds searchable custom entries, load/error gating and IndexedDB account-switch regressions; the shared Anima group editor and syntax-preserving tag actions; and cancellation checks during reference decoding, layer insertion and upload. Stored duplicate catalog IDs and category/tag pairs are repaired during loading without losing chosen previews. The Telegram regression loader now resolves the real utility dependencies.
 
 Validation in the Linux workspace: production build passed; Svelte checking reports 0 errors and the same 85 warnings as the checkpoint; i18n parity passed; all 124 existing Node regression tests and 4 new reference-browser tests passed; Prompt Studio, Telegram and Animadex scripts passed; 5 release artifact checks passed. No Rust source or version files changed. Native Windows checks run through PR Guardrails. Interactive visual testing and real ComfyUI generation remain outstanding; this continuation does not establish release readiness.
+
+### Further development without checks (2026-10-03)
+
+At the user's request, the next continuation adds reference-to-catalog saving with chosen previews and category selection; direct contextual-detail editing, item phrase previews and per-item reset; unique group names, duplication and bulk enable/disable. New labels are provided in all supported locales. These changes are saved on the same branch and PR #30.
+
+No build, type, regression, translation or CI checks were run for this continuation. Earlier passing results above apply only to the preceding checkpoint. The commit uses `[skip ci]` to honor the request to continue without checks. The release version remains unchanged.

@@ -1,5 +1,15 @@
 /** Korean translations. */
 const ko: Record<string, string> = {
+  "prompt_studio.groups_enable_all": "모든 그룹 활성화",
+  "prompt_studio.groups_disable_all": "모든 그룹 비활성화",
+  "prompt_studio.reset_item_details": "항목 세부 정보 초기화",
+  "prompt_studio.reference_save_catalog": "참조를 내 카탈로그에 저장",
+  "prompt_studio.reference_catalog_hint": "카테고리를 선택하고 저장할 태그를 편집하세요. 선택한 미리보기는 카탈로그와 함께 저장되며 내보내기에도 포함됩니다.",
+  "prompt_studio.catalog_destination": "카탈로그 카테고리",
+  "prompt_studio.reference_keep_preview": "이 이미지를 미리보기로 저장",
+  "prompt_studio.catalog_update_existing": "이 태그는 이미 이 카테고리에 있습니다. 저장하면 이름을 업데이트하며 새 이미지를 선택하지 않으면 기존 미리보기를 유지합니다.",
+  "prompt_studio.reference_catalog_saved": "카탈로그에 추가됨",
+
   "prompt_studio.item_details": "Details: {name}",
   "prompt_studio.search_groups": "Search Danbooru groups",
   "prompt_studio.search_macros": "Search macros",
