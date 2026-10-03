@@ -78,9 +78,73 @@ export async function searchBooruTags(
   source: BooruSource,
   query: string,
   limit = 24,
+  page = 1,
 ): Promise<BooruTag[]> {
-  const result = await ipcInvoke<BooruTag[]>("booru_tag_search", { source, query, limit });
+  limit = Math.min(50, Math.max(1, Math.floor(limit) || 24));
+  page = Math.max(1, Math.floor(page) || 1);
+  const result = await ipcInvoke<BooruTag[]>("booru_tag_search", { source, query, limit, page });
   return Array.isArray(result) ? result : [];
+}
+
+export interface BooruSearchPage {
+  tags: BooruTag[];
+  page: number;
+  hasMore: boolean;
+}
+
+/** One instance per view. Reset immediately when source/query changes, including
+ * during an outstanding request. A stale request returns null and cannot change
+ * pagination state; concurrent load-more events never issue duplicate requests.
+ */
+export class BooruSearchPager {
+  private generation = 0;
+  private source: BooruSource = "danbooru";
+  private query = "";
+  private limit = 24;
+  private nextPage = 1;
+  private pending = false;
+  private more = false;
+  private seen = new Set<string>();
+
+  get loading(): boolean { return this.pending; }
+  get hasMore(): boolean { return this.more; }
+
+  reset(source: BooruSource, query: string, limit = 24): void {
+    this.generation++;
+    this.source = source;
+    this.query = query.trim();
+    this.limit = Math.min(50, Math.max(1, Math.floor(limit) || 24));
+    this.nextPage = 1;
+    this.pending = false;
+    this.more = !!this.query;
+    this.seen = new Set();
+  }
+
+  async loadNext(): Promise<BooruSearchPage | null> {
+    if (this.pending || !this.more) return null;
+    const generation = this.generation;
+    const page = this.nextPage;
+    this.pending = true;
+    try {
+      const raw = await searchBooruTags(this.source, this.query, this.limit, page);
+      if (generation !== this.generation) return null;
+      const tags = raw.filter(tag => {
+        if (this.seen.has(tag.name)) return false;
+        this.seen.add(tag.name);
+        return true;
+      });
+      // Stop on short or repeated pages, rather than spinning on an API that
+      // ignores its offset. Errors leave nextPage unchanged for explicit retry.
+      this.more = raw.length === this.limit && tags.length > 0;
+      this.nextPage++;
+      return { tags, page, hasMore: this.more };
+    } catch (error) {
+      if (generation !== this.generation) return null;
+      throw error;
+    } finally {
+      if (generation === this.generation) this.pending = false;
+    }
+  }
 }
 
 /** Danbooru's curated `tag_groups` tree — sections of wiki pages that list tags. */

@@ -21,6 +21,7 @@ use tokio::{process::Command, sync::Mutex};
 static CHATGPT_LOCK: LazyLock<Arc<Mutex<()>>> = LazyLock::new(|| Arc::new(Mutex::new(())));
 static GEMINI_LOCK: LazyLock<Arc<Mutex<()>>> = LazyLock::new(|| Arc::new(Mutex::new(())));
 static CANCEL_LOGIN: AtomicU64 = AtomicU64::new(0);
+static CANCEL_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static CLOSING: AtomicBool = AtomicBool::new(false);
 
 fn error(message: &str) -> AppError {
@@ -92,6 +93,12 @@ pub fn cancel_login() {
 }
 pub async fn shutdown() {
     CLOSING.store(true, Ordering::SeqCst);
+    stop_active_requests().await;
+}
+
+/// Cancel running children without disabling future companion requests.
+pub async fn stop_active_requests() {
+    CANCEL_REQUESTS.fetch_add(1, Ordering::SeqCst);
     cancel_login();
     // Dropped requests kill their children, then clean history while holding
     // the lock. Wait for that cleanup before the runtime exits.
@@ -107,12 +114,13 @@ async fn bounded<T>(
     login: Option<u64>,
     work: impl Future<Output = Result<T, AppError>>,
 ) -> Result<T, AppError> {
+    let generation = CANCEL_REQUESTS.load(Ordering::SeqCst);
     tokio::select! {
         result = tokio::time::timeout(Duration::from_secs(seconds), work) =>
             result.map_err(|_| error("Companion request timed out. Please retry."))?,
         _ = async {
             loop {
-                if CLOSING.load(Ordering::SeqCst) || login.is_some_and(|n| n != CANCEL_LOGIN.load(Ordering::SeqCst)) { break; }
+                if CLOSING.load(Ordering::SeqCst) || generation != CANCEL_REQUESTS.load(Ordering::SeqCst) || login.is_some_and(|n| n != CANCEL_LOGIN.load(Ordering::SeqCst)) { break; }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         } => Err(error("Companion request cancelled.")),

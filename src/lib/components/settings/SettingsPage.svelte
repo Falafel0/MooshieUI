@@ -112,6 +112,7 @@
   let error = $state<string | null>(null);
   let restartNeeded = $state(false);
   let restarting = $state(false);
+  let stoppingManaged = $state(false);
   let search = $state("");
 
   let tagUrlInput = $state("");
@@ -2012,6 +2013,20 @@
       restarting = false;
     }
   }
+
+  async function stopAllManagedProcesses() {
+    if (stoppingManaged) return;
+    stoppingManaged = true;
+    error = null;
+    try {
+      await ipcInvoke("stop_all_managed_processes");
+      connection.connected = false;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      stoppingManaged = false;
+    }
+  }
 </script>
 
 <div class="h-full flex flex-col overflow-hidden">
@@ -2062,6 +2077,16 @@
         {:else}
           {locale.t('settings.restart_comfyui')}
         {/if}
+      </button>
+      <button
+        class="px-3 py-1.5 rounded-lg text-sm bg-neutral-700 hover:bg-neutral-600 text-neutral-100 transition-colors disabled:opacity-50"
+        onclick={stopAllManagedProcesses}
+        disabled={stoppingManaged || restarting}
+        title={locale.t('settings.stop_all_managed_hint')}
+      >
+        {stoppingManaged
+          ? locale.t('settings.stopping_all_managed')
+          : locale.t('settings.stop_all_managed')}
       </button>
       {/if}
       </div>

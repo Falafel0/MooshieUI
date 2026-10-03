@@ -1,3 +1,6 @@
+import { isBackslashEscaped } from "./promptSyntaxEscape.js";
+import { hasPromptAlternation, parsePromptAlternations, type PromptAlternation } from "./promptAlternation.js";
+export { hasPromptAlternation, parsePromptAlternations, resolvePromptAlternation, preservePromptAlternation, ALTERNATION_MODEL_FAMILIES, ALTERNATION_SAMPLERS } from "./promptAlternation.js";
 import type { PromptSegment } from "../types/index.js";
 import {
   PROMPT_REGION_TAG_REGEX,
@@ -35,6 +38,8 @@ const COMBINED_REGEX = PROMPT_SCHEDULE_REGEX;
 export interface ParsedPrompt {
   baseText: string;
   segments: PromptSegment[];
+  /** Ranges in the original prompt; syntax remains in base/segment texts for ComfyUI. */
+  alternations: PromptAlternation[];
 }
 
 /**
@@ -44,13 +49,32 @@ export interface ParsedPrompt {
  * only the "after" segment). Returns null only when BOTH sides are empty.
  */
 function splitSwarmContent(content: string): [string, string] | null {
-  let parts: string[];
-  if (content.includes("||")) {
-    parts = content.split("||").map((s) => s.trim());
-  } else if (content.includes("|")) {
-    parts = content.split("|").map((s) => s.trim());
-  } else {
-    parts = content.split(",").map((s) => s.trim());
+  let parts: string[] = [content];
+  for (const separator of ["||", "|", ","]) {
+    const positions: number[] = [];
+    let brackets = 0;
+    let parens = 0;
+    for (let i = 0; i < content.length; i++) {
+      if (isBackslashEscaped(content, i)) continue;
+      if (content[i] === "[") brackets++;
+      else if (content[i] === "]") brackets = Math.max(0, brackets - 1);
+      else if (content[i] === "(") parens++;
+      else if (content[i] === ")") parens = Math.max(0, parens - 1);
+      else if (!brackets && !parens && content.startsWith(separator, i)) {
+        positions.push(i);
+        i += separator.length - 1;
+      }
+    }
+    if (positions.length) {
+      let last = 0;
+      parts = positions.map((position) => {
+        const part = content.slice(last, position).trim();
+        last = position + separator.length;
+        return part;
+      });
+      parts.push(content.slice(last).trim());
+      break;
+    }
   }
   if (parts.length !== 2) return null;
   if (!parts[0] && !parts[1]) return null;
@@ -152,7 +176,7 @@ export function parseScheduledPrompt(raw: string): ParsedPrompt {
     .replace(/\s*,\s*$/, "")
     .trim();
 
-  return { baseText, segments };
+  return { baseText, segments, alternations: parsePromptAlternations(raw) };
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +311,21 @@ function renderPresetSegment(
   knownPresetSlugs?: ReadonlySet<string>,
   loraWords?: ReadonlySet<string>,
 ): string {
+  let html = "";
+  let last = 0;
+  for (const block of parsePromptAlternations(text)) {
+    html += renderPlainPresetSegment(text.slice(last, block.start), knownPresetSlugs, loraWords);
+    html += highlightPill(TAG_COLORS.from) + escapeHtml(text.slice(block.start, block.end)) + "</span>";
+    last = block.end;
+  }
+  return html + renderPlainPresetSegment(text.slice(last), knownPresetSlugs, loraWords);
+}
+
+function renderPlainPresetSegment(
+  text: string,
+  knownPresetSlugs?: ReadonlySet<string>,
+  loraWords?: ReadonlySet<string>,
+): string {
   if (!text) return "";
   if (!mayContainPresetToken(text)) return renderLoraWordsInPlainText(text, loraWords);
   let html = "";
@@ -408,7 +447,7 @@ function renderSegmentAwareText(
  */
 export function hasSchedulingTags(raw: string): boolean {
   COMBINED_REGEX.lastIndex = 0;
-  return COMBINED_REGEX.test(raw);
+  return COMBINED_REGEX.test(raw) || hasPromptAlternation(raw);
 }
 
 /**

@@ -5,6 +5,7 @@ pub mod image_edit;
 pub mod img2img;
 pub mod inpainting;
 pub mod music;
+pub mod prompt_alternation;
 pub mod rife;
 pub mod segment_detail;
 pub mod style_ref;
@@ -31,6 +32,7 @@ use crate::comfyui::types::{BaseSources, GenerationParams, PromptSegment, StageC
 /// Both the Tauri `generate` command and the LAN web server `generate` route
 /// must call this before `build_workflow`.
 pub fn validate_generation_params(params: &GenerationParams) -> Result<(), String> {
+    prompt_alternation::validate(params)?;
     validate_pause_resume(params)?;
 
     // Video mode has its own parameter set; validate it and return early so
@@ -1676,6 +1678,8 @@ fn finish_workflow(mut result: WorkflowResult, params: &GenerationParams, seed: 
     } else {
         final_image
     };
+
+    prompt_alternation::inject(&mut result);
 
     let save_id = result.next_id.to_string();
     let output_format = match params.output_format.as_str() {

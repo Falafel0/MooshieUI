@@ -103,6 +103,11 @@ export const SUB_THEMES: Record<string, StudioTheme> = {
   legwear: 'wardrobe',
   dress_type: 'wardrobe',
   emotions: 'detail',
+  posture: 'pose', gestures: 'pose', gaze: 'pose',
+  framing: 'scene', viewpoint: 'scene', layout: 'scene',
+  location: 'scene', weather: 'scene', light: 'scene', effects: 'scene',
+  headwear: 'wardrobe', jewelry: 'wardrobe', extras: 'wardrobe', shoes: 'wardrobe', shoe_details: 'wardrobe',
+  held_props: 'detail', scene_props: 'scene',
 };
 
 export function themeForSub(subId: string): StudioTheme | undefined {

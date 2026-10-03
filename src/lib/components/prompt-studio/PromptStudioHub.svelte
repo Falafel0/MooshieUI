@@ -19,7 +19,7 @@
 </script>
 
 <div class="mx-auto w-full max-w-6xl">
-  <p class="mb-1 font-mono text-[11px] tracking-[0.2em] text-indigo-400 uppercase">studio_ready</p>
+  <p class="mb-1 font-mono text-[11px] tracking-[0.2em] text-indigo-400 uppercase">{locale.t("prompt_studio.resume")}</p>
   <h3 class="mb-4 text-2xl font-semibold tracking-tight text-neutral-100">{locale.t("prompt_studio.hub")}</h3>
 
   {#if studio.selected.length}
@@ -37,8 +37,8 @@
         disabled={card.view === "advanced" && !advancedEnabled}
       >
         <span class="flex items-center justify-between font-mono text-[10px] tracking-[0.16em] text-neutral-500 uppercase">
-          {card.id}
-          <span class="text-indigo-400 group-hover:text-indigo-300">[open]</span>
+          {locale.t("prompt_studio.details")}
+          <span class="text-indigo-400 group-hover:text-indigo-300">→</span>
         </span>
         <span class="mt-auto text-base font-semibold text-neutral-100">{locale.t(card.title)}</span>
         <span class="text-xs leading-relaxed text-neutral-400">{locale.t(card.desc)}</span>

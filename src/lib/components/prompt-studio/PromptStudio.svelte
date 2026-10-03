@@ -10,145 +10,104 @@
   import PromptStudioSources from "./PromptStudioSources.svelte";
   import PromptStudioCatalog from "./PromptStudioCatalog.svelte";
   import PromptStudioAdvanced from "./PromptStudioAdvanced.svelte";
-  import { ChevronLeft, Dices, Redo2, RotateCcw, Shirt, Undo2, X } from "@lucide/svelte";
-
+  import { Dices, Redo2, RotateCcw, Undo2 } from "@lucide/svelte";
   type View = "hub" | "character" | "wardrobe" | "sources" | "catalog" | "advanced";
-
-  let { onClose, embedded = false }: { onClose?: () => void; embedded?: boolean } = $props();
+  let { onApply, onClose }: { onApply?: () => void; onClose?: () => void } = $props();
   let view = $state<View>("hub");
   let mobilePanel = $state(false);
-
+  let replacePrompt = $state(false);
   const wardrobe = $derived(view === "wardrobe");
   const body = $derived(view === "character" || view === "wardrobe");
-
   const titles: Record<View, string> = {
-    hub: "prompt_studio.hub",
-    character: "prompt_studio.character",
-    wardrobe: "prompt_studio.wardrobe",
-    sources: "prompt_studio.sources",
-    catalog: "prompt_studio.catalog",
-    advanced: "prompt_studio.advanced",
+    hub: "prompt_studio.hub", character: "prompt_studio.character", wardrobe: "prompt_studio.wardrobe",
+    sources: "prompt_studio.sources", catalog: "prompt_studio.catalog", advanced: "prompt_studio.advanced",
   };
-
   $effect(() => { studio.load(); });
   $effect(() => { if (body) studio.ensureActive(wardrobe); });
-  $effect(() => { studio.kind = wardrobe ? "wardrobe" : "character"; });
-  // The picked model only decides how weights are written on export.
-  $effect(() => {
-    studio.model = generation.isAnima ? "Anima (Cosmos)" : generation.isNovelAi ? "NAI" : "SDXL (NoobAI)";
-  });
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(studio.prompt);
-      gallery.showToast(locale.t("prompt_studio.copied"), "success");
-    } catch (error) {
-      gallery.showToast(String(error), "error");
-    }
+  function navigate(next: View) {
+    view = next;
+    if (next === "character" || next === "wardrobe") { studio.kind = next; studio.save(); }
   }
-
+  async function copy() {
+    try { await navigator.clipboard.writeText(studio.prompt); gallery.showToast(locale.t("prompt_studio.copied"), "success"); }
+    catch (error) { gallery.showToast(String(error), "error"); }
+  }
+  function requestApply() {
+    if (!studio.prompt.trim()) return;
+    if (generation.positivePrompt.trim() && generation.positivePrompt !== studio.prompt.trim()) { replacePrompt = true; return; }
+    apply();
+  }
   function apply() {
-    const value = studio.prompt.trim();
-    if (!value) {
-      gallery.showToast(locale.t("prompt_studio.empty"), "warning");
-      return;
-    }
-    generation.positivePrompt = value;
+    replacePrompt = false;
+    generation.positivePrompt = studio.prompt.trim();
     void generation.saveSettings();
     gallery.showToast(locale.t("prompt_studio.apply"), "success");
-    onClose?.();
+    (onApply ?? onClose)?.();
   }
-
-  function tool(active: boolean) {
-    return `inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-      active
-        ? "border-indigo-500 bg-indigo-500/10 text-indigo-300"
-        : "border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200"
-    }`;
-  }
+  const tool = "touch-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-800 text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
-<svelte:window onkeydown={(event) => { if (event.key === "Escape" && !embedded) onClose?.(); }} />
-
-{#if embedded}
-  <div class="flex h-full min-h-0 flex-col bg-neutral-950 text-neutral-100">
-    {@render shell()}
-  </div>
-{:else}
-  <div class="fixed inset-0 z-50 flex bg-black/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true">
-    <button
-      type="button"
-      class="absolute inset-0 cursor-default"
-      aria-label={locale.t("common.close")}
-      onclick={() => onClose?.()}
-    ></button>
-    <div class="relative z-10 m-auto flex h-full max-h-[94vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-neutral-100 shadow-2xl">
-      {@render shell()}
-    </div>
-  </div>
-{/if}
-
-{#snippet shell()}
-  <header class="flex items-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-2.5">
+<div style="--color-indigo-300:#a5b4fc;--color-indigo-400:#818cf8;--color-indigo-500:#6366f1;--color-indigo-600:#4f46e5;--color-indigo-950:#1e1b4b" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-neutral-950 text-neutral-100 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-500">
+  <header class="flex shrink-0 flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
     <div class="flex min-w-0 flex-1 items-center gap-2.5">
-      {#if view !== "hub"}
-        <button type="button" class={tool(false)} title={locale.t("prompt_studio.back")} onclick={() => (view = "hub")}>
-          <ChevronLeft size={16} strokeWidth={2} />
-        </button>
-      {/if}
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-[11px] font-bold text-white">PS</span>
+      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-xs font-semibold text-indigo-300">PS</span>
       <div class="min-w-0">
-        <h2 class="truncate text-sm font-semibold text-neutral-100">{locale.t(titles[view])}</h2>
-        <p class="text-[10px] text-neutral-500">{studio.count} {locale.t("prompt_studio.tags_word")} · {studio.selected.length} {locale.t("prompt_studio.picked_word")}</p>
+        <h2 class="truncate text-sm font-semibold">{locale.t("nav.prompt_studio")}</h2>
+        <p class="text-xs text-neutral-400">{studio.count} {locale.t("prompt_studio.tags_word")} · {studio.selected.length} {locale.t("prompt_studio.picked_word")}</p>
       </div>
     </div>
-
     <div class="flex items-center gap-1.5">
       {#if body}
-        <button type="button" class={tool(false)} title={locale.t("prompt_studio.random")} onclick={() => studio.randomize(wardrobe)}>
-          <Dices size={15} strokeWidth={1.8} />
-        </button>
-        <button type="button" class={tool(false)} title={locale.t("prompt_studio.random_wardrobe")} onclick={() => studio.randomize(true)}>
-          <Shirt size={15} strokeWidth={1.8} />
-        </button>
-        <button type="button" class={tool(false)} title={locale.t("prompt_studio.reset")} onclick={() => studio.clear()}>
-          <RotateCcw size={15} strokeWidth={1.8} />
-        </button>
-        <button type="button" class={tool(false)} disabled={!studio.history.length} title={locale.t("prompt_studio.undo")} onclick={() => studio.undo()}>
-          <Undo2 size={15} strokeWidth={1.8} />
-        </button>
-        <button type="button" class={tool(false)} disabled={!studio.future.length} title={locale.t("prompt_studio.redo")} onclick={() => studio.redo()}>
-          <Redo2 size={15} strokeWidth={1.8} />
-        </button>
-        <button type="button" class="{tool(false)} lg:hidden" title={locale.t("prompt_studio.assembled")} onclick={() => (mobilePanel = !mobilePanel)}>
-          <span class="text-[11px] font-semibold">{studio.count}</span>
-        </button>
+        <button type="button" class={tool} aria-label={locale.t(wardrobe ? "prompt_studio.random_wardrobe" : "prompt_studio.random")} title={locale.t(wardrobe ? "prompt_studio.random_wardrobe" : "prompt_studio.random")} onclick={() => studio.randomize(wardrobe)}><Dices size={16} /></button>
       {/if}
-      {#if !embedded}
-        <button type="button" class={tool(false)} title={locale.t("common.close")} onclick={() => onClose?.()}>
-          <X size={16} strokeWidth={2} />
-        </button>
-      {/if}
+      <button type="button" class={tool} disabled={!studio.selected.some((item) => !studio.pinned.includes(item.tag))} aria-label={locale.t("prompt_studio.reset")} title={locale.t("prompt_studio.reset")} onclick={() => studio.clear()}><RotateCcw size={16} /></button>
+      <button type="button" class={tool} disabled={!studio.history.length} aria-label={locale.t("prompt_studio.undo")} title={locale.t("prompt_studio.undo")} onclick={() => studio.undo()}><Undo2 size={16} /></button>
+      <button type="button" class={tool} disabled={!studio.future.length} aria-label={locale.t("prompt_studio.redo")} title={locale.t("prompt_studio.redo")} onclick={() => studio.redo()}><Redo2 size={16} /></button>
+      <button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-indigo-300 lg:hidden" aria-expanded={mobilePanel} aria-controls="studio-assembled" onclick={() => (mobilePanel = !mobilePanel)}>{locale.t("prompt_studio.assembled")} ({studio.count})</button>
     </div>
   </header>
-
-  <div class="min-h-0 flex-1 overflow-y-auto p-3">
-    {#if view === "hub"}
-      <PromptStudioHub onOpen={(next) => (view = next)} advancedEnabled={generation.isAnima} />
-    {:else if body}
-      <div class="grid gap-3 lg:grid-cols-[minmax(260px,330px)_116px_minmax(0,1fr)] lg:items-start">
-        <div class="{mobilePanel ? "" : "hidden"} lg:block">
-          <PromptStudioAssembled onApply={apply} onCopy={copy} />
+  <nav aria-label={locale.t("nav.prompt_studio")} class="flex shrink-0 gap-1 overflow-x-auto border-b border-neutral-800 px-3 py-2">
+    {#each Object.entries(titles) as [id, title] (id)}
+      <button type="button" aria-current={view === id ? "page" : undefined} disabled={id === "advanced" && !generation.isAnima} class="touch-target shrink-0 rounded-lg border px-3 py-2 text-xs transition-colors {view === id ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-transparent text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40'}" onclick={() => navigate(id as View)}>{locale.t(title)}</button>
+    {/each}
+  </nav>
+  {#if studio.storageError}
+    <div role="alert" class="shrink-0 border-b border-amber-700/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">{locale.t("prompt_studio.storage_error")}</div>
+  {/if}
+  {#if replacePrompt}
+    <div role="alert" class="flex shrink-0 flex-wrap items-center gap-3 border-b border-indigo-500/30 bg-neutral-900 px-4 py-3 text-xs">
+      <p class="flex-1 text-neutral-300">{locale.t("prompt_studio.replace_prompt_confirm")}</p>
+      <button type="button" class="touch-target rounded-lg bg-indigo-600 px-3 py-2 text-white" onclick={apply}>{locale.t("generation.interrogate.replace_prompt")}</button>
+      <button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 py-2" onclick={() => (replacePrompt = false)}>{locale.t("common.cancel")}</button>
+    </div>
+  {/if}
+  {#if studio.pendingConflict}
+    {@const pending = studio.pendingConflict}
+    <div role="alert" class="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-600/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+      <p class="min-w-0 flex-1 break-words">{locale.t("prompt_studio.conflict", { tag: pending.name, tags: pending.with.join(", ") })}</p>
+      <button type="button" class="touch-target rounded-lg bg-amber-500 px-3 py-2 text-neutral-950" onclick={() => studio.resolveConflict(true)}>{locale.t("generation.controlnet.replace")}</button>
+      <button type="button" class="touch-target rounded-lg border border-amber-600/40 px-3 py-2" onclick={() => studio.resolveConflict(false)}>{locale.t("common.cancel")}</button>
+    </div>
+  {/if}
+  <div class="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)] lg:overflow-hidden">
+    <div id="studio-assembled" class="min-h-0 min-w-0 border-b border-neutral-800 p-3 lg:overflow-y-auto lg:overscroll-contain lg:border-r lg:border-b-0 {mobilePanel ? '' : 'hidden lg:block'}">
+      <PromptStudioAssembled onApply={requestApply} onCopy={copy} />
+    </div>
+    <section aria-label={locale.t(titles[view])} class="min-h-0 min-w-0 p-3 lg:overflow-y-auto lg:overscroll-contain">
+      {#if view === "hub"}
+        <PromptStudioHub onOpen={navigate} advancedEnabled={generation.isAnima} />
+      {:else if body}
+        <div class="grid min-w-0 gap-3 md:grid-cols-[112px_minmax(0,1fr)] md:items-start">
+          <PromptStudioRail categories={studio.scoped(wardrobe)} {wardrobe} />
+          <PromptStudioEditor />
         </div>
-        <PromptStudioRail categories={studio.scoped(wardrobe)} {wardrobe} />
-        <PromptStudioEditor />
-      </div>
-    {:else if view === "sources"}
-      <PromptStudioSources />
-    {:else if view === "catalog"}
-      <PromptStudioCatalog />
-    {:else}
-      <PromptStudioAdvanced />
-    {/if}
+      {:else if view === "sources"}
+        <PromptStudioSources />
+      {:else if view === "catalog"}
+        <PromptStudioCatalog />
+      {:else}
+        <PromptStudioAdvanced />
+      {/if}
+    </section>
   </div>
-{/snippet}
+</div>

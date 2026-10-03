@@ -30,7 +30,7 @@ pub(crate) fn is_civitai_url(url: &str) -> bool {
     reqwest::Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(|host| host.to_ascii_lowercase()))
-        .is_some_and(|host| host == "civitai.com" || host.ends_with(".civitai.com"))
+        .is_some_and(|host| crate::commands::api::is_allowed_civitai_image_host(&host))
 }
 
 /// Returns true when a non-2xx upload response looks like a JSON-only gateway
@@ -1553,6 +1553,15 @@ impl AppState {
         let mut req = self.http_client.get(url);
         if let Some(token) = huggingface_token_for_url(url) {
             req = req.bearer_auth(token);
+        } else if crate::commands::api::parse_civitai_image_url(url).is_ok() {
+            req = req.header(
+                reqwest::header::USER_AGENT,
+                crate::commands::api::CIVITAI_USER_AGENT,
+            );
+            let key = self.config.read().await.civitai_api_key.clone();
+            if let Some(key) = key.filter(|key| !key.trim().is_empty()) {
+                req = req.bearer_auth(key);
+            }
         }
         // reqwest errors quote the full URL, which may carry `?token=`.
         let resp = req.send().await.map_err(reqwest::Error::without_url)?;
@@ -1729,7 +1738,7 @@ impl AppState {
             .http_client
             .get(url)
             .header(reqwest::header::RANGE, "bytes=0-0");
-        if is_civitai_url(url) {
+        if crate::commands::api::parse_civitai_image_url(url).is_ok() {
             let key = self.config.read().await.civitai_api_key.clone();
             if let Some(key) = key.filter(|v| !v.trim().is_empty()) {
                 req = req.bearer_auth(key);

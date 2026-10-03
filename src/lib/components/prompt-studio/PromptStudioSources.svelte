@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PromptStudioCachedImage from "./PromptStudioCachedImage.svelte";
   import { studio } from "../../prompt-studio/studio.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { gallery } from "../../stores/gallery.svelte.js";
@@ -20,6 +21,8 @@
   let query = $state("");
   let group = $state("");
   let limit = $state(60);
+  let alphabetical = $state(false);
+  let requestId = 0;
   const cache = new Map<SourceId, SourceEntry[]>();
 
   const meta = $derived(SOURCES.find((item) => item.id === active) ?? SOURCES[0]);
@@ -30,18 +33,22 @@
     entries.filter((entry) => {
       if (group && entry.categories[0] !== group) return false;
       if (!needle) return true;
-      return entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.includes(needle));
+      return entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle));
     }),
   );
-  const shown = $derived(filtered.slice(0, limit));
+  $effect(() => { query; group; limit = 60; });
+  const sorted = $derived(alphabetical ? [...filtered].sort((a, b) => a.name.localeCompare(b.name, locale.current)) : filtered);
+  const shown = $derived(sorted.slice(0, limit));
 
   async function open(source: SourceId) {
+    const id = ++requestId;
     active = source;
     query = "";
     group = "";
     limit = 60;
     const cached = cache.get(source);
     if (cached) {
+      loading = false;
       entries = cached;
       error = "";
       return;
@@ -53,11 +60,12 @@
       const normalized = normalizeCatalog(source, await loadAnimaCatalog(source));
       if (!normalized.length) throw new Error(locale.t("prompt_studio.source_empty"));
       cache.set(source, normalized);
-      entries = normalized;
+      if (id === requestId) entries = normalized;
     } catch (cause) {
+      if (id !== requestId) return;
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      loading = false;
+      if (id === requestId) loading = false;
     }
   }
 
@@ -101,6 +109,7 @@
         class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {active === source.id
           ? 'border-indigo-500 bg-indigo-500/10 text-neutral-100'
           : 'border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+        aria-pressed={active === source.id}
         onclick={() => void open(source.id)}
       >
         {locale.t(source.labelKey)}
@@ -111,6 +120,8 @@
       type="button"
       class="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-2 py-1.5 text-[11px] text-neutral-400 hover:text-neutral-200"
       title={locale.t("prompt_studio.reload")}
+      aria-label={locale.t("prompt_studio.reload")}
+      disabled={loading}
       onclick={() => { cache.delete(active); entries = []; void open(active); }}
     >
       <RefreshCw size={12} strokeWidth={1.8} />
@@ -122,12 +133,14 @@
       <Search size={13} strokeWidth={1.8} class="absolute left-2.5 text-neutral-500" />
       <input
         class="w-full rounded-lg border border-neutral-800 bg-neutral-950 py-1.5 pr-2 pl-8 text-[11px] text-neutral-200 outline-none focus:border-indigo-500"
+        aria-label={locale.t("prompt_studio.search")}
         placeholder={locale.t("prompt_studio.search")}
         bind:value={query}
       />
     </label>
     <select
       class="max-w-[240px] rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-[11px] text-neutral-200"
+      aria-label={locale.t("prompt_studio.all_groups")}
       bind:value={group}
       disabled={!groups.length}
     >
@@ -136,7 +149,8 @@
         <option value={item}>{groupName(item)}</option>
       {/each}
     </select>
-    <span class="font-mono text-[10px] text-neutral-500">{filtered.length}</span>
+    <button type="button" aria-pressed={alphabetical} class="touch-target rounded border border-neutral-700 px-2 py-1.5 text-xs text-neutral-300" onclick={() => alphabetical = !alphabetical}>A → Z</button>
+    <span role="status" class="font-mono text-[10px] text-neutral-500">{filtered.length}</span>
   </div>
 
   <p class="text-[10px] leading-relaxed text-neutral-500">
@@ -151,7 +165,7 @@
   {:else if error}
     <div class="flex flex-col gap-2 rounded-xl border border-red-900/50 bg-red-950/30 p-4 text-xs text-red-300">
       <p class="font-semibold text-red-200">{locale.t("prompt_studio.source_error")}</p>
-      <p class="font-mono text-[10px] break-all">{error}</p>
+      <p class="text-[11px]">{locale.t("prompt_studio.source_error")}</p>
       <button
         type="button"
         class="self-start rounded-lg border border-red-800/60 px-2.5 py-1 hover:bg-red-900/30"
@@ -160,6 +174,8 @@
         {locale.t("prompt_studio.retry")}
       </button>
     </div>
+  {:else if !filtered.length}
+    <p role="status" class="rounded-xl border border-neutral-800 bg-neutral-900 p-6 text-center text-sm text-neutral-400">{locale.t("prompt_studio.nothing_found")}</p>
   {:else if attire}
     <div class="flex flex-wrap gap-1.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2.5">
       {#each shown as entry (entry.id)}
@@ -183,12 +199,7 @@
         {@const taken = entry.tags.every((tag) => studio.isChosen(tag))}
         <div class="flex gap-2.5 rounded-xl border border-neutral-800 bg-neutral-900 p-2.5">
           {#if entry.preview}
-            <img
-              src={entry.preview}
-              alt={entry.name}
-              loading="lazy"
-              class="h-16 w-16 shrink-0 rounded-lg border border-neutral-800 object-cover"
-            />
+            <PromptStudioCachedImage src={entry.preview} alt={entry.name} />
           {/if}
           <div class="flex min-w-0 flex-1 flex-col gap-1">
             <div class="flex items-start gap-1.5">
@@ -212,6 +223,7 @@
               class="mt-auto self-start rounded-lg border px-2 py-0.5 text-[10px] transition-colors {taken
                 ? 'border-indigo-500/60 text-indigo-300'
                 : 'border-neutral-700 text-neutral-300 hover:border-indigo-500 hover:text-indigo-300'}"
+              disabled={taken}
               onclick={() => add(entry)}
             >
               {taken ? locale.t("prompt_studio.added") : `+ ${entry.tags.length}`}

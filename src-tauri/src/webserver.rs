@@ -603,6 +603,7 @@ const MODERATOR_COMMANDS: &[&str] = &[
     // server / config control
     "update_config",
     "stop_comfyui",
+    "stop_all_managed_processes",
     "kill_port_process",
     "export_logs",
     "install_pip_package",
@@ -2956,6 +2957,18 @@ async fn dispatch_command(
                 .map_err(|e| e.to_string())?;
             Ok(serde_json::json!(null))
         }
+        "stop_all_managed_processes" => {
+            crate::media_tools::shutdown(&state).await;
+            crate::prompt_assistant::companion::stop_active_requests().await;
+            #[cfg(feature = "desktop")]
+            crate::commands::patchy::stop_launched_patchy();
+            crate::commands::music_link::shutdown(&state).await;
+            crate::commands::music_audio_style::shutdown(&state).await;
+            let comfy_result = crate::comfyui::process::stop_comfyui_process(&state).await;
+            state.prompt_assistant.server.unload().await;
+            comfy_result.map_err(|e| e.to_string())?;
+            Ok(serde_json::json!(null))
+        }
         "kill_port_process" => {
             let port = state.config.read().await.server_port;
             crate::comfyui::process::stop_comfyui_process(&state)
@@ -4786,7 +4799,7 @@ async fn dispatch_command(
             let mut req = state
                 .http_client
                 .get("https://civitai.com/api/v1/models?limit=1")
-                .header("User-Agent", "MooshieUI/0.3.9");
+                .header("User-Agent", crate::commands::api::CIVITAI_USER_AGENT);
             if let Some(ref key) = api_key {
                 req = req.bearer_auth(key);
             }
@@ -4838,18 +4851,22 @@ async fn dispatch_command(
                 .or_else(|| args["image_ref"].as_str())
                 .ok_or("Missing imageRef")?
                 .to_string();
-            let image_id =
-                commands::api::parse_civitai_image_id_pub(&image_ref).map_err(|e| e.to_string())?;
+            let url =
+                commands::api::civitai_image_lookup_url(&image_ref).map_err(|e| e.to_string())?;
             let api_key = state.config.read().await.civitai_api_key.clone();
-            let url = format!(
-                "https://civitai.com/api/v1/images?imageId={}&withMeta=true",
-                image_id
+            let mut req = state.http_client.get(&url).header(
+                reqwest::header::USER_AGENT,
+                commands::api::CIVITAI_USER_AGENT,
             );
-            let mut req = state.http_client.get(&url);
             if let Some(ref key) = api_key {
                 req = req.header("Authorization", format!("Bearer {}", key));
             }
-            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?;
             let val: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             Ok(val)
         }
@@ -5105,7 +5122,8 @@ async fn dispatch_command(
             let source = args["source"].as_str().unwrap_or("danbooru").to_string();
             let query = args["query"].as_str().unwrap_or("").to_string();
             let limit = args["limit"].as_u64().unwrap_or(24).clamp(1, 50) as u32;
-            commands::api::booru_tag_search_impl(state.as_ref(), source, query, limit)
+            let page = args["page"].as_u64().unwrap_or(1).clamp(1, u32::MAX as u64) as u32;
+            commands::api::booru_tag_search_page_impl(state.as_ref(), source, query, limit, page)
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -5496,10 +5514,12 @@ async fn dispatch_command(
             let mut req = state
                 .http_client
                 .get(&url)
-                .header("User-Agent", "MooshieUI/1.3.0");
+                .header("User-Agent", commands::api::CIVITAI_USER_AGENT);
             if let Some(token) = crate::comfyui::client::huggingface_token_for_url(&url) {
                 req = req.bearer_auth(token);
-            } else if crate::comfyui::client::is_civitai_url(&url) && !url_has_token_param(&url) {
+            } else if commands::api::parse_civitai_image_url(&url).is_ok()
+                && !url_has_token_param(&url)
+            {
                 // Browser clients below admin no longer hold the instance's
                 // CivitAI key to append as `?token=`, so the server adds it.
                 // reqwest drops the header if CivitAI redirects to another host.

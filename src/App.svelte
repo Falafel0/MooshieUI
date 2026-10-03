@@ -4325,7 +4325,7 @@
         previewStatus={artistPreviewStatus}
       />
     {:else if currentPage === "studio"}
-      <PromptStudio />
+      <PromptStudio onApply={() => (currentPage = "generate")} />
     {:else if currentPage === "settings"}
       <SettingsPage {userRole} section={settingsSection} />
     {/if}

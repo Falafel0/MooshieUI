@@ -21,6 +21,12 @@ fn default_true() -> bool {
     true
 }
 
+const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
+
+fn current_config_schema_version() -> u32 {
+    CURRENT_CONFIG_SCHEMA_VERSION
+}
+
 /// A user-supplied ONNX tagger folder registered as a custom model.
 /// MooshieUI never downloads or deletes these files; the user manages them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,8 +90,11 @@ pub struct AppConfig {
     pub extra_args: Vec<String>,
     /// VRAM management mode: "auto", "high", "normal", "low", "none"
     pub vram_mode: String,
-    /// Keep ComfyUI running after the app closes (default: false)
+    /// Keep ComfyUI running after the app closes (default: true)
     pub keep_alive: bool,
+    /// Internal config migration marker.
+    #[serde(default = "current_config_schema_version")]
+    pub config_schema_version: u32,
     /// Automatically start ComfyUI when the app launches (default: true)
     pub auto_start: bool,
     /// Download and install Patchy automatically when an edit needs it
@@ -306,7 +315,8 @@ impl Default for AppConfig {
             venv_path: String::new(),
             extra_args: vec![],
             vram_mode: "normal".to_string(),
-            keep_alive: false,
+            keep_alive: true,
+            config_schema_version: CURRENT_CONFIG_SCHEMA_VERSION,
             auto_start: true,
             patchy_auto_install: true,
             patchy_auto_start: false,
@@ -610,7 +620,19 @@ pub fn load_persisted_config() -> AppConfig {
         let config_path = dir.join("config.json");
         if let Ok(json) = std::fs::read_to_string(&config_path) {
             match serde_json::from_str::<AppConfig>(&json) {
-                Ok(config) => {
+                Ok(mut config) => {
+                    let saved_schema_version = serde_json::from_str::<serde_json::Value>(&json)
+                        .ok()
+                        .and_then(|value| value.get("config_schema_version")?.as_u64())
+                        .unwrap_or(0) as u32;
+                    if saved_schema_version < CURRENT_CONFIG_SCHEMA_VERSION {
+                        // Keep the persisted preference, including an explicit
+                        // false. The new default only applies to new configs.
+                        config.config_schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
+                        if let Err(error) = save_config(&config) {
+                            log::warn!("Could not persist config migration: {error}");
+                        }
+                    }
                     eprintln!(
                         "Loaded config from {}: comfyui_path={}, venv_path={}",
                         config_path.display(),
@@ -899,6 +921,7 @@ fn env_disables_local_trust(value: Option<&str>) -> bool {
 pub fn save_config(config: &AppConfig) -> Result<(), String> {
     let mut config = config.clone();
     normalize_config_fields(&mut config);
+    config.config_schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
     let dir = app_data_dir().ok_or("Failed to determine app data directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;

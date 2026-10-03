@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ipcListen } from "../../utils/ipc.js";
+  import { parseCivitaiModelRef } from "../../utils/civitai.js";
   import {
     downloadModel,
     getCivitaiModel,
@@ -162,37 +163,36 @@
   let directInstalling = $state(false);
   let lastInferredDirectFilename = "";
 
-  let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let queryDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchRequestGeneration = 0;
   let initialSearchDone = $state(false);
 
-  // Auto-search when dropdown/checkbox filters change (short debounce)
+  // Debounce all search inputs together so text and filter changes cannot
+  // issue competing requests or waste CivitAI's rate limit.
   $effect(() => {
+    void query;
     void selectedType;
     void selectedArchitecture;
     void selectedFileFormat;
     void sort;
     void period;
     void includeNsfw;
+    void source;
 
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
     if (!initialSearchDone) return;
 
-    if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
-    filterDebounceTimer = setTimeout(() => {
+    // Invalidate in-flight results immediately, including while debouncing
+    // or switching source, so obsolete cards cannot overwrite the new input.
+    searchRequestGeneration += 1;
+    loading = false;
+    loadingMore = false;
+    if (source !== "civitai") return;
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
       void runSearch();
-    }, 150);
-  });
-
-  // Auto-search when query text changes (longer debounce for typing)
-  $effect(() => {
-    void query;
-
-    if (!initialSearchDone) return;
-
-    if (queryDebounceTimer) clearTimeout(queryDebounceTimer);
-    queryDebounceTimer = setTimeout(() => {
-      void runSearch();
-    }, 500);
+    }, 350);
   });
 
   let downloading = $state<Record<string, { downloaded: number; total: number }>>({});
@@ -560,6 +560,7 @@
 
     // Refresh architecture filters in the background because auth can change available models.
     void fetchArchitectures();
+    void runSearch();
   }
 
   function normalizeArchitectures(architectures: string[]): string[] {
@@ -636,10 +637,15 @@
   }
 
   async function fetchModels(nextPage: number = 1, append: boolean = false) {
+    const requestGeneration = append
+      ? searchRequestGeneration
+      : ++searchRequestGeneration;
+
     if (append) {
       loadingMore = true;
     } else {
       loading = true;
+      loadingMore = false;
       error = null;
       page = 1;
       nextCursor = null;
@@ -666,6 +672,8 @@
         limit: 30,
         apiKey: apiKey.trim() || undefined,
       });
+
+      if (requestGeneration !== searchRequestGeneration) return;
 
       if (append) {
         const existing = new Set(items.map((item) => item.id));
@@ -696,6 +704,7 @@
 
       civitaiFailures = 0;
     } catch (e) {
+      if (requestGeneration !== searchRequestGeneration) return;
       const message = e instanceof Error ? e.message : String(e);
       error = message;
       if (!append) {
@@ -714,15 +723,24 @@
         keyRecommended = true;
       }
     } finally {
-      loading = false;
-      loadingMore = false;
+      if (requestGeneration === searchRequestGeneration) {
+        loading = false;
+        loadingMore = false;
+      }
     }
   }
 
   async function runSearch() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+    if (source !== "civitai") return;
+
     // A pasted CivitAI model URL jumps straight to that model's card.
     const direct = parseCivitaiModelUrl(query);
     if (direct) {
+      searchRequestGeneration += 1;
+      loading = false;
+      loadingMore = false;
       await openModelFromUrl(direct.modelId, direct.versionId);
       return;
     }
@@ -975,28 +993,18 @@
   function parseCivitaiModelUrl(
     value: string,
   ): { modelId: number; versionId: number | null } | null {
-    let parsed: URL;
-    try {
-      parsed = new URL(value.trim());
-    } catch {
-      return null;
-    }
-    if (parsed.hostname !== "civitai.com" && !parsed.hostname.endsWith(".civitai.com")) {
-      return null;
-    }
-    const match = parsed.pathname.match(/^\/models\/(\d+)/);
-    if (!match) return null;
-    const versionParam = parsed.searchParams.get("modelVersionId");
-    const versionId = versionParam && /^\d+$/.test(versionParam) ? Number(versionParam) : null;
-    return { modelId: Number(match[1]), versionId };
+    const model = parseCivitaiModelRef(value);
+    return model ? { modelId: model.modelId, versionId: model.versionId ?? null } : null;
   }
 
   /** Load a single model by id (from a pasted CivitAI URL) and open its detail modal. */
   async function openModelFromUrl(modelId: number, versionId: number | null) {
+    const requestGeneration = searchRequestGeneration;
     loading = true;
     error = null;
     try {
       const model = await getCivitaiModel(modelId, apiKey.trim() || undefined);
+      if (requestGeneration !== searchRequestGeneration) return;
       items = [model];
       totalPages = 1;
       totalItems = 1;
@@ -1007,6 +1015,7 @@
       }
       selectedModel = model;
     } catch (e) {
+      if (requestGeneration !== searchRequestGeneration) return;
       const message = e instanceof Error ? e.message : String(e);
       const status = extractApiStatus(message);
       if (status === 401 || status === 403) {
@@ -1016,7 +1025,7 @@
         error = message;
       }
     } finally {
-      loading = false;
+      if (requestGeneration === searchRequestGeneration) loading = false;
     }
   }
 
@@ -1150,6 +1159,7 @@
 
     return () => {
       if (unlisten) unlisten();
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
       if (directFilenameResolveTimer) clearTimeout(directFilenameResolveTimer);
     };
   });

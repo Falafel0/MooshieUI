@@ -311,7 +311,11 @@ pub fn parse_gelbooru_tags(value: &serde_json::Value) -> Vec<BooruTag> {
                 .unwrap_or(0);
             Some(BooruTag {
                 name,
-                category: gelbooru_category(row.get("type").and_then(|v| v.as_u64()).unwrap_or(0)),
+                category: gelbooru_category(
+                    row.get("type")
+                        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
+                        .unwrap_or(0),
+                ),
                 post_count: count,
             })
         })
@@ -370,27 +374,27 @@ fn parse_json_tags(value: &serde_json::Value, category: fn(u64) -> u8) -> Vec<Bo
 static LAST_CALL: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
 /// Sleeps just long enough to keep this host under its documented rate limit.
-async fn throttle(host: &str, authenticated: bool) {
+pub(crate) async fn throttle(host: &str, authenticated: bool) {
     let interval = if authenticated {
         MIN_INTERVAL_AUTHENTICATED
     } else {
         MIN_INTERVAL_ANONYMOUS
     };
-    let elapsed = {
-        let guard = LAST_CALL.lock().unwrap_or_else(|e| e.into_inner());
-        guard
-            .as_ref()
-            .and_then(|map| map.get(host).copied())
-            .map(|last| last.elapsed())
-            .unwrap_or(Duration::from_secs(3600))
+    // Reserve a slot while locked: simultaneous requests must not all wake
+    // together after observing the same last-call instant.
+    let wait = {
+        let now = Instant::now();
+        let mut guard = LAST_CALL.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = guard.get_or_insert_with(HashMap::new);
+        let at = calls
+            .get(host)
+            .map(|last| *last + interval)
+            .unwrap_or(now)
+            .max(now);
+        calls.insert(host.to_string(), at);
+        at.saturating_duration_since(now)
     };
-    if let Some(wait) = interval.checked_sub(elapsed) {
-        tokio::time::sleep(wait).await;
-    }
-    let mut guard = LAST_CALL.lock().unwrap_or_else(|e| e.into_inner());
-    guard
-        .get_or_insert_with(HashMap::new)
-        .insert(host.to_string(), Instant::now());
+    tokio::time::sleep(wait).await;
 }
 
 fn cache_slot<T: Clone + Send + 'static>(
@@ -422,7 +426,7 @@ async fn get(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(|e| format!("{host} request failed: {e}"))?;
+        .map_err(|e| format!("{host} request failed: {}", e.without_url()))?;
     let status = response.status();
     if !status.is_success() {
         let hint = match status.as_u16() {
@@ -475,6 +479,21 @@ pub async fn tag_search(
     query: &str,
     limit: u32,
 ) -> Result<Vec<BooruTag>, String> {
+    tag_search_page(client, creds, source, query, limit, 1).await
+}
+
+/// UI pages are 1-based; Gelbooru's live tag pattern API accepts 0-based pid.
+/// Do not use after_id here: authenticated probes show it overrides
+/// name_pattern and returns unrelated tags, even with ascending ID ordering.
+pub async fn tag_search_page(
+    client: &reqwest::Client,
+    creds: &Credentials,
+    source: &str,
+    query: &str,
+    limit: u32,
+    page: u32,
+) -> Result<Vec<BooruTag>, String> {
+    let page = page.max(1);
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -489,6 +508,7 @@ pub async fn tag_search(
                 let mut pairs = url.query_pairs_mut();
                 pairs.append_pair("search[name_matches]", &pattern);
                 pairs.append_pair("search[order]", "count");
+                pairs.append_pair("page", &page.to_string());
                 pairs.append_pair("limit", &limit.to_string());
                 for (key, value) in auth_pairs(creds, "danbooru") {
                     pairs.append_pair(&key, &value);
@@ -509,6 +529,9 @@ pub async fn tag_search(
                 pairs.append_pair("json", "1");
                 pairs.append_pair("limit", &limit.to_string());
                 pairs.append_pair("name_pattern", &format!("%{}%", query.replace(' ', "_")));
+                pairs.append_pair("pid", &(page - 1).to_string());
+                pairs.append_pair("orderby", "count");
+                pairs.append_pair("order", "DESC");
                 for (key, value) in auth_pairs(creds, "gelbooru") {
                     pairs.append_pair(&key, &value);
                 }
@@ -525,6 +548,7 @@ pub async fn tag_search(
                 let mut pairs = url.query_pairs_mut();
                 pairs.append_pair("search[name_matches]", &pattern);
                 pairs.append_pair("search[order]", "count");
+                pairs.append_pair("page", &page.to_string());
                 pairs.append_pair("limit", &limit.to_string());
                 if let (Some(login), Some(key)) = (&creds.e621_login, &creds.e621_api_key) {
                     pairs.append_pair("login", login);

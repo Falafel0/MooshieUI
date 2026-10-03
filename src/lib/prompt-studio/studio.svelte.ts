@@ -23,7 +23,7 @@ export type Detail = {
 };
 export type PendingConflict = { tag: string; name: string; category: string; single: boolean; with: string[] };
 
-export const WARDROBE_CATEGORY_IDS = ['tops', 'bottoms', 'dresses'];
+export const WARDROBE_CATEGORY_IDS = ['tops', 'bottoms', 'dresses', 'accessories', 'footwear'];
 /** Tags that are computed rather than picked, so their chip cannot be edited. */
 const DERIVED = new Set(['auto', 'dependency', 'detail']);
 
@@ -37,6 +37,8 @@ class Studio {
   banned = $state<string[]>([]);
   prefix = $state('');
   suffix = $state('');
+  /** Literal output override; constructor choices remain intact. */
+  rawPrompt = $state<string | undefined>(undefined);
   nai = $state(false);
   readable = $state(true);
   autoTags = $state(true);
@@ -51,12 +53,17 @@ class Studio {
   presets = $state<{ name: string; snapshot: StudioSnapshotV1 }[]>([]);
   history = $state<StudioState[]>([]);
   future = $state<StudioState[]>([]);
+  storageError = $state(false);
   private loadedKey = '';
+  private pendingEntries: { tag: string; name: string; category: string }[] = [];
 
   // ---------------------------------------------------------------- storage
   load() {
     if (this.loadedKey === key()) return;
     this.loadedKey = key();
+    this.applyState({ name: '', kind: 'character', model: 'NAI', choices: [], details: {}, prefix: '', suffix: '', readable: true, nai: false }, false);
+    this.pinned = []; this.banned = []; this.presets = [];
+    this.history = []; this.future = [];
     try {
       const raw = JSON.parse(localStorage.getItem(key()) || '{}');
       const state = raw.state ? fromSnapshot(raw.state, 'Prompt Studio') : fromSnapshot(raw, 'Prompt Studio');
@@ -89,11 +96,16 @@ class Studio {
       details: JSON.parse(JSON.stringify(this.details)) as Record<string, Detail>,
       prefix: this.prefix,
       suffix: this.suffix,
+      rawPrompt: this.rawPrompt,
       readable: this.readable,
       nai: this.nai,
+      autoTags: this.autoTags,
+      clothed: this.clothed,
     };
   }
   applyState(state: StudioState, save = true) {
+    this.pendingConflict = null;
+    this.pendingEntries = [];
     this.name = state.name;
     this.kind = state.kind;
     this.model = state.model;
@@ -101,8 +113,11 @@ class Studio {
     this.details = this.validDetails(state.details, this.selected);
     this.prefix = state.prefix;
     this.suffix = state.suffix;
+    this.rawPrompt = state.rawPrompt;
     this.readable = state.readable;
     this.nai = state.nai;
+    if (state.autoTags !== undefined) this.autoTags = state.autoTags;
+    if (state.clothed !== undefined) this.clothed = state.clothed;
     if (save) this.save();
   }
   private validDetails(value: Record<string, Detail> | undefined, selected: Choice[]): Record<string, Detail> {
@@ -136,7 +151,20 @@ class Studio {
         activeSubId: this.activeSubId,
         presets: this.presets,
       }));
-    } catch (error) { console.warn('Prompt Studio save:', error); }
+      this.storageError = false;
+    } catch (error) { this.storageError = true; console.warn('Prompt Studio save:', error); }
+  }
+  editText(field: 'prefix' | 'suffix', value: string) {
+    if (this[field] === value) return;
+    this.checkpoint();
+    this[field] = value;
+    this.save();
+  }
+  editPrompt(value: string | undefined) {
+    if (value === this.rawPrompt) return;
+    this.checkpoint();
+    this.rawPrompt = value;
+    this.save();
   }
   private checkpoint() { this.history = [...this.history.slice(-49), this.state()]; this.future = []; }
   undo() { const value = this.history.at(-1); if (!value) return; this.future = [...this.future, this.state()]; this.history = this.history.slice(0, -1); this.applyState(value); }
@@ -191,48 +219,44 @@ class Studio {
     if (!tag) return;
     if (this.selected.some((v) => v.tag === tag)) { this.remove(tag); return; }
     const clashes = conflictingTags(tag, this.selected.map((v) => v.tag));
-    if (clashes.length) { this.pendingConflict = { tag, name, category, single, with: clashes }; return; }
+    if (clashes.length) { this.pendingEntries = [{ tag, name: name || tag, category }]; this.pendingConflict = { tag, name, category, single, with: clashes }; return; }
     this.commit([{ tag, name: name || tag, category }], single);
   }
   resolveConflict(replace: boolean) {
     const pending = this.pendingConflict;
+    const entries = this.pendingEntries;
     this.pendingConflict = null;
+    this.pendingEntries = [];
     if (!pending || !replace) return;
-    for (const tag of pending.with) {
-      this.selected = this.selected.filter((v) => v.tag !== tag);
-      this.pinned = this.pinned.filter((v) => v !== tag);
-      delete this.details[tag];
-    }
-    this.commit([{ tag: pending.tag, name: pending.name, category: pending.category }], pending.single);
-  }
-  /** Adds a source recipe or a batch of imported tags, honouring relations. */
-  addMany(entries: { tag: string; name?: string; category: string }[]) {
-    const incoming = entries.filter((e) => e.tag && !this.isChosen(e.tag));
-    if (!incoming.length) return;
-    const clashOf = (tag: string) => conflictingTags(tag, this.selected.map((v) => v.tag));
-    const blocked = incoming.find((e) => clashOf(e.tag).length);
-    if (blocked) {
-      this.pendingConflict = {
-        tag: blocked.tag,
-        name: blocked.name || blocked.tag,
-        category: blocked.category,
-        single: false,
-        with: clashOf(blocked.tag),
-      };
-    }
-    this.commit(
-      incoming.filter((e) => e !== blocked).map((e) => ({ tag: e.tag, name: e.name || e.tag, category: e.category })),
-      false,
-    );
-  }
-  private commit(entries: { tag: string; name: string; category: string }[], single: boolean) {
     this.checkpoint();
+    const removed = new Set(entries.flatMap((entry) => conflictingTags(entry.tag, this.selected.map((v) => v.tag))));
+    this.selected = this.selected.filter((v) => !removed.has(v.tag));
+    for (const tag of removed) delete this.details[tag];
+    this.commit(entries, pending.single, false);
+  }
+  /** A recipe is one undoable action; never silently apply only half of it. */
+  addMany(entries: { tag: string; name?: string; category: string }[]) {
+    const seen = new Set(this.selected.map((item) => item.tag));
+    const incoming = entries.filter((entry) => entry.tag && !seen.has(entry.tag) && !!seen.add(entry.tag))
+      .map((entry) => ({ ...entry, name: entry.name || entry.tag }));
+    if (!incoming.length) return;
+    const clashes = [...new Set(incoming.flatMap((entry) => conflictingTags(entry.tag, this.selected.map((v) => v.tag))))];
+    if (clashes.length) {
+      this.pendingEntries = incoming;
+      this.pendingConflict = { ...incoming[0], single: false, with: clashes };
+      return;
+    }
+    this.commit(incoming, false);
+  }
+  private commit(entries: { tag: string; name: string; category: string }[], single: boolean, checkpoint = true) {
+    if (!entries.length) return;
+    if (checkpoint) this.checkpoint();
     let next = [...this.selected];
     for (const entry of entries) {
       if (single) next = next.filter((v) => v.category !== entry.category);
       if (!next.some((v) => v.tag === entry.tag)) next.push({ ...entry, weight: 1 });
       for (const dep of dependentTags(entry.tag)) {
-        if (this.banned.includes(dep.tag) || next.some((v) => v.tag === dep.tag)) continue;
+        if ((dep.type !== 'requires' && !this.autoTags) || this.banned.includes(dep.tag) || next.some((v) => v.tag === dep.tag)) continue;
         next.push({
           tag: dep.tag,
           name: dep.tag.replaceAll('_', ' '),
@@ -242,6 +266,7 @@ class Studio {
       }
     }
     this.selected = next;
+    this.details = this.validDetails(this.details, next);
     this.save();
   }
   chooseVariant(sub: SubCategory, variant: Variant) {
@@ -271,6 +296,8 @@ class Studio {
     this.save();
   }
   weight(tag: string, weight: number) {
+    if (!Number.isFinite(weight)) return;
+    weight = Math.max(0.1, Math.min(2, weight));
     this.checkpoint();
     this.selected = this.selected.map((v) => v.tag === tag ? { ...v, weight } : v);
     this.save();
@@ -323,7 +350,7 @@ class Studio {
     const keepsDetail = (tag: string) => !subIds.has(this.selected.find((v) => v.tag === tag)?.category ?? '');
     const next = this.selected.filter((v) => this.pinned.includes(v.tag) || !subIds.has(v.category));
     const details: Record<string, Detail> = {};
-    for (const [tag, detail] of Object.entries(this.details)) if (keepsDetail(tag)) details[tag] = detail;
+    for (const [tag, detail] of Object.entries(this.details)) if (this.pinned.includes(tag) || keepsDetail(tag)) details[tag] = detail;
 
     // Gender drives `ifGender` subcategories and *_female / *_male spellings, so
     // it is settled first: an existing (pinned or surviving) choice wins.
@@ -355,7 +382,7 @@ class Studio {
     let resolved = next;
     for (const tag of next.map((v) => v.tag)) {
       for (const dep of dependentTags(tag)) {
-        if (this.banned.includes(dep.tag) || resolved.some((v) => v.tag === dep.tag)) continue;
+        if ((dep.type !== 'requires' && !this.autoTags) || this.banned.includes(dep.tag) || resolved.some((v) => v.tag === dep.tag)) continue;
         resolved = [...resolved, {
           tag: dep.tag,
           name: dep.tag.replaceAll('_', ' '),
@@ -384,6 +411,7 @@ class Studio {
     this.checkpoint();
     this.applyState(state);
     this.ensureActive(state.kind === 'wardrobe');
+    this.save();
     return true;
   }
   exportPreset(name?: string): StudioSnapshotV1 {
@@ -401,12 +429,13 @@ class Studio {
     this.name = state.name;
     this.presets = [...this.presets.filter((p) => p.name !== state.name), { name: state.name, snapshot: toSnapshot(state) }];
     this.ensureActive(state.kind === 'wardrobe');
+    this.save();
     return state.name;
   }
 
   // ---------------------------------------------------------------- output
   private expanded(): { choice: Choice; theme: StudioTheme }[] {
-    const values = [...this.selected].sort((a, b) => Number(this.pinned.includes(b.tag)) - Number(this.pinned.includes(a.tag)));
+    const values = this.selected.filter((value) => this.autoTags || value.category !== 'auto').sort((a, b) => Number(this.pinned.includes(b.tag)) - Number(this.pinned.includes(a.tag)));
     const seen = new Set(values.map((v) => v.tag));
     const out: { choice: Choice; theme: StudioTheme }[] = [];
     for (const value of values) {
@@ -420,7 +449,7 @@ class Studio {
         seen.add(tag);
       }
     }
-    if (this.clothed) {
+    if (this.clothed && values.some((value) => !this.isDerived(value.category))) {
       for (const tag of ['clothed', 'fashion']) {
         if (!seen.has(tag)) {
           out.push({ choice: { tag, name: tag, category: 'detail', weight: 1 }, theme: 'wardrobe' });
@@ -459,11 +488,12 @@ class Studio {
     if (value.weight === 1) return tag;
     return this.nai ? `${value.weight.toFixed(2)}::${tag}::` : `(${tag}:${value.weight.toFixed(2)})`;
   }
-  get prompt(): string {
+  get constructorPrompt(): string {
     return [this.prefix.trim(), this.expanded().map(({ choice }) => this.format(choice)).join(', '), this.suffix.trim()]
       .filter(Boolean)
       .join(', ');
   }
+  get prompt(): string { return this.rawPrompt ?? this.constructorPrompt; }
   get count(): number { return this.expanded().length; }
   get autoCount(): number { return this.expanded().filter(({ choice }) => this.isDerived(choice.category)).length; }
 }

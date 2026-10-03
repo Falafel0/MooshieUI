@@ -180,6 +180,20 @@ pub async fn stop_comfyui(state: State<'_, Arc<AppState>>) -> Result<(), AppErro
     process::stop_comfyui_process(&state).await
 }
 
+/// Stop services launched by MooshieUI. External ComfyUI servers are never
+/// killed unless this app owns their process handle.
+#[tauri::command]
+pub async fn stop_all_managed_processes(state: State<'_, Arc<AppState>>) -> Result<(), AppError> {
+    crate::media_tools::shutdown(&state).await;
+    crate::prompt_assistant::companion::stop_active_requests().await;
+    crate::commands::music_link::shutdown(&state).await;
+    crate::commands::music_audio_style::shutdown(&state).await;
+    let comfy_result = process::stop_comfyui_process(&state).await;
+    crate::commands::patchy::stop_launched_patchy();
+    state.prompt_assistant.server.unload().await;
+    comfy_result
+}
+
 /// Compatibility alias: stop only managed ComfyUI processes before retrying.
 #[tauri::command]
 pub async fn kill_port_process(state: State<'_, Arc<AppState>>) -> Result<u16, AppError> {

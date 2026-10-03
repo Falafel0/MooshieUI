@@ -1696,7 +1696,181 @@ class MooshieRegionalMask:
         return (mask,)
 
 
+# Every-step prompt alternation. Metadata is preserved by ComfyUI conditioning
+# transforms (timestep ranges, masks, guidance and ControlNet); selection happens
+# immediately before batching, never by mutating a CLIP tensor mid-generation.
+def _alternation_escaped(text, index):
+    start = index
+    while start > 0 and text[start - 1] == "\\":
+        start -= 1
+    return (index - start) % 2 == 1
+
+
+def _prompt_alternations(text):
+    blocks = []
+    start = 0
+    while start < len(text):
+        if text[start] != "[":
+            start += 1
+            continue
+        depth, nested, option_start, end = 1, False, start + 1, start + 1
+        options = []
+        while end < len(text):
+            if not _alternation_escaped(text, end):
+                if text[end] == "[":
+                    depth += 1
+                    nested = True
+                elif text[end] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                elif text[end] == "|" and depth == 1:
+                    options.append(text[option_start:end].strip())
+                    option_start = end + 1
+            end += 1
+        if end == len(text):
+            break
+        options.append(text[option_start:end].strip())
+        if (not _alternation_escaped(text, start) and not nested
+                and 2 <= len(options) <= 16 and all(options)):
+            blocks.append((start, end + 1, options))
+        start = end + 1
+    return blocks
+
+
+def _resolve_prompt_alternation(text, blocks, step):
+    parts, last = [], 0
+    for start, end, options in blocks:
+        parts.extend((text[last:start], re.sub(r"\\([|])", r"\1", options[step % len(options)])))
+        last = end
+    return "".join(parts) + text[last:]
+
+
+class MooshieAlternatingTextEncode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip": ("CLIP",), "text": ("STRING", {"multiline": True})}}
+
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "encode"
+    CATEGORY = "mooshie/conditioning"
+
+    def encode(self, clip, text):
+        from math import lcm
+        blocks = _prompt_alternations(text)
+        cycle = 1
+        for _, _, options in blocks:
+            cycle = lcm(cycle, len(options))
+            if cycle > 64:
+                raise ValueError("Prompt alternation exceeds 64 conditioning variants.")
+        conditioning = []
+        for phase in range(cycle):
+            resolved = _resolve_prompt_alternation(text, blocks, phase)
+            # Use the native CLIP path, including (text:weight), pooled outputs
+            # and encoder-specific metadata, rather than synthesizing embeddings.
+            encoded = clip.encode_from_tokens_scheduled(clip.tokenize(resolved))
+            for tensor, metadata in encoded:
+                metadata = metadata.copy()
+                if blocks:
+                    metadata["mooshie_alternation"] = (phase, cycle)
+                conditioning.append([tensor, metadata])
+        return (conditioning,)
+
+
+_ALTERNATION_SAMPLER_FUNCTIONS = {
+    "sample_euler", "sample_euler_ancestral", "sample_dpmpp_2m",
+    "sample_dpmpp_2m_sde", "sample_dpmpp_2m_sde_gpu",
+    "sample_dpmpp_2m_sde_heun", "sample_dpmpp_2m_sde_heun_gpu",
+    "sample_dpmpp_3m_sde", "sample_dpmpp_3m_sde_gpu",
+    "sample_lcm", "sample_lms", "sample_ddpm", "sample_er_sde",
+}
+
+
+def _alternation_sampler_wrapper(executor, model_wrap, sigmas, extra_args,
+                                 callback, noise, latent_image=None,
+                                 denoise_mask=None, disable_pbar=False):
+    # This hook receives the ACTUAL schedule after denoise/truncation and the
+    # actual sampler (also for upscale/detail passes with their own step count).
+    sampler = executor.class_obj
+    function = getattr(sampler, "sampler_function", None)
+    if getattr(function, "__name__", "") not in _ALTERNATION_SAMPLER_FUNCTIONS:
+        raise ValueError("This sampler has no every-step prompt alternation adapter; choose euler or dpmpp_2m.")
+    if getattr(sampler, "extra_options", {}).get("s_churn", 0):
+        raise ValueError("Prompt alternation does not support sampler churn.")
+    if "sampler_calc_cond_batch_function" in extra_args.get("model_options", {}):
+        raise ValueError("A custom conditioning batch function bypasses prompt alternation.")
+    if sigmas.ndim != 1 or len(sigmas) < 2 or not bool(torch.all(sigmas[:-1] > sigmas[1:])):
+        raise ValueError("Prompt alternation requires a strictly decreasing sigma schedule.")
+    options = extra_args.get("model_options", {})
+    effective_sigmas = sigmas
+    # SNR-based flow samplers intentionally move an initial sigma of 1 a
+    # little inward. Mirror the native helper without changing their schedule.
+    if getattr(function, "__name__", "") in {
+            "sample_er_sde", "sample_dpmpp_2m_sde", "sample_dpmpp_2m_sde_gpu",
+            "sample_dpmpp_2m_sde_heun", "sample_dpmpp_2m_sde_heun_gpu",
+            "sample_dpmpp_3m_sde", "sample_dpmpp_3m_sde_gpu"}:
+        from comfy.k_diffusion import sampling
+        adjust = getattr(sampling, "offset_first_sigma_for_snr", None)
+        if adjust is not None:
+            effective_sigmas = adjust(sigmas, model_wrap.inner_model.model_sampling)
+    options.setdefault("transformer_options", {})["mooshie_alternation_sigmas"] = effective_sigmas
+    return executor(model_wrap, sigmas, extra_args, callback, noise,
+                    latent_image, denoise_mask, disable_pbar)
+
+
+def _alternation_batch_wrapper(executor, model, conds, x, timestep, model_options):
+    if not any(c is not None and any("mooshie_alternation" in item for item in c) for c in conds):
+        return executor(model, conds, x, timestep, model_options)
+    transformer_options = model_options.get("transformer_options", {})
+    sigmas = transformer_options.get("mooshie_alternation_sigmas", transformer_options.get("sample_sigmas"))
+    if sigmas is None or len(sigmas) < 2:
+        raise RuntimeError("ComfyUI did not supply the sampling schedule for prompt alternation.")
+    # One evaluation per loop for the allowlisted samplers. Select by actual
+    # sigma, not call count: separate CFG batches and repeated evaluations keep
+    # the same phase, and a new/refinement generation always starts at phase 0.
+    sigma = timestep.flatten()[0].to(sigmas)
+    if not bool(torch.allclose(timestep, timestep.flatten()[0].expand_as(timestep))):
+        raise RuntimeError("Mixed timestep batches cannot alternate prompt conditioning.")
+    distances = (sigmas[:-1] - sigma).abs()
+    step = int(distances.argmin().item())
+    if not bool(torch.isclose(sigmas[step], sigma, rtol=1e-5, atol=1e-6)):
+        raise RuntimeError("Sampler evaluated an off-schedule timestep; prompt alternation is unsupported.")
+    filtered = []
+    for conditioning in conds:
+        if conditioning is None or not any("mooshie_alternation" in item for item in conditioning):
+            filtered.append(conditioning)
+            continue
+        selected = []
+        for item in conditioning:
+            phase = item.get("mooshie_alternation")
+            if phase is None or step % phase[1] == phase[0]:
+                selected.append(item)
+        filtered.append(selected)
+    return executor(model, filtered, x, timestep, model_options)
+
+
+class MooshiePromptAlternation:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"model": ("MODEL",)}}
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    CATEGORY = "mooshie/conditioning"
+
+    def patch(self, model):
+        from comfy.patcher_extension import WrappersMP
+        if not hasattr(model, "add_wrapper_with_key") or not hasattr(WrappersMP, "CALC_COND_BATCH"):
+            raise RuntimeError("Update ComfyUI: prompt alternation requires conditioning and sampler wrappers.")
+        patched = model.clone()
+        patched.add_wrapper_with_key(WrappersMP.SAMPLER_SAMPLE, "mooshie_prompt_alternation", _alternation_sampler_wrapper)
+        patched.add_wrapper_with_key(WrappersMP.CALC_COND_BATCH, "mooshie_prompt_alternation", _alternation_batch_wrapper)
+        return (patched,)
+
+
 NODE_CLASS_MAPPINGS = {
+    "MooshieAlternatingTextEncode": MooshieAlternatingTextEncode,
+    "MooshiePromptAlternation": MooshiePromptAlternation,
     "MooshieRegionalMask": MooshieRegionalMask,
     "MooshieInpaintControl": MooshieInpaintControl,
     "MooshieInpaintConditionMask": MooshieInpaintConditionMask,
@@ -1726,6 +1900,8 @@ from .h3_preview import NODE_CLASS_MAPPINGS as H3_PREVIEW_NODES
 NODE_CLASS_MAPPINGS.update(H3_PREVIEW_NODES)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MooshieAlternatingTextEncode": "Mooshie Alternating Text Encode",
+    "MooshiePromptAlternation": "Mooshie Every-Step Prompt Alternation",
     "MooshieRegionalMask": "Mooshie Regional Mask",
     "MooshieInpaintControl": "Mooshie Inpaint Control",
     "MooshieInpaintConditionMask": "Mooshie Inpaint Condition Mask",

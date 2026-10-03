@@ -1,3 +1,4 @@
+import { parsePromptAlternations } from "./promptAlternation.js";
 import { SYNTAX_ANGLE_LOOKBEHIND } from "./promptSyntaxEscape.js";
 import { mayContainPresetToken, presetTokenRegex } from "./promptChunkTokens.js";
 
@@ -69,6 +70,7 @@ export function getPromptInertRanges(raw: string): PromptTextRange[] {
 
   const ranges: PromptTextRange[] = [
     ...collectRegexRanges(raw, PROMPT_SCHEDULE_REGEX),
+    ...parsePromptAlternations(raw).map(({ start, end }) => ({ start, end })),
   ];
 
   if (mayContainPresetToken(raw)) {
