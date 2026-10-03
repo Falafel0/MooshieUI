@@ -1,4 +1,3 @@
-import { resolveAnimaPromptGroups } from "../utils/animaIntegration.js";
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
@@ -3964,9 +3963,8 @@ class GenerationStore {
             artist_chain: mixerArtistChain,
           }
         : null,
-      anima_tools: this.isAnima
-        ? resolveAnimaPromptGroups(this.animaTools, text => promptPresets.resolveInline(text, { fixedChoices: options.fixedPresetChoices }))
-        : null,
+      // Retired controls must not inject invisible groups from older saved settings.
+      anima_tools: null,
       edit_reference_images: this.editReferenceImages.filter((v): v is string => !!v),
       edit_reference_strength: this.editReferenceStrength,
       edit_split_screen: this.editSplitScreen,

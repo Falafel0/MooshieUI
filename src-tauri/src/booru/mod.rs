@@ -18,7 +18,6 @@ pub const USER_AGENT: &str = concat!(
 const GELBOORU_API: &str = "https://gelbooru.com/index.php";
 const E621_API: &str = "https://e621.net";
 
-
 /// Per-host minimum spacing, so a burst of UI clicks cannot hammer a site.
 const MIN_INTERVAL_AUTHENTICATED: Duration = Duration::from_millis(250);
 const MIN_INTERVAL_ANONYMOUS: Duration = Duration::from_millis(1100);
@@ -371,7 +370,5 @@ mod tests {
     fn search_patterns_accept_spaces_and_underscores() {
         assert_eq!(search_pattern("blue hair"), "*blue_hair*");
         assert_eq!(search_pattern("  blue_hair  "), "*blue_hair*");
-
     }
-
 }

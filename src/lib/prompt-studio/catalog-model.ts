@@ -19,9 +19,9 @@ export function normalizeEntries(value: unknown): CustomCatalogEntry[] {
       id, tag, subId,
       name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : tag.replaceAll('_', ' '),
       preview: typeof raw.preview === 'string' && raw.preview.length <= 400000 && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(raw.preview) ? raw.preview : previous?.preview,
-      contextualTags: Array.isArray(raw.contextualTags) ? [...new Set<string>(raw.contextualTags.filter((v: unknown): v is string => typeof v === 'string' && !!v.trim()).map((v: string) => v.trim()))] : [],
-      description: typeof raw.description === 'string' ? raw.description : '',
-      aliases: Array.isArray(raw.aliases) ? [...new Set<string>(raw.aliases.filter((v: unknown): v is string => typeof v === 'string' && !!v.trim()).map((v: string) => v.trim()))] : [],
+      contextualTags: Array.isArray(raw.contextualTags) ? [...new Set<string>(raw.contextualTags.filter((v: unknown): v is string => typeof v === 'string' && !!v.trim()).map((v: string) => v.trim()))] : previous?.contextualTags,
+      description: typeof raw.description === 'string' ? raw.description : previous?.description,
+      aliases: Array.isArray(raw.aliases) ? [...new Set<string>(raw.aliases.filter((v: unknown): v is string => typeof v === 'string' && !!v.trim()).map((v: string) => v.trim()))] : previous?.aliases,
     });
   }
   return [...rows.values()];
@@ -34,15 +34,15 @@ export function normalizeCatalog(value: unknown): CatalogData {
   const ids = new Set<string>();
   if (Array.isArray(data?.categories)) {
     for (const raw of data.categories) {
-      if (!raw || typeof raw.id !== 'string' || !raw.id.trim() || typeof raw.name !== 'string' || !raw.name.trim() || ids.has(raw.id)) continue;
-      ids.add(raw.id);
-      categories.push({ id: raw.id, name: raw.name.trim(), icon: typeof raw.icon === 'string' ? raw.icon : 'sparkles', subs: [] });
+      if (!raw || typeof raw.id !== 'string' || !raw.id.trim() || typeof raw.name !== 'string' || !raw.name.trim() || ids.has(raw.id.trim())) continue;
+      ids.add(raw.id.trim());
+      categories.push({ id: raw.id.trim(), name: raw.name.trim(), icon: typeof raw.icon === 'string' ? raw.icon : 'sparkles', subs: [] });
     }
     for (const category of categories) {
-      const raw = data.categories.find(row => row?.id === category.id);
+      const raw = data.categories.find(row => typeof row?.id === 'string' && row.id.trim() === category.id);
       for (const sub of Array.isArray(raw?.subs) ? raw.subs : []) {
-        if (!sub || typeof sub.id !== 'string' || !sub.id.trim() || typeof sub.name !== 'string' || !sub.name.trim() || ids.has(sub.id)) continue;
-        ids.add(sub.id); category.subs.push({ id: sub.id, name: sub.name.trim() });
+        if (!sub || typeof sub.id !== 'string' || !sub.id.trim() || typeof sub.name !== 'string' || !sub.name.trim() || ids.has(sub.id.trim())) continue;
+        ids.add(sub.id.trim()); category.subs.push({ id: sub.id.trim(), name: sub.name.trim() });
       }
     }
   }

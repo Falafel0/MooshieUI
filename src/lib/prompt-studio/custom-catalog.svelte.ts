@@ -149,14 +149,14 @@ class CustomCatalog {
     if (data.kind === 'mooshie-tag-pack') {
       const declared = new Set<string>();
       for (const category of data.categories as any[]) {
-        if (!category || typeof category.id !== 'string' || !category.id.trim() || typeof category.name !== 'string' || !category.name.trim() || !Array.isArray(category.subs) || declared.has(category.id)) return false;
-        declared.add(category.id);
+        if (!category || typeof category.id !== 'string' || !category.id.trim() || typeof category.name !== 'string' || !category.name.trim() || !Array.isArray(category.subs) || declared.has(category.id.trim())) return false;
+        declared.add(category.id.trim());
       }
       for (const category of data.categories as any[]) for (const sub of category.subs) {
-        if (!sub || typeof sub.id !== 'string' || !sub.id.trim() || typeof sub.name !== 'string' || !sub.name.trim() || declared.has(sub.id)) return false;
-        declared.add(sub.id);
+        if (!sub || typeof sub.id !== 'string' || !sub.id.trim() || typeof sub.name !== 'string' || !sub.name.trim() || declared.has(sub.id.trim())) return false;
+        declared.add(sub.id.trim());
       }
-      if (data.entries.some(row => !row || typeof row.tag !== 'string' || !row.tag.trim() || typeof row.subId !== 'string' || !declared.has(row.subId))) return false;
+      if (data.entries.some(row => !row || typeof row.tag !== 'string' || !row.tag.trim() || typeof row.subId !== 'string' || !declared.has(row.subId.trim()))) return false;
     }
     const imported = normalizeCatalog(data);
     if (data.entries.length && !imported.entries.length) return false;
@@ -187,7 +187,7 @@ class CustomCatalog {
       const subId = mapping.get(row.subId) ?? row.subId;
       const key = JSON.stringify([subId, row.tag]); const existing = merged.get(key);
       const id = existing?.id ?? (usedIds.has(row.id) ? crypto.randomUUID() : row.id);
-      usedIds.add(id); merged.set(key, { ...row, id, subId, preview: row.preview ?? existing?.preview });
+      usedIds.add(id); merged.set(key, { ...row, id, subId, preview: row.preview ?? existing?.preview, description: row.description ?? existing?.description, aliases: row.aliases ?? existing?.aliases, contextualTags: row.contextualTags ?? existing?.contextualTags });
     }
     this.categories = categories; this.entries = [...merged.values()]; this.save(); return true;
   }

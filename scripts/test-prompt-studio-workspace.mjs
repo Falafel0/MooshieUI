@@ -10,7 +10,9 @@ const cache = new Map();
 const storage = new Map();
 let booruRequest = async () => [];
 let userScope = '';
-const runtime = {};
+let exportedBlob;
+let download;
+const runtime = { Blob, URL: { createObjectURL: blob => { exportedBlob = blob; return 'blob:test'; }, revokeObjectURL() {} }, document: { createElement: () => (download = { click() {} }) } };
 const boundaries = {
   '../utils/ipc.js': { userScopedKey: key => key + userScope, ipcInvoke: (...args) => booruRequest(...args) },
   '../utils/syncTrigger.js': { triggerSync: () => {} },
@@ -54,11 +56,34 @@ assert.equal(customCatalog.entries[0].contextualTags[0], 'my_context');
 studio.choose('my_tag','My tag',sub); studio.toggleModifier('my_tag','my_context');
 assert.equal(studio.prompt,'my tag, my context');
 assert.ok(!studio.prompt.includes('clothed'));
-const pack = JSON.parse(JSON.stringify({kind:'mooshie-tag-pack',version:1,categories:customCatalog.categories,entries:customCatalog.entries}));
+customCatalog.export(category);
+assert.equal(download.download, 'prompt-studio-tag-pack.json');
+const pack = JSON.parse(await exportedBlob.text());
+assert.equal(pack.categories.length, 1);
+assert.equal(pack.entries[0].preview, preview);
+assert.deepEqual(pack.entries[0].contextualTags, ['my_context']);
 assert.equal(customCatalog.import(pack),true);
 assert.equal(customCatalog.entries.length,1,'Reimporting a pack is idempotent');
 assert.equal(customCatalog.entries[0].preview,preview);
 assert.equal(customCatalog.entries[0].aliases[0],'Alias');
+// Older packs omit metadata; importing them must not erase authored contexts/previews.
+assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'old',tag:'my_tag',subId:sub}]}),true);
+assert.equal(customCatalog.entries[0].description,'Description');
+assert.equal(customCatalog.entries[0].aliases[0],'Alias');
+assert.equal(customCatalog.entries[0].contextualTags[0],'my_context');
+// Whitespace IDs normalize together, and conflicting category/sub IDs remap consistently.
+const padded = {kind:'mooshie-tag-pack',version:1,categories:[{id:' padded ',name:'Padded',subs:[{id:' nested ',name:'Nested'}]}],entries:[{id:'pad',tag:'pad_tag',subId:' nested '}]};
+assert.equal(customCatalog.import(padded),true);
+assert.equal(customCatalog.entries.find(row=>row.tag==='pad_tag').subId,'nested');
+const collision = {kind:'mooshie-tag-pack',version:1,categories:[{id:sub,name:'Collision',subs:[{id:category,name:'Collision sub'}]}],entries:[{id:customCatalog.entries[0].id,tag:'collision_tag',subId:category}]};
+assert.equal(customCatalog.import(collision),true);
+const beforeRepeat = JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries});
+assert.equal(customCatalog.import(collision),true);
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeRepeat);
+assert.equal(new Set(customCatalog.entries.map(row=>row.id)).size,customCatalog.entries.length);
+const invalid = {...padded,categories:[...padded.categories,{id:'padded',name:'Duplicate ID',subs:[]}]};
+assert.equal(customCatalog.import(invalid),false);
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeRepeat,'Invalid packs must not partly mutate the catalog');
 customCatalog.removeSub(sub);
 assert.equal(customCatalog.entries[0].subId,category,'Deleting a subcategory keeps its entries');
 const group = studio.addGroup('My block'); studio.updateGroup(group,{content:'manual prose'});
@@ -68,6 +93,7 @@ assert.ok(studio.prompt.endsWith('manual prose'));
 assert.equal(customCatalog.import({kind:'mooshie-tag-pack',version:99,categories:[],entries:[]}),false);
 assert.equal(customCatalog.import({kind:'mooshie-custom-catalog',version:1,entries:[{id:'legacy',tag:'saved_tag',subId:'old_bucket',preview}]}),true);
 assert.ok(customCatalog.categories.some(row=>row.id==='old_bucket'));
+assert.match(fs.readFileSync(new URL('src/lib/stores/generation.svelte.ts', root), 'utf8'), /anima_tools: null/, 'Retired Anima controls cannot inject hidden saved groups');
 console.log('Local catalog, user contexts, portable packs, legacy import and prompt history cases passed.');
 
 // Drive real store reads and writes through deferred IndexedDB boundary calls.

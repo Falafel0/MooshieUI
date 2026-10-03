@@ -9,7 +9,7 @@
   let name = $state(category?.name ?? sub?.name ?? '');
   let deleting = $state(false);
   let dialog: HTMLDialogElement;
-  const title = id ? 'common.edit' : categoryId ? 'prompt_studio.add_subcategory' : 'prompt_studio.add_category';
+  const title = $derived(id ? 'common.edit' : categoryId ? 'prompt_studio.add_subcategory' : 'prompt_studio.add_category');
   onMount(() => dialog.showModal());
   function save() {
     if (!name.trim()) return;
