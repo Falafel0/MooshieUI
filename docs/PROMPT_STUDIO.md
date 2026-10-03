@@ -47,6 +47,6 @@ Send selects the generation destination, positive/negative field and append/prep
 
 The old source browser, Danbooru tag/group/post search, automatic preview lookup, upstream catalog/image proxy and their UI components are removed. The corresponding desktop command registrations and browser IPC routes are removed too. Danbooru credentials no longer appear in settings; legacy config fields remain only for migration/redaction. Existing Gelbooru/e621 credential settings and backend support are outside this constructor and remain available.
 
-## Validation status
+## Validation
 
-No build, type check, test suite or runtime UI check was run for this refactor, per the user's instruction to continue without checks. The regression script was updated for empty catalogs, user contexts, packs, legacy import and account-scoped storage; its results are not claimed here. The previously published v2.3.8-fork.5 installer does not include this later refactor.
+The v2.3.9-fork.1 integration is checked with frontend build/type checks, the pack and account-scoping regressions, Node tests, localization parity, release-artifact checks and Rust desktop/server CI on Windows. A real-checkpoint GPU render and a manual runtime UI walkthrough are not part of these checks.
