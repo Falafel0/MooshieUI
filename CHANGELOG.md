@@ -1,5 +1,18 @@
 # Changelog
 
+## What's New in v2.3.9-fork.4
+
+### Prompt Studio usability and persistence
+- Library separates prompt composition from global-set management. TXT/JSON sets open in the full set editor for review; saved prompt documents remain distinct from reusable tag datasets.
+- Character assembly adds appearance sections, compact tags, cards and lists, supplied previews, color swatches and tag details with canonical names, aliases and contextual modifiers.
+- Collections retain their own filters and display preferences. Unrelated artist or category filters no longer hide character or wardrobe results.
+- Mix randomizes style terms and weights independently, preserves locked styles and slot weights, consolidates exclusion/restore actions and prevents duplicate draft chunks. Redundant database panels and cross-mode routing buttons are removed.
+- The shared draft uses a labeled selector for main text, prompt chunks and final output. Prefix/suffix controls, custom modifiers, chunk names, enabled state and order stay accessible; copying and sending use the complete prompt.
+- Account-scoped Library navigation and active draft parts persist. Narrow layouts wrap controls, action targets remain at least 44px, and text follows the existing font-scale setting.
+- Improved keyboard tab navigation, modal focus and Escape handling, loading/error/empty states, and settings that stay open while editing.
+
+---
+
 ## What's New in v2.3.9-fork.3
 
 ### Connected Prompt Studio libraries
