@@ -54,7 +54,7 @@
   let groupName = $state(initial.groupName);
   let feedback = $state('');
   let failed = $state(false);
-  $effect(() => { const id = library.mixerSet; if (id) { family = 'local'; bucket = id; } });
+  $effect(() => { const id = library.mixerSet; if (id) { family = 'local'; bucket = id; library.mixerSet = ''; } });
   const localOptions = $derived(customCatalog.entries
     .filter(entry => !bucket || entry.subId === bucket || customCatalog.categories.find(category => category.id === bucket)?.subs.some(sub => sub.id === entry.subId))
     .map(entry => ({ id: `local:${entry.id}`, tag: entry.tag, family: 'local' as const, name: entry.name })));
