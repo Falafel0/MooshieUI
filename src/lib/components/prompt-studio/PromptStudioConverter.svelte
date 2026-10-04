@@ -1,14 +1,17 @@
 <script lang="ts">
   import { ArrowLeftRight, Copy, Plus, ScanText } from '@lucide/svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { convertWeights, type WeightFormat } from '../../prompt-studio/weight-converter.js';
   import { locale } from '../../stores/locale.svelte.js';
-  let input = $state('');
-  let from = $state<WeightFormat>('sd');
-  let to = $state<WeightFormat>('nai');
-  let groupName = $state('');
+  const initial = restoreTool('converter', { input: '', from: 'sd', to: 'nai', groupName: '' });
+  let input = $state(initial.input);
+  let from = $state<WeightFormat>(initial.from as WeightFormat);
+  let to = $state<WeightFormat>(initial.to as WeightFormat);
+  let groupName = $state(initial.groupName);
   let feedback = $state('');
   let failed = $state(false);
+  $effect(() => { saveTool('converter', { input, from, to, groupName }); });
   const result = $derived(convertWeights(input, from, to));
   function resetFeedback() { feedback = ''; failed = false; }
   function swap() { const previous = from; from = to; to = previous; resetFeedback(); }

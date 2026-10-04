@@ -7,6 +7,8 @@
   import { locale } from '../../stores/locale.svelte.js';
   import { gallery } from '../../stores/gallery.svelte.js';
   import PromptStudioSend from './PromptStudioSend.svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
+  import PromptStudioCollections from './PromptStudioCollections.svelte';
   import PromptStudioGuided from './PromptStudioGuided.svelte';
   import PromptStudioMixer from './PromptStudioMixer.svelte';
   import PromptStudioWriting from './PromptStudioWriting.svelte';
@@ -17,6 +19,8 @@
   let sending = $state(false);
   const scope = $derived(userScopedKey('mooshie.prompt-studio.workspace'));
   $effect(() => { void scope; sending = false; });
+  let buildView = $state(restoreTool('build', { view: 'parameters' }).view);
+  $effect(() => { saveTool('build', { view: buildView }); });
   const views = [{ id: 'build' as StudioView, icon: Layers3 }, { id: 'mix' as StudioView, icon: SlidersHorizontal }, { id: 'editor' as StudioView, icon: PenLine }, { id: 'library' as StudioView, icon: BookOpen }];
   const guidedModes: GuidedMode[] = ['character', 'wardrobe', 'scene'];
   const canSend = $derived(!!studio.prompt.trim() && !studio.pendingConflict);
@@ -81,7 +85,8 @@
           </div>
           <p class="text-xs text-neutral-500">{locale.t('prompt_studio.v2.build_hint')}</p>
         </div>
-        <div class="min-h-0 flex-1 p-4 sm:p-5"><PromptStudioGuided mode={workspace.guidedMode} /></div>
+        <div class="flex shrink-0 gap-2 px-4 pt-3 sm:px-5"><button type="button" aria-pressed={buildView === 'parameters'} class="touch-target rounded-lg border border-neutral-800 px-3 text-xs {buildView === 'parameters' ? 'bg-neutral-800 text-amber-300' : 'text-neutral-400'}" onclick={() => buildView = 'parameters'}>{locale.t('prompt_studio.library.parameters')}</button><button type="button" aria-pressed={buildView === 'collections'} class="touch-target rounded-lg border border-neutral-800 px-3 text-xs {buildView === 'collections' ? 'bg-neutral-800 text-amber-300' : 'text-neutral-400'}" onclick={() => buildView = 'collections'}>{locale.t('prompt_studio.library.zone_collections')}</button></div>
+        <div class="min-h-0 flex-1 p-4 sm:p-5"><div class="h-full {buildView === 'parameters' ? '' : 'hidden'}"><PromptStudioGuided mode={workspace.guidedMode} /></div>{#each guidedModes as mode}<div class="h-full {buildView === 'collections' && workspace.guidedMode === mode ? '' : 'hidden'}">{#if buildView === 'collections'}<PromptStudioCollections {mode} />{/if}</div>{/each}</div>
       </div>
       <div class="min-h-0 flex-1 p-4 sm:p-5 {workspace.view === 'mix' ? '' : 'hidden'}"><PromptStudioMixer /></div>
       <div class="min-h-0 flex-1 p-4 sm:p-5 {workspace.view === 'editor' ? '' : 'hidden'}"><PromptStudioWriting active={workspace.view === 'editor'} /></div>

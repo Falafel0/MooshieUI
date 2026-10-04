@@ -23,3 +23,23 @@ export async function loadCollection(id: string): Promise<CollectionEntry[]> {
   if (collection.kind === 'artist') return (pages.flat() as [string, number | null, number][]).map(([tag, count, memberships], i) => ({ id: `artist-${i}`, tag, name: tag, group: 'artists', count, memberships }));
   return pages.flat() as CollectionEntry[];
 }
+
+/** Intentional placement of supplied resources in the three composing zones. */
+export const modeCollections = {
+  character: ['characters', 'templates', 'all-tags', 'lexicon'],
+  wardrobe: ['wardrobe', 'templates', 'all-tags', 'lexicon'],
+  scene: ['composition', 'templates', 'generation-styles', 'artists', 'all-tags', 'lexicon'],
+} as const;
+export function collectionInMode(row: CollectionEntry, collection: string, mode?: 'character' | 'wardrobe' | 'scene'): boolean {
+  if (!mode) return true;
+  if (collection === 'all-tags') return row.group.startsWith({ character: 'Персонажи / ', wardrobe: 'Гардероб / ', scene: 'Композиция / ' }[mode]);
+  if (collection !== 'templates') return true;
+  if (mode === 'character') return row.group === 'poses_and_emotions_mix_and_backgrounds';
+  if (mode === 'scene') return ['backgrounds', 'poses_and_emotions_mix_and_backgrounds', 'textures_and_colors'].includes(row.group);
+  return !['backgrounds', 'poses_and_emotions_mix_and_backgrounds'].includes(row.group);
+}
+
+export function collectionGroupKey(value: string): string {
+  const group = value.split(' / ').at(-1)?.trim() || 'misc';
+  return `prompt_studio.library.group.${group}`;
+}

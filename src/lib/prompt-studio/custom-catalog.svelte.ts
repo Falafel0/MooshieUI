@@ -1,5 +1,5 @@
 import { userScopedKey } from '../utils/ipc.js';
-import { normalizeCatalog, normalizeEntries, type CatalogCategory, type CustomCatalogEntry } from './catalog-model.js';
+import { normalizeCatalog, normalizeEntries, type CatalogCategory, type CatalogDomain, type CustomCatalogEntry } from './catalog-model.js';
 export type { CustomCatalogEntry } from './catalog-model.js';
 const scopedKey = () => userScopedKey('mooshie.studio.custom-catalog.v1');
 async function database(): Promise<IDBDatabase> {
@@ -16,6 +16,7 @@ class CustomCatalog {
   storageError = $state(false);
   ready = $state(false);
   get scope() { return scopedKey(); }
+  get current() { return this.ready && this.loadedKey === scopedKey(); }
   private loadedKey = '';
   private revision = 0;
   private saveQueue = Promise.resolve();
@@ -77,6 +78,29 @@ class CustomCatalog {
         if (key === this.loadedKey) this.storageError = false;
       } catch (error) { if (key === this.loadedKey) this.storageError = true; console.warn('Custom catalogue save:', error); }
     });
+  }
+  /** Atomically replace a global set, preserving identity and all entry metadata. */
+  replaceSet(categoryId: string, name: string, domains: CatalogDomain[], entries: CustomCatalogEntry[]): boolean {
+    if (!this.writable() || !name.trim()) return false;
+    const category = this.categories.find(row => row.id === categoryId);
+    if (!category) return false;
+    const buckets = new Set([category.id, ...category.subs.map(row => row.id)]);
+    if (entries.some(row => !row || !row.tag?.trim() || !buckets.has(row.subId))) return false;
+    const normalized = normalizeEntries(entries);
+    if (normalized.length !== entries.length) return false;
+    const untouched = this.entries.filter(row => !buckets.has(row.subId));
+    const used = new Set(untouched.map(row => row.id));
+    const rows = normalized.map(row => {
+      const id = used.has(row.id) ? crypto.randomUUID() : row.id;
+      used.add(id); return { ...row, id };
+    });
+    this.categories = this.categories.map(row => row.id === categoryId ? { ...row, name: name.trim(), domains: [...new Set(domains.filter(domain => ['character', 'wardrobe', 'scene'].includes(domain)))] } : row);
+    this.entries = [...untouched, ...rows]; this.save(); return true;
+  }
+  async flushed(): Promise<boolean> {
+    const owner = this.loadedKey;
+    await this.saveQueue;
+    return owner === scopedKey() && !this.storageError;
   }
   export(categoryId?: string) {
     if (!this.ready || this.loadedKey !== scopedKey()) return;
@@ -178,6 +202,7 @@ class CustomCatalog {
         target = categories.find(row => row.id === id);
         if (!target) { target = { ...category, id, subs: [] }; categories.push(target); usedBuckets.add(id); }
       }
+      if (category.domains !== undefined) target.domains = category.domains;
       mapping.set(category.id, target.id);
       for (const sub of category.subs) {
         let id = sub.id;
@@ -192,7 +217,7 @@ class CustomCatalog {
       const subId = mapping.get(row.subId) ?? row.subId;
       const key = JSON.stringify([subId, row.tag]); const existing = merged.get(key);
       const id = existing?.id ?? (usedIds.has(row.id) ? crypto.randomUUID() : row.id);
-      usedIds.add(id); merged.set(key, { ...row, id, subId, preview: row.preview ?? existing?.preview, description: row.description ?? existing?.description, aliases: row.aliases ?? existing?.aliases, contextualTags: row.contextualTags ?? existing?.contextualTags });
+      usedIds.add(id); merged.set(key, { ...row, id, subId, preview: row.preview ?? existing?.preview, description: row.description ?? existing?.description, aliases: row.aliases ?? existing?.aliases, contextualTags: row.contextualTags ?? existing?.contextualTags, collectionData: row.collectionData ?? existing?.collectionData });
     }
     this.categories = categories; this.entries = [...merged.values()]; this.save(); return true;
   }

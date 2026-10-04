@@ -10,7 +10,9 @@ const root = new URL('../', import.meta.url);
 const storage = new Map();
 const cache = new Map();
 let userScope = '';
+const fixtures = JSON.parse(fs.readFileSync(new URL('src/lib/prompt-studio/data/characters.json', root), 'utf8'));
 const boundaries = {
+  './collections.js': { collectionGroupKey: group => `prompt_studio.library.group.${group}`, collectionIndex: { collections: [{ id: 'characters', label: 'Characters' }] }, loadCollection: async id => id === 'characters' ? fixtures : [] },
   '../utils/ipc.js': { userScopedKey: key => `${key}${userScope}` },
   '../stores/locale.svelte.js': { locale: { t: key => key } },
 };
@@ -27,7 +29,7 @@ function load(path) {
       const resolved = new URL(name.replace(/\.js$/, '.ts'), new URL(path, root));
       return load(resolved.pathname.slice(root.pathname.length));
     },
-    console, $state: value => value, crypto: { randomUUID },
+    console, $state: Object.assign(value => value, { raw: value => value }), crypto: { randomUUID },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
   }, { filename: path });
   return module.exports;
@@ -68,6 +70,8 @@ assert.deepEqual(plain(reset), { categories: ['pinned', 'active'], entries: [cho
 const { studio } = load('src/lib/prompt-studio/studio.svelte.ts');
 const { customCatalog } = load('src/lib/prompt-studio/custom-catalog.svelte.ts');
 const { workflow } = load('src/lib/prompt-studio/workflow.svelte.ts');
+const { library } = load('src/lib/prompt-studio/library.svelte.ts');
+library.load(); for (const mode of ['character', 'wardrobe', 'scene']) library.select(mode, 'starter');
 await customCatalog.load(); studio.load(); workflow.load();
 assert.equal(customCatalog.categories.length, 0, 'Starter recipes never populate authored catalogs');
 studio.selected = [choice('before', 'library'), choice('keep', 'target'), choice('remove', 'target'), choice('after', 'other')];
@@ -140,7 +144,7 @@ userScope = ':alice'; workflow.load(); studio.load();
 assert.equal(workflow.locked.length, 0); assert.equal(studio.selected.length, 0);
 workflow.toggleLock(subject.id);
 assert.deepEqual(JSON.parse(storage.get('mooshie.prompt-studio.workflow.v1:alice')).locked, [subject.id]);
-userScope = ':bob';
+userScope = ':bob'; library.select('character', 'starter');
 // Mutations at a new account boundary must load its preferences before writing.
 workflow.toggleLock(features.id);
 assert.deepEqual(plain(workflow.locked), [features.id]);
@@ -152,5 +156,48 @@ userScope = ':alice'; workflow.load(); studio.load();
 assert.deepEqual(plain(workflow.locked), [subject.id]); assert.equal(studio.selected.length, 0);
 storage.set('mooshie.prompt-studio.workflow.v1:carol', JSON.stringify({ locked: [subject.id, subject.id, 'unknown', 4] }));
 userScope = ':carol'; workflow.load();
-assert.deepEqual(plain(workflow.locked), [subject.id]);
+assert.deepEqual(plain(workflow.locked), [subject.id, 'unknown'], 'Unavailable global set IDs remain locked until their datasets load');
 console.log('Guided recipes, atomic draft changes, pinned/banned/locked randomization, resets and account boundaries passed.');
+
+// Shared databases and editable global sets must change options in every mode,
+// while the prompt remains a snapshot until an explicit composing action.
+await library.fetch('characters');
+library.select('character', 'database');
+assert.equal(library.groups('character').flatMap(group => group.options).length, fixtures.length);
+const copied = await library.copyCollection('characters');
+assert.ok(copied);
+assert.equal(customCatalog.entries.filter(row => customCatalog.categories.find(category => category.id === copied).subs.some(sub => sub.id === row.subId)).length, fixtures.length);
+const global = customCatalog.addCategory('Shared edits');
+const beforeEdit = studio.prompt;
+const metadata = { id: 'row', tag: 'source_tag', name: 'Named source', subId: global, contextualTags: ['optional_detail'], aliases: ['alias'], description: 'kept', collectionData: { id: 'original', tag: 'source_tag', name: 'Source', group: 'body', negative: ['negative_tag'], meta: { zone: 'body' } } };
+assert.ok(customCatalog.replaceSet(global, 'Shared edits', [], [metadata]));
+assert.equal(studio.prompt, beforeEdit, 'Global data editing must not change the working prompt');
+for (const mode of ['character', 'wardrobe', 'scene']) {
+ library.select(mode, global);
+ assert.equal(library.groups(mode)[0].options[0].tag, 'source_tag');
+}
+assert.ok(customCatalog.replaceSet(global, 'Shared edits', [], [{ ...metadata, tag: 'updated_tag' }]));
+for (const mode of ['character', 'wardrobe', 'scene']) assert.equal(library.groups(mode)[0].options[0].tag, 'updated_tag');
+assert.equal(customCatalog.entries.find(row => row.tag === 'updated_tag').collectionData.negative[0], 'negative_tag');
+assert.equal(studio.prompt, beforeEdit);
+workflow.choose('character', global, 'updated_tag');
+assert.ok(studio.selected.some(row => row.tag === 'updated_tag'));
+assert.equal(customCatalog.replaceSet(global, 'No duplicates', [], [metadata, metadata]), false);
+const { parseGlobalSet } = load('src/lib/prompt-studio/catalog-model.ts');
+assert.equal(parseGlobalSet('source_tag\nnew_tag\nsource_tag', 'txt', global, [metadata])[0].description, 'kept');
+const large = JSON.stringify([{ ...metadata, description: 'x'.repeat(33 * 1024 * 1024) }]);
+assert.equal(parseGlobalSet(large, 'json', global)[0].description.length, 33 * 1024 * 1024, 'Global set parsing has no 32 MiB cap');
+assert.ok(customCatalog.replaceSet(global, 'Character only', ['character'], [metadata]));
+assert.equal(library.groups('scene').length, 0);
+const { restoreTool, saveTool } = load('src/lib/prompt-studio/tool-state.ts');
+saveTool('test', { weights: [1.2, .8], query: 'kept', page: 7 });
+assert.deepEqual(plain(restoreTool('test', { weights: [], query: '', page: 0 })), { weights: [1.2, .8], query: 'kept', page: 7 });
+userScope = ':isolated';
+assert.equal(restoreTool('test', { query: '' }).query, '');
+console.log('Shared database coverage, global edits across modes, metadata, uncapped files and persistent scoped working state passed.');
+
+const limited = randomizeWorkflow([choice('pinned', 'g0', 1.6)], Array.from({ length: 20 }, (_, i) => group(`g${i}`, [`new${i}`])), { locked: [], pinned: ['pinned'], banned: [], freshLimit: 4, random: () => .75 });
+assert.equal(limited.categories.length, 20);
+assert.equal(limited.entries.filter(row => row.tag.startsWith('new')).length, 4);
+assert.equal(limited.entries.find(row => row.tag === 'pinned').weight, 1.6);
+console.log('Full database randomization respects the requested detail budget and preserves pinned weights.');

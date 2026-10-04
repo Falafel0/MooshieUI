@@ -1,24 +1,37 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { locale } from '../../stores/locale.svelte.js';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
+  import type { StudioKind } from '../../prompt-studio/presets.js';
+  import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
+  import { library } from '../../prompt-studio/library.svelte.js';
+  import { workspace } from '../../prompt-studio/workspace.svelte.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { userScopedKey } from '../../utils/ipc.js';
-  import { collectionIndex, loadCollection, loadCollectionAsset, type CollectionEntry } from '../../prompt-studio/collections.js';
+  import { collectionIndex, loadCollectionAsset, type CollectionEntry, modeCollections, collectionInMode, collectionGroupKey } from '../../prompt-studio/collections.js';
   import { resolveTemplate, wardrobeCompatibility, artistPrompt, type Dictionaries, type Relations } from '../../prompt-studio/collection-tools.js';
   let scroller = $state<HTMLDivElement>();
   const previewKey = (tag: string) => tag.replaceAll(' ', '_').replace(/\\([()[\]])/g, '$1');
-  let collection = $state('characters');
+  let { management = false, mode }: { management?: boolean; mode?: StudioKind } = $props();
+  let copying = $state(false);
+  async function copyGlobal() { copying = true; try { await library.copyCollection(collection); } finally { copying = false; } }
+  const initial = untrack(() => restoreTool(`collections-${mode ?? 'library'}`, { collection: mode === 'wardrobe' ? 'wardrobe' : mode === 'scene' ? 'composition' : 'characters', query: '', group: '', set: -1, page: 0, prefix: false }));
+  let collection = $state(initial.collection);
+  const available = $derived(collectionIndex.collections.filter(row => !mode || (modeCollections[mode] as readonly string[]).includes(row.id)));
+  $effect(() => { if (!available.some(row => row.id === collection)) collection = available[0].id; });
+  $effect(() => { saveTool(`collections-${mode ?? 'library'}`, { collection, query, group, set, page, prefix }); });
   let rows = $state.raw<CollectionEntry[]>([]);
-  let query = $state(''); let search = $state(''); let group = $state(''); let set = $state(-1); let page = $state(0);
-  let prefix = $state(false); let busy = $state(false); let failed = $state(false);
+  let query = $state(initial.query); let search = $state(initial.query.toLowerCase().trim()); let group = $state(initial.group); let set = $state(initial.set); let page = $state(initial.page);
+  let prefix = $state(initial.prefix); let busy = $state(false); let failed = $state(false);
   let inspecting = $state<CollectionEntry>(); let preview = $state(''); let unresolved = $state(false);
   let dictionaries = $state.raw<Dictionaries>({}); let relations = $state.raw<Relations>();
   let previews = $state.raw<{ open: string[]; closed: string[]; extensions: Record<string, string>; poses: Record<string, string>; journal: { дни?: unknown[] }; status: { t?: string }; blurred: Record<string, string>; restricted: string[] }>();
   let sequence = 0; let alive = true;
   const current = $derived(collectionIndex.collections.find(item => item.id === collection)!);
   const artistSets = $derived(collectionIndex.collections.find(item => item.id === 'artists')!.sets ?? []);
-  const groups = $derived([...new Set(rows.map(row => row.group))]);
-  const filtered = $derived(rows.filter(row => (!group || row.group === group) && (set < 0 || !!((row.memberships ?? 0) & (1 << set))) && (!search || `${row.name} ${row.tag} ${row.description ?? ''}`.toLowerCase().includes(search))));
+  const zoneRows = $derived(rows.filter(row => collectionInMode(row, collection, mode)));
+  const groups = $derived([...new Set(zoneRows.map(row => row.group))]);
+  const filtered = $derived(zoneRows.filter(row => (!group || row.group === group) && (set < 0 || !!((row.memberships ?? 0) & (1 << set))) && (!search || `${row.name} ${row.tag} ${row.description ?? ''}`.toLowerCase().includes(search))));
   const pages = $derived(Math.max(1, Math.ceil(filtered.length / 60)));
   const visible = $derived(filtered.slice(page * 60, page * 60 + 60));
   const compatibility = $derived(inspecting && relations && collection === 'wardrobe' ? wardrobeCompatibility(relations, inspecting.tag, studio.selected.map(item => item.tag)) : []);
@@ -26,11 +39,10 @@
   const scope = $derived(userScopedKey('mooshie.prompt-studio.collections'));
   $effect(() => {
     const id = collection; const owner = scope; const revision = ++sequence;
-    rows = []; inspecting = undefined; group = ''; set = -1; page = 0; busy = true; failed = false; query = '';
-    loadCollection(id).then(result => { if (alive && revision === sequence && owner === userScopedKey('mooshie.prompt-studio.collections')) rows = result; }).catch(() => { if (alive && revision === sequence) failed = true; }).finally(() => { if (alive && revision === sequence) busy = false; });
+    inspecting = undefined; busy = true; failed = false;
+    library.fetch(id).then(() => { if (library.failed.includes(id)) throw new Error('Collection unavailable'); return library.databases[id] ?? []; }).then(result => { if (alive && revision === sequence && owner === userScopedKey('mooshie.prompt-studio.collections')) rows = result; }).catch(() => { if (alive && revision === sequence) failed = true; }).finally(() => { if (alive && revision === sequence) busy = false; });
   });
-  $effect(() => { const value = query.toLowerCase().trim(); const timer = setTimeout(() => { search = value; page = 0; }, 150); return () => clearTimeout(timer); });
-  $effect(() => { void group; void set; page = 0; });
+  $effect(() => { const value = query.toLowerCase().trim(); const timer = setTimeout(() => { search = value; }, 150); return () => clearTimeout(timer); });
   $effect(() => { if (page >= pages) page = pages - 1; });
   loadCollectionAsset<Dictionaries>('dictionaries.json').then(value => { if (alive) dictionaries = value; }).catch(() => { if (alive) failed = true; });
   loadCollectionAsset<Relations>('wardrobe-relations.json').then(value => { if (alive) relations = value; }).catch(() => {});
@@ -45,23 +57,25 @@
   }
   function add(row: CollectionEntry) {
     if (current.kind === 'template' || /(?<!\\)\{/.test(row.tag) || collection === 'wardrobe') { review(row); return; }
+    if (management) { review(row); return; }
     const tag = current.kind === 'artist' ? artistPrompt(row.tag, prefix) : row.tag;
     if (studio.selected.some(item => item.tag === tag)) studio.remove(tag);
     else studio.addMany([{ tag, name: row.name, category: `collection:${collection}:${row.group}` }]);
   }
 </script>
 <section class="flex h-full min-h-0 flex-col gap-3 overflow-hidden" aria-label={locale.t('prompt_studio.collections.title')}>
+  <div class="flex shrink-0 flex-wrap gap-2">{#if management}<button type="button" disabled={copying || busy || failed || !customCatalog.ready} onclick={() => void copyGlobal()} class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-amber-300 disabled:opacity-30">{locale.t(copying ? 'prompt_studio.loading' : 'prompt_studio.library.copy_global')}</button>{:else}{#if ['characters', 'wardrobe', 'composition'].includes(collection)}{#each ['build', 'mix', 'editor'] as view}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => { const mode = collection === 'characters' ? 'character' : collection === 'wardrobe' ? 'wardrobe' : 'scene'; library.select(mode, 'database'); workspace.setGuidedMode(mode); workspace.setView(view as 'build' | 'mix' | 'editor'); }}>{locale.t('prompt_studio.library.use_in', { mode: locale.t(`prompt_studio.v2.view_${view}`) })}</button>{/each}{/if}{/if}</div>
   <p class="shrink-0 text-xs leading-relaxed text-neutral-400">{locale.t('prompt_studio.collections.hint')}</p>
   <div class="flex shrink-0 flex-wrap gap-2">
     <select bind:value={collection} aria-label={locale.t('prompt_studio.collections.choose')} class="touch-target min-w-0 max-w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-xs text-neutral-200">
-      {#each collectionIndex.collections as item}<option value={item.id}>{locale.t(`prompt_studio.collections.${item.id}`)} · {locale.formatInteger(item.count)}</option>{/each}
+      {#each available as item}<option value={item.id}>{locale.t(`prompt_studio.collections.${item.id}`)} · {locale.formatInteger(item.count)}</option>{/each}
     </select>
     <input type="search" bind:value={query} aria-label={locale.t('prompt_studio.search')} placeholder={locale.t('prompt_studio.search')} class="touch-target min-w-32 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs text-neutral-200" />
     {#if current.kind === 'artist'}
       <select bind:value={set} aria-label={locale.t('prompt_studio.collections.artist_set')} class="touch-target min-w-0 max-w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-xs text-neutral-300"><option value={-1}>{locale.t('prompt_studio.collections.all_sets')}</option>{#each artistSets as item, i}<option value={i}>{locale.t(`prompt_studio.collections.set_${item.id}`)}</option>{/each}</select>
       <label class="flex items-center gap-2 text-xs text-neutral-400"><input type="checkbox" bind:checked={prefix} class="accent-amber-400" />{locale.t('prompt_studio.collections.artist_prefix')}</label>
     {:else}
-      <select bind:value={group} aria-label={locale.t('prompt_studio.collections.category')} class="touch-target min-w-0 max-w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-xs text-neutral-300"><option value="">{locale.t('prompt_studio.collections.all_categories')}</option>{#each groups as value}<option value={value}>{value.replaceAll('_', ' ')}</option>{/each}</select>
+      <select bind:value={group} aria-label={locale.t('prompt_studio.collections.category')} class="touch-target min-w-0 max-w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-xs text-neutral-300"><option value="">{locale.t('prompt_studio.collections.all_categories')}</option>{#each groups as value}<option value={value}>{locale.t(collectionGroupKey(value))}</option>{/each}</select>
     {/if}
   </div>
   {#if busy}<p role="status" class="py-8 text-sm text-neutral-400">{locale.t('common.loading')}</p>
@@ -74,8 +88,8 @@
           {#if inspecting.description}<p class="mt-2 text-xs leading-relaxed text-neutral-400">{inspecting.description}</p>{/if}
           <textarea bind:value={preview} aria-label={locale.t('prompt_studio.collections.preview')} class="mt-3 min-h-24 w-full rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea>
           {#if unresolved}<p class="mt-2 text-xs text-amber-300">{locale.t('prompt_studio.collections.unresolved')}</p>{/if}
-          <div class="mt-2 flex flex-wrap gap-2"><button type="button" class="touch-target rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 disabled:opacity-40" disabled={!preview.trim() || /(?<!\\)\{(?:@|[^{}]*\|)/.test(preview)} onclick={() => studio.addGroup(inspecting!.name, preview.trim())}>{locale.t('prompt_studio.v2.tools.add_group')}</button>{#if current.kind === 'template' || /(?<!\\)\{/.test(inspecting.tag)}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => review(inspecting!)}>{locale.t('prompt_studio.collections.reroll')}</button>{/if}</div>
-          {#if inspecting.context?.length}<div class="mt-3"><p class="text-xs text-neutral-500">{locale.t('prompt_studio.collections.context')}</p><div class="mt-1 flex flex-wrap gap-1">{#each inspecting.context as tag}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => studio.addMany([{ tag, category: 'collection:context' }])}>+ {tag}</button>{/each}</div></div>{/if}
+          <div class="mt-2 flex flex-wrap gap-2"><button type="button" class="touch-target rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 disabled:opacity-40" disabled={management || !preview.trim() || /(?<!\\)\{(?:@|[^{}]*\|)/.test(preview)} onclick={() => studio.addGroup(inspecting!.name, preview.trim())}>{locale.t('prompt_studio.v2.tools.add_group')}</button>{#if current.kind === 'template' || /(?<!\\)\{/.test(inspecting.tag)}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" onclick={() => review(inspecting!)}>{locale.t('prompt_studio.collections.reroll')}</button>{/if}</div>
+          {#if inspecting.context?.length}<div class="mt-3"><p class="text-xs text-neutral-500">{locale.t('prompt_studio.collections.context')}</p><div class="mt-1 flex flex-wrap gap-1">{#each inspecting.context as tag}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300" disabled={management} onclick={() => studio.addMany([{ tag, category: 'collection:context' }])}>+ {tag}</button>{/each}</div></div>{/if}
           {#if inspecting.negative?.length}<p class="mt-3 text-xs text-neutral-500">{locale.t('prompt_studio.collections.negative')}</p><textarea readonly value={inspecting.negative.join(', ')} aria-label={locale.t('prompt_studio.collections.negative')} class="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 p-2 text-xs text-neutral-400"></textarea>{/if}
           {#if collection === 'characters' && previews}<p class="mt-3 text-xs text-neutral-500">{locale.t(previews.open.includes(previewKey(inspecting.tag)) ? 'prompt_studio.collections.preview_open' : previews.closed.includes(previewKey(inspecting.tag)) ? 'prompt_studio.collections.preview_closed' : 'prompt_studio.collections.preview_missing')}</p>{/if}
           {#if collection === 'characters' && previews?.blurred[previewKey(inspecting.tag)]}<figure class="mt-3"><img src={`data:image/webp;base64,${previews.blurred[previewKey(inspecting.tag)]}`} alt={locale.t('prompt_studio.collections.blurred_preview')} width="120" height="120" class="h-28 w-28 rounded-xl object-cover" /><figcaption class="mt-1 text-xs text-neutral-500">{locale.t('prompt_studio.collections.blurred_preview')}</figcaption></figure>{/if}

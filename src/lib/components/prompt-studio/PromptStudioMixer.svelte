@@ -1,5 +1,10 @@
 <script lang="ts">
   import { Check, Copy, Lock, Palette, Plus, Shuffle, Unlock, X } from '@lucide/svelte';
+  import { library } from '../../prompt-studio/library.svelte.js';
+  import { artistPrompt } from '../../prompt-studio/collection-tools.js';
+  import { collectionIndex } from '../../prompt-studio/collections.js';
+  import PromptStudioDatabase from './PromptStudioDatabase.svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { formatWeightedTag, type WeightFormat } from '../../prompt-studio/weight-converter.js';
@@ -34,27 +39,38 @@
     { id: 'backlight', tag: 'backlighting, glowing silhouette', family: 'light', key: 'backlight' },
     { id: 'studio', tag: 'studio lighting, softbox illumination', family: 'light', key: 'studio' },
   ];
-  let choices = $state<StyleChoice[]>([curated[0], curated[8], curated[16]].map((item, index) => ({ ...item, weight: [1, 0.85, 1.1][index], locked: false })));
-  let excluded = $state<StyleOption[]>([]);
-  let family = $state<'all' | Family>('all');
-  let bucket = $state('');
-  let query = $state('');
-  let count = $state(3);
-  let format = $state<WeightFormat>('sd');
-  let groupName = $state('');
+  const initial = restoreTool('mixer', { choices: [curated[0], curated[8], curated[16]].map((item, index) => ({ ...item, weight: [1, 0.85, 1.1][index], locked: false })), excluded: [] as StyleOption[], family: 'all', bucket: '', query: '', count: 3, format: 'sd', groupName: '', page: 0, artistSet: -1, artistPrefix: false, minWeight: 0.6, maxWeight: 1.3 });
+  let choices = $state<StyleChoice[]>(initial.choices.filter(item => item && typeof item.tag === 'string' && Number.isFinite(item.weight)));
+  let artistPrefix = $state(initial.artistPrefix), minWeight = $state(initial.minWeight), maxWeight = $state(initial.maxWeight);
+  let artistSet = $state(initial.artistSet);
+  let page = $state(initial.page);
+  let excluded = $state<StyleOption[]>(initial.excluded);
+  let family = $state<'all' | Family>(initial.family as 'all' | Family);
+  let bucket = $state(initial.bucket);
+  let query = $state(initial.query);
+  let count = $state(initial.count);
+  let format = $state<WeightFormat>(initial.format as WeightFormat);
+  let groupName = $state(initial.groupName);
   let feedback = $state('');
   let failed = $state(false);
+  $effect(() => { const id = library.mixerSet; if (id) { family = 'local'; bucket = id; } });
   const localOptions = $derived(customCatalog.entries
     .filter(entry => !bucket || entry.subId === bucket || customCatalog.categories.find(category => category.id === bucket)?.subs.some(sub => sub.id === entry.subId))
     .map(entry => ({ id: `local:${entry.id}`, tag: entry.tag, family: 'local' as const, name: entry.name })));
   const draftArtists = $derived(studio.selected.filter(item => item.category.startsWith('collection:artists:')).map(item => ({ id: `draft:${item.tag}`, tag: item.tag, family: 'artists' as const, name: item.name })));
-  const options = $derived(family === 'artists' ? draftArtists : family === 'local' ? localOptions : curated.filter(item => family === 'all' || item.family === family));
+  const artistOptions = $derived((library.databases.artists ?? []).filter(row => artistSet < 0 || !!((row.memberships ?? 0) & (1 << artistSet))).map(row => ({ id: `artist:${row.id}`, tag: artistPrompt(row.tag, false), family: 'artists' as const, name: row.name })));
+  const styleTags = $derived((library.databases.composition ?? []).filter(row => ['style', 'medium', 'color', 'linework', 'print', 'light_effect', 'shadow'].includes(row.group)).map(row => ({ id: `composition:${row.id}`, tag: row.tag, family: 'style' as const, name: row.name })));
+  const generationStyles = $derived((library.databases['generation-styles'] ?? []).map(row => ({ id: `style:${row.id}`, tag: row.tag, family: 'style' as const, name: row.name })));
+  const options = $derived(family === 'artists' ? [...artistOptions, ...draftArtists.filter(row => !artistOptions.some(item => item.tag === row.tag))] : family === 'local' ? localOptions : [...curated, ...generationStyles, ...styleTags].filter(item => family === 'all' || item.family === family));
   const visible = $derived(options.filter(item => `${name(item)} ${item.tag}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
+  const currentPage = $derived(Math.min(page, Math.max(0, Math.ceil(visible.length / 60) - 1)));
+  $effect(() => { if (family === 'artists') void library.fetch('artists'); if (family === 'style' || family === 'all') { void library.fetch('generation-styles'); void library.fetch('composition'); } });
+  $effect(() => { saveTool('mixer', { choices, excluded, family, bucket, query, count, format, groupName, page, artistSet, artistPrefix, minWeight, maxWeight }); });
   const lockedCount = $derived(choices.filter(item => item.locked).length);
   const pool = $derived(options.filter(item => !excluded.some(value => value.tag === item.tag) && !choices.some(value => value.locked && value.tag === item.tag)));
   const canShuffle = $derived(lockedCount < count && new Set(pool.map(item => item.tag)).size >= count - lockedCount);
-  const sd = $derived(choices.map(item => formatWeightedTag(item.tag, item.weight, 'sd')).join(', '));
-  const nai = $derived(choices.map(item => formatWeightedTag(item.tag, item.weight, 'nai')).join(', '));
+  const sd = $derived(choices.map(item => formatWeightedTag(artistPrefix && item.family === 'artists' && !item.tag.startsWith('@') ? `@${item.tag}` : item.tag, item.weight, 'sd')).join(', '));
+  const nai = $derived(choices.map(item => formatWeightedTag(artistPrefix && item.family === 'artists' && !item.tag.startsWith('@') ? `@${item.tag}` : item.tag, item.weight, 'nai')).join(', '));
   const output = $derived(format === 'sd' ? sd : nai);
 
   function name(item: StyleOption) { return item.key ? locale.t(`prompt_studio.v2.mixer.style_${item.key}`) : item.name || item.tag; }
@@ -96,6 +112,11 @@
     choices = [...next, ...fresh.slice(cursor)];
     clearFeedback();
   }
+  function rerollWeights() {
+    if (!Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || minWeight < .1 || maxWeight > 2 || minWeight > maxWeight) return;
+    choices = choices.map(item => item.locked ? item : { ...item, weight: Math.round((minWeight + Math.random() * (maxWeight - minWeight)) * 100) / 100 });
+    clearFeedback();
+  }
   function changeCount(value: number) {
     count = Math.max(lockedCount, Math.max(2, Math.min(6, value)));
     if (choices.length > count) {
@@ -126,23 +147,26 @@
     <div class="mb-2 flex items-center gap-2 text-amber-300"><Palette size={18} /><h2 id="studio-mixer-title" class="text-base font-semibold">{locale.t('prompt_studio.v2.mixer.title')}</h2></div>
     <p class="text-sm leading-relaxed text-neutral-400">{locale.t('prompt_studio.v2.mixer.description')}</p>
   </header>
+  <PromptStudioDatabase />
   <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,1fr)]">
     <section class="min-w-0 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-4" aria-labelledby="studio-style-library">
       <h3 id="studio-style-library" class="text-sm font-semibold text-neutral-200">{locale.t('prompt_studio.v2.mixer.library')}</h3>
       <p class="mt-1 text-xs leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.mixer.library_hint')}</p>
       <div class="mt-4 flex flex-wrap gap-2" aria-label={locale.t('prompt_studio.v2.mixer.families')}>
         {#each ['all', 'medium', 'style', 'light', 'local', 'artists'] as value}
-          <button type="button" aria-pressed={family === value} class="touch-target rounded-lg border px-3 text-xs {family === value ? 'border-amber-400/60 bg-amber-400/10 text-amber-300' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600'}" onclick={() => { family = value as typeof family; query = ''; }}>{locale.t(`prompt_studio.v2.mixer.family_${value}`)}</button>
+          <button type="button" aria-pressed={family === value} class="touch-target rounded-lg border px-3 text-xs {family === value ? 'border-amber-400/60 bg-amber-400/10 text-amber-300' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600'}" onclick={() => { family = value as typeof family; }}>{locale.t(`prompt_studio.v2.mixer.family_${value}`)}</button>
         {/each}
       </div>
+      {#if family === 'artists'}<label class="mt-3 block text-xs text-neutral-400">{locale.t('prompt_studio.collections.artist_set')}<select bind:value={artistSet} class="touch-target mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs"><option value={-1}>{locale.t('prompt_studio.collections.all_sets')}</option>{#each collectionIndex.collections.find(row => row.id === 'artists')?.sets ?? [] as set, index}<option value={index}>{locale.t(`prompt_studio.collections.set_${set.id}`)}</option>{/each}</select></label>{#if library.pending.includes('artists')}<p role="status" class="mt-3 text-xs text-neutral-500">{locale.t('prompt_studio.loading')}</p>{/if}{/if}
       {#if family === 'local'}
         <label class="mt-4 block text-xs text-neutral-400">{locale.t('prompt_studio.v2.mixer.local_category')}
           <select bind:value={bucket} class="touch-target mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200"><option value="">{locale.t('prompt_studio.v2.mixer.local_all')}</option>{#each customCatalog.categories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select>
         </label>
       {/if}
+      {#if family === 'artists'}<label class="touch-target mt-2 flex items-center gap-2 text-xs text-neutral-400"><input type="checkbox" bind:checked={artistPrefix} class="accent-amber-400" />{locale.t('prompt_studio.collections.artist_prefix')}</label>{/if}
       <label class="mt-4 block text-xs text-neutral-400">{locale.t('prompt_studio.search')}<input type="search" bind:value={query} class="touch-target mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200" /></label>
       <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {#each visible as item (item.id)}
+        {#each visible.slice(currentPage * 60, (currentPage + 1) * 60) as item (item.id)}
           {@const chosen = choices.find(choice => choice.tag === item.tag)}
           {@const banned = excluded.some(value => value.tag === item.tag)}
           <article class="flex min-w-0 rounded-xl border {chosen ? 'border-amber-400/40 bg-amber-400/5' : 'border-neutral-800 bg-neutral-950/50'} {banned ? 'opacity-50' : ''}">
@@ -154,6 +178,7 @@
           </article>
         {/each}
       </div>
+      {#if visible.length > 60}<nav class="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-400"><button type="button" disabled={!currentPage} onclick={() => page = currentPage - 1} class="touch-target rounded-lg border border-neutral-700 px-3 disabled:opacity-30">{locale.t('prompt_studio.v2.catalog_previous_page')}</button><span>{currentPage + 1} / {Math.ceil(visible.length / 60)}</span><button type="button" disabled={(currentPage + 1) * 60 >= visible.length} onclick={() => page = currentPage + 1} class="touch-target rounded-lg border border-neutral-700 px-3 disabled:opacity-30">{locale.t('prompt_studio.v2.catalog_next_page')}</button></nav>{/if}
       {#if !visible.length}<p class="py-8 text-center text-xs leading-relaxed text-neutral-500">{locale.t(family === 'local' && !localOptions.length ? 'prompt_studio.v2.mixer.local_empty' : 'prompt_studio.nothing_found')}</p>{/if}
       {#if excluded.length}
         <div class="mt-5 border-t border-neutral-800 pt-4"><h4 class="text-xs font-medium text-neutral-400">{locale.t('prompt_studio.v2.mixer.excluded')}</h4><div class="mt-2 flex flex-wrap gap-2">{#each excluded as item (item.id)}<button type="button" class="touch-target flex items-center gap-2 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-500 hover:text-neutral-200" aria-label={locale.t('prompt_studio.v2.mixer.restore', { name: name(item) })} onclick={() => exclude(item)}>{name(item)}<Plus size={13} /></button>{/each}</div></div>
@@ -168,6 +193,7 @@
           <label class="text-xs text-neutral-400">{locale.t('prompt_studio.v2.mixer.count')}<select value={count} onchange={event => changeCount(Number(event.currentTarget.value))} class="touch-target mt-2 block min-w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200">{#each [2, 3, 4, 5, 6] as value}<option value={value} disabled={value < lockedCount}>{value}</option>{/each}</select></label>
           <button type="button" disabled={!canShuffle} class="touch-target flex items-center gap-2 rounded-lg border border-neutral-700 px-4 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-40" onclick={shuffle}><Shuffle size={15} />{locale.t('prompt_studio.v2.mixer.shuffle')}</button>
         </div>
+        <details class="mt-3 rounded-xl border border-neutral-800 p-3"><summary class="touch-target cursor-pointer text-xs text-neutral-400">{locale.t('prompt_studio.library.weight_randomization')}</summary><div class="mt-2 flex flex-wrap items-end gap-2"><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.min_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={minWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.max_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={maxWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><button type="button" disabled={choices.every(item => item.locked) || !Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || minWeight < .1 || maxWeight > 2 || minWeight > maxWeight} onclick={rerollWeights} class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 disabled:opacity-30">{locale.t('prompt_studio.library.reroll_weights')}</button></div></details>
         <div class="mt-4 space-y-2">
           {#each choices as item, index (item.id)}
             <article class="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
