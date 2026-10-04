@@ -56,6 +56,9 @@ jobs:
       - name: Prompt Studio workspace regressions
         run: |
           node scripts/test-prompt-studio-workspace.mjs
+          node scripts/test-prompt-studio-guided.mjs
+          node scripts/test-prompt-studio-writing.mjs
+          node --test tests/prompt-studio-tools.test.mjs tests/prompt-studio-collections.test.mjs
 
       - name: i18n parity
         run: node scripts/check-i18n-parity.mjs

@@ -200,6 +200,31 @@ class Studio {
   isChosen(tag: string): boolean { return this.selected.some((v) => v.tag === tag); }
   isDerived(category: string): boolean { return DERIVED.has(category) || category.startsWith('auto:'); }
 
+  /** Replace recipe groups in one undo step while retaining every other source. */
+  replaceChoices(entries: Choice[], categories: string[]) {
+    const targets = new Set(categories);
+    if (!targets.size) return;
+    const incoming = entries.filter(entry => targets.has(entry.category) && entry.tag.trim() && !this.isDerived(entry.category));
+    const untouchedTags = new Set(this.selected.filter(entry => !targets.has(entry.category)).map(entry => entry.tag));
+    const seen = new Set(untouchedTags);
+    const replacements = incoming.filter(entry => !seen.has(entry.tag) && !!seen.add(entry.tag)).map(entry => ({ ...entry, weight: Number.isFinite(entry.weight) ? Math.max(0.1, Math.min(2, entry.weight)) : 1 }));
+    const emitted = new Set<string>();
+    const next: Choice[] = [];
+    for (const entry of this.selected) {
+      if (!targets.has(entry.category)) { next.push(entry); continue; }
+      if (!emitted.has(entry.category)) {
+        emitted.add(entry.category);
+        next.push(...replacements.filter(replacement => replacement.category === entry.category));
+      }
+    }
+    next.push(...replacements.filter(entry => !emitted.has(entry.category)));
+    if (JSON.stringify(next) === JSON.stringify(this.selected)) return;
+    this.checkpoint();
+    this.selected = next;
+    this.details = this.validDetails(this.details, next);
+    this.save();
+  }
+
   /**
    * Adds or removes a tag. A tag that clashes with the current selection is not
    * applied straight away: the refusal is parked in `pendingConflict`, so the UI
@@ -400,12 +425,12 @@ class Studio {
     this.groups = [...this.groups, ...blocks.filter(block => block.content.trim()).map(block => ({ id: crypto.randomUUID(), name: block.name, content: block.content, enabled: true }))];
     this.save();
   }
-  addGroup(name: string) {
+  addGroup(name: string, content = '') {
     const base = name.trim() || locale.t('prompt_studio.group_name');
     let unique = base, number = 1;
     while (this.groups.some(group => group.name === unique)) unique = `${base} (${++number})`;
     this.checkpoint();
-    const group = { id: crypto.randomUUID(), name: unique, content: '', enabled: true };
+    const group = { id: crypto.randomUUID(), name: unique, content, enabled: true };
     this.groups = [...this.groups, group]; this.save(); return group.id;
   }
   updateGroup(id: string, patch: Partial<Omit<StudioPromptGroup, 'id'>>) {

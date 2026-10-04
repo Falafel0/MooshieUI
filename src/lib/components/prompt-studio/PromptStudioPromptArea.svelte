@@ -33,13 +33,12 @@
 <section class="max-h-[45dvh] shrink-0 overflow-y-auto border-t border-neutral-800 bg-neutral-900 p-3" aria-label={locale.t('prompt_studio.prompt_editor')}>
   <div class="mb-2 flex flex-wrap items-center gap-2">
     <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label={locale.t('prompt_studio.prompt_groups')}>
-      <button type="button" aria-pressed={!group} class="touch-target shrink-0 rounded-lg px-3 py-2 text-xs {!group ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}" onclick={() => active = ''}>{locale.t('prompt_studio.constructor_output')}</button>
+      <button type="button" aria-pressed={!group} class="touch-target shrink-0 rounded-lg px-3 py-2 text-xs {!group ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}" onclick={() => active = ''}>{locale.t('prompt_studio.v2.draft')}</button>
       {#each studio.groups as item (item.id)}
         <button type="button" aria-pressed={active === item.id} class="touch-target max-w-40 shrink-0 truncate rounded-lg px-3 py-2 text-xs {active === item.id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'} {item.enabled ? '' : 'opacity-50'}" onclick={() => active = item.id}>{item.name || locale.t('prompt_studio.group_name')}</button>
       {/each}
     </nav>
     <button type="button" class="touch-target rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 disabled:opacity-40" disabled={!studio.prompt.trim()} onclick={onCopy} aria-label={locale.t('prompt_studio.copy')}><Copy size={16} /></button>
-    <button type="button" disabled={!content.trim()} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => { macroId = ''; macroName = ''; macroContent = content; macros = true; }}>{locale.t('prompt_studio.save_chunk')}</button>
     <button type="button" class="touch-target rounded-lg bg-amber-400 px-4 py-2 text-xs font-medium text-neutral-950 disabled:opacity-40" disabled={!studio.prompt.trim() || !!studio.pendingConflict} onclick={onApply}>{locale.t('prompt_studio.apply')}</button>
   </div>
   {#if group}
@@ -64,6 +63,7 @@
   <details class="min-w-0 flex-1">
     <summary class="touch-target flex cursor-pointer items-center text-xs text-neutral-400">{locale.t('prompt_studio.prompt_helpers')}</summary>
     <div class="flex flex-wrap gap-2 pb-2">
+    <button type="button" disabled={!content.trim()} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => { macroId = ''; macroName = ''; macroContent = content; macros = true; }}>{locale.t('prompt_studio.save_chunk')}</button>
       <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => active = studio.addGroup(locale.t('prompt_studio.group_name'))}>+ {locale.t('prompt_studio.prompt_groups')}</button>
       <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
       <button type="button" aria-expanded={macros} class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => macros = !macros}>{locale.t('prompt_studio.macros')}</button>

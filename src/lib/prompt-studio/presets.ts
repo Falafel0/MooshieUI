@@ -164,7 +164,7 @@ export function fromSnapshot(value: unknown, fallbackName = 'Imported'): StudioS
   }
   const rawPrompt = typeof data.rawPrompt === 'string' ? data.rawPrompt : typeof data.content === 'string' ? data.content : undefined;
   if (!choices.length && rawPrompt) choices = tagsFromRawPrompt(rawPrompt);
-  if (!choices.length && !data.prefix && !data.suffix && !(data.version === 1 && Array.isArray(data.selected)) && !(Array.isArray(data.choices) && typeof data.prefix === 'string' && typeof data.suffix === 'string')) return null;
+  if (!choices.length && !(typeof data.prefix === 'string' && data.prefix.trim()) && !(typeof data.suffix === 'string' && data.suffix.trim()) && !(Array.isArray(data.groups) && data.groups.some((group: any) => group && typeof group.id === 'string' && typeof group.content === 'string' && group.content.trim())) && !(data.version === 1 && Array.isArray(data.selected)) && !(Array.isArray(data.choices) && typeof data.prefix === 'string' && typeof data.suffix === 'string')) return null;
 
   const seen = new Set<string>();
   choices = choices.filter((choice) => !seen.has(choice.tag) && seen.add(choice.tag));

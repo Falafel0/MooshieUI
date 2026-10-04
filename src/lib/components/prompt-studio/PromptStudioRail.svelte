@@ -5,9 +5,10 @@
   import { CATEGORY_ICONS, fallbackIcon } from './icons.js';
   import PromptStudioStructure from './PromptStudioStructure.svelte';
   import { Plus, Settings2, Search, Download, Upload } from '@lucide/svelte';
+  let { showTransfers = true }: { showTransfers?: boolean } = $props();
   let query = $state('');
   let editing = $state<string | undefined>();
-  let input: HTMLInputElement;
+  let input = $state<HTMLInputElement>();
   let busy = $state(false);
   let error = $state('');
   const categories = $derived(customCatalog.categories.filter(category => category.name.toLowerCase().includes(query.trim().toLowerCase())));
@@ -39,12 +40,12 @@
     {#if customCatalog.ready && !customCatalog.categories.length}<p class="py-5 text-xs leading-relaxed text-neutral-500">{locale.t('prompt_studio.blank_catalog')}</p>{/if}
   </nav>
   <button type="button" disabled={!customCatalog.ready} class="touch-target flex shrink-0 items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-xs text-neutral-200 disabled:opacity-40" onclick={() => editing = ''}><Plus size={17} />{locale.t('prompt_studio.add_category')}</button>
-  <div class="flex shrink-0 gap-2">
+  {#if showTransfers}<div class="flex shrink-0 gap-2">
     <button type="button" disabled={!customCatalog.ready || busy} class="touch-target flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-800 text-xs text-neutral-400" onclick={() => customCatalog.export()}><Download size={14} />{locale.t('prompt_studio.export_pack')}</button>
-    <button type="button" disabled={!customCatalog.ready || busy} class="touch-target flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-800 text-xs text-neutral-400" onclick={() => input.click()}><Upload size={14} />{locale.t('prompt_studio.import_pack')}</button>
+    <button type="button" disabled={!customCatalog.ready || busy} class="touch-target flex flex-1 items-center justify-center gap-2 rounded-lg border border-neutral-800 text-xs text-neutral-400" onclick={() => input?.click()}><Upload size={14} />{locale.t('prompt_studio.import_pack')}</button>
     <input type="file" accept="application/json,.json" bind:this={input} onchange={importFile} class="hidden" />
   </div>
   {#if studio.currentCategory}<button type="button" class="touch-target shrink-0 text-left text-xs text-neutral-500" onclick={() => customCatalog.export(studio.activeCategoryId)}>{locale.t('prompt_studio.export_category_pack')}</button>{/if}
-  {#if error}<p role="alert" class="text-xs text-amber-300">{error}</p>{/if}
+  {#if error}<p role="alert" class="text-xs text-amber-300">{error}</p>{/if}{/if}
 </aside>
 {#if editing !== undefined}<PromptStudioStructure id={editing} onClose={() => editing = undefined} />{/if}
