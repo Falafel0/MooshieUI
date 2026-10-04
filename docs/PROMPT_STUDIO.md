@@ -30,7 +30,7 @@ Prompt chunks are named editable fragments of the document. Saved chunks use Moo
 
 ## Library
 
-Compose prompt browses resources and opens global sets in Build, Mix or Editor. Manage sets edits the shared datasets independently of the working prompt. The four sections are Collections, Tag catalog, Saved sets and Import & export.
+Compose prompt browses resources and adds tags to the shared draft. Shared sets connect through the source pickers in Build, Mix and Editor. Manage sets edits the shared datasets independently of the working prompt. The four sections are Collections, Tag catalog, Saved sets and Import & export.
 
 Global tag sets are reusable datasets. Saved prompts are complete draft snapshots containing tags, details, weights, chunks and literal text. Loading a saved prompt is an explicit undoable replacement of the draft; editing a global set leaves the draft unchanged.
 
@@ -54,4 +54,16 @@ To rebuild supplied data, run `python3 scripts/build-prompt-studio-data.py --man
 
 ## Validation
 
-The release checks frontend compilation, type errors, localization parity, catalog and account boundaries, atomic history, template expansion, source coverage, artist formatting, bitmap indexing, weight conversion, async assistant guards and release artifacts. Browser checks exercise the actual app, collections, editor, draft handoff and narrow layouts. Windows CI validates Rust desktop and server targets. Local checks do not perform a GPU render or contact a configured assistant model.
+Validation checks frontend compilation, type errors, localization parity, catalog and account boundaries, atomic history, template expansion, source coverage, artist formatting, bitmap indexing, weight conversion, async assistant guards and release artifacts. Browser checks exercise the actual app, collections, editor, draft handoff and narrow layouts. Windows CI validates Rust desktop and server targets. Local checks do not perform a GPU render or contact a configured assistant model.
+
+## Display and interaction
+
+Build offers appearance sections, compact tags, cards or lists, supplied thumbnails and color swatches. Display preferences are separate from selected tags. Details show canonical names, aliases and contextual modifiers in a keyboard-accessible modal. Collections keep independent search and category filters; artist membership filters apply only to artists. Loading, failed fetches and empty search results have distinct states.
+
+Mix contains one style library, one blend and one format preview. Randomizing terms preserves slot weights and locked styles; rerolling weights is a separate action. Clear removes unlocked styles. Exclusions have one restore action, and an unchanged mix cannot create a duplicate draft chunk. One chosen style may remain while editing, but adding a blend requires two to six styles.
+
+The draft uses a labeled selector for the main text, chunks and final output. The final output is read-only; chunk names, enabled state, order and content remain editable. Copy and Send operate on the complete prompt. Prefix and suffix affect the selected-tag constructor; manual text remains an explicit override. The inspector shows tag weights, pins, exclusions and contextual modifiers.
+
+Import distinguishes shared tag sets from prompt documents. TXT sets use one tag per line; JSON keeps metadata. New tag sets open for review in the full set editor. Prompt documents open a replacement preview. Saved global datasets and complete saved prompts have separate headings.
+
+Layouts use flexible columns, wrapped controls and 44px minimum action targets. Browser zoom and narrow windows use the same responsive layout; no independent application zoom changes prompt state. The interaction review uses IBM Carbon guidance for filtering and data views, W3C dialog/reflow/text-resizing guidance and Danbooru's separation of canonical names, aliases and tag metadata.

@@ -7,6 +7,7 @@
   import { locale } from '../../stores/locale.svelte.js';
   import { gallery } from '../../stores/gallery.svelte.js';
   import PromptStudioRecipe from './PromptStudioRecipe.svelte';
+  import PromptStudioTagDetails from './PromptStudioTagDetails.svelte';
   import { library } from '../../prompt-studio/library.svelte.js';
   import PromptStudioSend from './PromptStudioSend.svelte';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
@@ -65,7 +66,7 @@
       <button type="button" class="touch-target rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 disabled:opacity-30" disabled={!studio.history.length} aria-label={locale.t('prompt_studio.undo')} title={`${locale.t('prompt_studio.undo')} · Ctrl Z`} onclick={() => studio.undo()}><Undo2 size={17} /></button>
       <button type="button" class="touch-target rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 disabled:opacity-30" disabled={!studio.future.length} aria-label={locale.t('prompt_studio.redo')} title={`${locale.t('prompt_studio.redo')} · Ctrl Shift Z`} onclick={() => studio.redo()}><Redo2 size={17} /></button>
       <button type="button" class="touch-target ml-1 flex items-center gap-2 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 xl:hidden" aria-label={locale.t('prompt_studio.v2.draft')} aria-pressed={workspace.mobileDraft} onclick={() => workspace.mobileDraft = !workspace.mobileDraft}><PanelRight size={16} /><span class="hidden sm:inline">{locale.t('prompt_studio.v2.draft')}</span><span class="tabular-nums">{studio.selected.length}</span></button>
-      <button type="button" class="touch-target ml-2 flex items-center gap-2 rounded-lg bg-amber-400 px-3 text-xs font-semibold text-neutral-950 hover:bg-amber-300 disabled:opacity-35 sm:px-4" disabled={!canSend} onclick={apply}>{locale.t('prompt_studio.v2.send')}<ArrowRight size={16} /></button>
+      <button type="button" class="touch-target ml-2 flex items-center gap-2 rounded-lg bg-amber-400 {workspace.mobileDraft ? 'hidden' : 'xl:hidden'} px-3 text-xs font-semibold text-neutral-950 hover:bg-amber-300 disabled:opacity-35 sm:px-4" disabled={!canSend} onclick={apply}>{locale.t('prompt_studio.v2.send')}<ArrowRight size={16} /></button>
     </div>
   </header>
   <div class="flex shrink-0 items-center border-b border-neutral-800 px-3 sm:px-5">
@@ -75,7 +76,7 @@
         <button type="button" id={`studio-tab-${view.id}`} role="tab" aria-selected={workspace.view === view.id} aria-controls="studio-workspace" tabindex={workspace.view === view.id ? 0 : -1} class="touch-target flex shrink-0 items-center gap-2 border-b-2 px-2 py-3 text-xs font-medium sm:px-4 {workspace.view === view.id ? 'border-amber-400 text-amber-300' : 'border-transparent text-neutral-500 hover:text-neutral-200'}" onclick={() => workspace.setView(view.id)}><span class="hidden sm:block"><Icon size={16} /></span>{locale.t(`prompt_studio.v2.view_${view.id}`)}</button>
       {/each}
     </div>
-    <span class="ml-3 hidden text-[11px] text-neutral-500 sm:inline">{locale.t('prompt_studio.v2.local_draft')}</span>
+    <span class="ml-3 hidden text-xs text-neutral-500 sm:inline">{locale.t('prompt_studio.v2.local_draft')}</span>
   </div>
   {#if studio.storageError || customCatalog.storageError || workspace.storageError}<div role="alert" class="shrink-0 border-b border-amber-700/30 bg-amber-400/5 px-5 py-2 text-xs text-amber-300">{locale.t('prompt_studio.storage_error')}{#if !customCatalog.ready}<button type="button" class="touch-target ml-3 underline" onclick={() => void customCatalog.load()}>{locale.t('prompt_studio.retry')}</button>{/if}</div>{/if}
   <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -98,6 +99,7 @@
   </div>
 </div>
 {#if library.recipePreview}<PromptStudioRecipe />{/if}
+{#if library.inspectedTag}<PromptStudioTagDetails />{/if}
 {#if sending}<PromptStudioSend onCancel={() => sending = false} onDone={() => { sending = false; (onApply ?? onClose)?.(); }} />{/if}
 
 {/key}

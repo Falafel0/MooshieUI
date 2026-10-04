@@ -9,6 +9,7 @@ import { userScopedKey } from '../utils/ipc.js';
 
 export const domainCollection = { character: 'characters', wardrobe: 'wardrobe', scene: 'composition' } as const;
 const key = () => userScopedKey('mooshie.prompt-studio.library.v1');
+export type InspectedTag = { tag: string; name: string; group: string; description?: string; aliases?: string[]; context?: string[]; preview?: string; mode?: StudioKind; groupId?: string; source?: string };
 
 /** One source selection and one cached database for every working view. */
 class StudioLibrary {
@@ -21,13 +22,14 @@ class StudioLibrary {
   newSetDraft = $state.raw<{ name: string; entries: CustomCatalogEntry[] } | undefined>();
   recipePreview = $state<{ name: string; text: string; scope: string } | undefined>();
   recipeLoading = $state(false);
+  inspectedTag = $state<InspectedTag>();
   private recipeRevision = 0;
   private owner = '';
   private requests = new Map<string, Promise<void>>();
   load() {
     const owner = key();
     if (owner === this.owner) return;
-    this.owner = owner; this.editingSet = undefined; this.mixerSet = ''; this.newSetDraft = undefined; this.clearRecipe();
+    this.owner = owner; this.editingSet = undefined; this.mixerSet = ''; this.newSetDraft = undefined; this.inspectedTag = undefined; this.clearRecipe();
     this.sources = { character: 'database', wardrobe: 'database', scene: 'database' };
     try {
       const raw = JSON.parse(localStorage.getItem(owner) ?? '{}');
