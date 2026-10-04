@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
+  import PromptStudioGlobalSets from './PromptStudioGlobalSets.svelte';
   import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { normalizeCatalog } from '../../prompt-studio/catalog-model.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
@@ -7,11 +9,13 @@
   import { locale } from '../../stores/locale.svelte.js';
   import { Upload, Download, Link, FolderOpen, Save, Trash2, X, Check, FileJson } from '@lucide/svelte';
 
-  let { view = 'sources' }: { view?: 'sources' | 'sets' } = $props();
+  let { view = 'sources', management = false }: { view?: 'sources' | 'sets'; management?: boolean } = $props();
   let input = $state<HTMLInputElement>();
-  let url = $state('');
-  let setName = $state('');
-  let query = $state('');
+  const initial = restoreTool('sources', { url: '', setName: '', query: '' });
+  let url = $state(initial.url);
+  let setName = $state(initial.setName);
+  let query = $state(initial.query);
+  $effect(() => { saveTool('sources', { url, setName, query }); });
   let busy = $state(false);
   let error = $state('');
   let result = $state('');
@@ -19,7 +23,6 @@
   let pending = $state<{ snapshot: StudioSnapshotV1; scope: string } | null>(null);
   let request = 0;
   let controller: AbortController | undefined;
-  const MAX_BYTES = 32 * 1024 * 1024;
   const sets = $derived(studio.presets.filter(preset => preset.name.toLowerCase().includes(query.trim().toLowerCase())));
   const replacesSet = $derived(studio.presets.some(preset => preset.name === setName.trim()));
 
@@ -57,7 +60,6 @@
     if (!file) return;
     const operation = start();
     try {
-      if (file.size > MAX_BYTES) throw new Error(locale.t('prompt_studio.v2.source_too_large'));
       const text = await file.text();
       if (!active(operation)) return;
       let raw: unknown;
@@ -78,25 +80,21 @@
     return parsed;
   }
   async function readResponse(response: Response): Promise<string> {
-    if (Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error(locale.t('prompt_studio.v2.source_too_large'));
     if (!response.body) {
       const text = await response.text();
-      if (new TextEncoder().encode(text).length > MAX_BYTES) throw new Error(locale.t('prompt_studio.v2.source_too_large'));
       return text;
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let bytes = 0, text = '';
+    let text = '';
     try {
       while (true) {
         const chunk = await reader.read();
         if (chunk.done) return text + decoder.decode();
-        bytes += chunk.value.byteLength;
-        if (bytes > MAX_BYTES) throw new Error(locale.t('prompt_studio.v2.source_too_large'));
         text += decoder.decode(chunk.value, { stream: true });
       }
     } finally {
-      // Stop oversized streams as well as releasing the reader lock.
+      // Cancel abandoned reads and release the reader lock.
       await reader.cancel().catch(() => undefined); reader.releaseLock();
     }
   }
@@ -124,7 +122,7 @@
     }
   }
   function loadPending() {
-    if (!pending || pending.scope !== customCatalog.scope) { pending = null; return; }
+    if (management || !pending || pending.scope !== customCatalog.scope) { pending = null; return; }
     const name = pending.snapshot.name;
     if (!studio.loadPreset(pending.snapshot)) { error = locale.t('prompt_studio.v2.invalid_source'); return; }
     pending = null; result = locale.t('prompt_studio.v2.set_loaded', { name });
@@ -137,6 +135,7 @@
     setName = '';
   }
   function loadSet(snapshot: StudioSnapshotV1, name: string) {
+    if (management) return;
     error = ''; result = '';
     if (studio.loadPreset(snapshot)) result = locale.t('prompt_studio.v2.set_loaded', { name });
     else error = locale.t('prompt_studio.v2.invalid_source');
@@ -145,6 +144,7 @@
 
 <section class="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950" aria-label={locale.t(view === 'sets' ? 'prompt_studio.v2.saved_sets' : 'prompt_studio.v2.sources')}>
   <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
+    {#if view === 'sets'}<div class="mb-5"><PromptStudioGlobalSets {management} /></div>{/if}
     {#if view === 'sources'}
       <div class="mx-auto flex max-w-2xl flex-col gap-5">
         <header><h3 class="text-sm font-semibold text-neutral-200">{locale.t('prompt_studio.v2.sources_title')}</h3><p class="mt-2 text-xs leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.sources_hint')}</p></header>
@@ -160,7 +160,7 @@
           <p class="mt-3 text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.url_source_hint')}</p>
         </section>
         {#if pending && pending.scope === customCatalog.scope}
-          <section class="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4"><h4 class="flex items-center gap-2 text-xs font-medium text-amber-300"><FileJson size={17} />{pending.snapshot.name}</h4><p class="mt-2 text-xs text-neutral-400">{locale.t('prompt_studio.v2.pending_set', { count: locale.formatInteger(pending.snapshot.selected.length) })}</p>{#if pending.snapshot.rawPrompt}<p class="mt-3 line-clamp-3 break-words rounded-lg bg-neutral-950 p-3 font-mono text-xs text-neutral-400">{pending.snapshot.rawPrompt}</p>{/if}{#each pending.snapshot.groups ?? [] as group}<p class="mt-2 break-words rounded-lg bg-neutral-950 p-3 text-xs text-neutral-400"><strong>{group.name}</strong><span class="mt-1 block line-clamp-3 whitespace-pre-wrap">{group.content}</span></p>{/each}<p class="mt-3 text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.load_set_hint')}</p><div class="mt-3 flex gap-2"><button type="button" class="touch-target rounded-lg bg-amber-400 px-4 text-xs font-medium text-neutral-950" onclick={loadPending}>{locale.t('prompt_studio.v2.load_imported_set')}</button><button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => pending = null}>{locale.t('prompt_studio.v2.cancel')}</button></div></section>
+          <section class="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4"><h4 class="flex items-center gap-2 text-xs font-medium text-amber-300"><FileJson size={17} />{pending.snapshot.name}</h4><p class="mt-2 text-xs text-neutral-400">{locale.t('prompt_studio.v2.pending_set', { count: locale.formatInteger(pending.snapshot.selected.length) })}</p>{#if pending.snapshot.rawPrompt}<p class="mt-3 line-clamp-3 break-words rounded-lg bg-neutral-950 p-3 font-mono text-xs text-neutral-400">{pending.snapshot.rawPrompt}</p>{/if}{#each pending.snapshot.groups ?? [] as group}<p class="mt-2 break-words rounded-lg bg-neutral-950 p-3 text-xs text-neutral-400"><strong>{group.name}</strong><span class="mt-1 block line-clamp-3 whitespace-pre-wrap">{group.content}</span></p>{/each}<p class="mt-3 text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.load_set_hint')}</p><div class="mt-3 flex gap-2"><button type="button" class="touch-target rounded-lg bg-amber-400 px-4 text-xs font-medium text-neutral-950" disabled={management} onclick={loadPending}>{locale.t('prompt_studio.v2.load_imported_set')}</button><button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => pending = null}>{locale.t('prompt_studio.v2.cancel')}</button></div></section>
         {/if}
       </div>
     {:else}
@@ -172,7 +172,7 @@
           <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.load_set_hint')}</p>
           <div class="flex flex-col gap-2">
             {#each sets as preset (preset.name)}
-              <article class="rounded-xl border border-neutral-800 bg-neutral-900 p-3"><div class="mb-2 flex items-center gap-2"><FileJson size={16} class="shrink-0 text-amber-300" /><h4 class="min-w-0 flex-1 truncate text-xs font-medium text-neutral-200">{preset.name}</h4><span class="text-[10px] text-neutral-500">{locale.t('prompt_studio.v2.tag_results', { count: locale.formatInteger(preset.snapshot.selected?.length ?? 0) })}</span></div><div class="flex flex-wrap gap-2">{#if deleting === preset.name}<p class="w-full text-xs text-neutral-400">{locale.t('prompt_studio.v2.delete_set_hint', { name: preset.name })}</p><button type="button" class="touch-target rounded-lg border border-red-900/60 px-3 text-xs text-red-300" onclick={() => { studio.deletePreset(preset.name); deleting = ''; }}>{locale.t('prompt_studio.v2.delete_set')}</button><button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => deleting = ''}>{locale.t('prompt_studio.v2.cancel')}</button>{:else}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-4 text-xs text-neutral-200" onclick={() => loadSet(preset.snapshot, preset.name)}>{locale.t('prompt_studio.v2.load_set')}</button><button type="button" aria-label={locale.t('prompt_studio.v2.export_named', { name: preset.name })} class="touch-target flex items-center gap-2 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-400" onclick={() => studio.exportPreset(preset.name)}><Download size={14} />{locale.t('prompt_studio.v2.export_set')}</button><button type="button" aria-label={locale.t('prompt_studio.v2.delete_named', { name: preset.name })} class="touch-target ml-auto rounded-lg p-3 text-neutral-500 hover:text-red-300" onclick={() => deleting = preset.name}><Trash2 size={15} /></button>{/if}</div></article>
+              <article class="rounded-xl border border-neutral-800 bg-neutral-900 p-3"><div class="mb-2 flex items-center gap-2"><FileJson size={16} class="shrink-0 text-amber-300" /><h4 class="min-w-0 flex-1 truncate text-xs font-medium text-neutral-200">{preset.name}</h4><span class="text-[10px] text-neutral-500">{locale.t('prompt_studio.v2.tag_results', { count: locale.formatInteger(preset.snapshot.selected?.length ?? 0) })}</span></div><div class="flex flex-wrap gap-2">{#if deleting === preset.name}<p class="w-full text-xs text-neutral-400">{locale.t('prompt_studio.v2.delete_set_hint', { name: preset.name })}</p><button type="button" class="touch-target rounded-lg border border-red-900/60 px-3 text-xs text-red-300" onclick={() => { studio.deletePreset(preset.name); deleting = ''; }}>{locale.t('prompt_studio.v2.delete_set')}</button><button type="button" class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => deleting = ''}>{locale.t('prompt_studio.v2.cancel')}</button>{:else}<button type="button" class="touch-target rounded-lg border border-neutral-700 px-4 text-xs text-neutral-200" disabled={management} onclick={() => loadSet(preset.snapshot, preset.name)}>{locale.t('prompt_studio.v2.load_set')}</button><button type="button" aria-label={locale.t('prompt_studio.v2.export_named', { name: preset.name })} class="touch-target flex items-center gap-2 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-400" onclick={() => studio.exportPreset(preset.name)}><Download size={14} />{locale.t('prompt_studio.v2.export_set')}</button><button type="button" aria-label={locale.t('prompt_studio.v2.delete_named', { name: preset.name })} class="touch-target ml-auto rounded-lg p-3 text-neutral-500 hover:text-red-300" onclick={() => deleting = preset.name}><Trash2 size={15} /></button>{/if}</div></article>
             {/each}
           </div>
           {#if !sets.length}<p class="py-5 text-center text-xs text-neutral-500">{locale.t('prompt_studio.v2.no_results_hint')}</p>{/if}

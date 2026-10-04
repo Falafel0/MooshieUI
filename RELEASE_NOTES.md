@@ -1,3 +1,17 @@
+## What's New in v2.3.9-fork.3
+
+### Connected Prompt Studio libraries
+- Build, Mix and Editor now use shared global tag sets. Character, Wardrobe and Scene include the complete databases and collections relevant to each zone, with an optional quick assembly source.
+- Library separates composing from dataset management. Global tag sets and saved prompt snapshots have distinct actions and descriptions.
+- A full-size set editor offers searchable tag metadata, aliases and modifiers, plus bulk JSON/TXT editing. Built-in collections can be copied into editable global sets; selected draft tags can form a new set.
+- Global edits preserve source metadata and do not modify the active prompt. Data imports have no application-imposed file-size or tag-count cap; device memory and storage capacity still apply.
+- Custom tag modifiers are visible and switchable in the draft panel. Mixer includes the complete artist catalog, artist selections and style tags, with independent weight rerolls and artist-prefix formatting.
+- Working sources, mixer terms and weights, filters, open groups, editor input and chunk drafts persist per account. Large groups render only when opened and use pagination; full-database randomization has an explicit detail budget.
+- Reusable prompt fragments consistently use the existing Mooshie chunk library. Shared set actions and redundant transfer/edit controls have been consolidated.
+- Imported template choices and dictionary variables are resolved in an editable preview before adding a chunk. JSON entries without identifiers are normalized safely for metadata editing.
+
+---
+
 ## What's New in v2.3.9-fork.2
 
 ### Rebuilt Prompt Studio

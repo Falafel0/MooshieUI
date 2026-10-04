@@ -2,7 +2,9 @@
   import { onDestroy, untrack } from 'svelte';
   import { FileText, Scale, Sparkles, LoaderCircle, Plus } from '@lucide/svelte';
   import PromptTextarea from '../generation/PromptTextarea.svelte';
+  import PromptStudioDatabase from './PromptStudioDatabase.svelte';
   import PromptStudioConverter from './PromptStudioConverter.svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { promptAssistant } from '../../stores/promptAssistant.svelte.js';
   import { generation } from '../../stores/generation.svelte.js';
@@ -10,20 +12,22 @@
   import { userScopedKey } from '../../utils/ipc.js';
 
   let { active = true }: { active?: boolean } = $props();
-  let view = $state<'text' | 'weights'>('text');
-  let assistantOpen = $state(false);
-  let description = $state('');
-  let length = $state<'short' | 'medium' | 'detailed'>('medium');
-  let result = $state('');
-  let resultScope = $state('');
-  let groupName = $state('');
+  const initial = restoreTool('writing', { view: 'text', assistantOpen: false, description: '', length: 'medium', result: '', resultScope: '', groupName: '', added: false });
+  let view = $state<'text' | 'weights'>(initial.view as 'text' | 'weights');
+  let assistantOpen = $state(initial.assistantOpen);
+  let description = $state(initial.description);
+  let length = $state<'short' | 'medium' | 'detailed'>(initial.length as 'short' | 'medium' | 'detailed');
+  let result = $state(initial.result);
+  let resultScope = $state(initial.resultScope);
+  let groupName = $state(initial.groupName);
   let error = $state('');
-  let added = $state(false);
+  let added = $state(initial.added);
   let composing = $state(false);
   let scope = $state(userScopedKey('mooshie.prompt-studio.writing'));
   let requestRevision = 0;
   let mounted = true;
 
+  $effect(() => { saveTool('writing', { view, assistantOpen, description, length, result, resultScope, groupName, added }); });
   function resetAssistant() {
     requestRevision += 1;
     composing = false;
@@ -131,6 +135,7 @@
 
   <div class:hidden={view !== 'weights'} class="min-h-0 flex-1 overflow-y-auto overscroll-contain"><PromptStudioConverter /></div>
     <div class:hidden={view !== 'text'} class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-5">
+      <PromptStudioDatabase />
       <div>
         <h2 class="text-base font-medium text-neutral-100">{locale.t('prompt_studio.v2.writing_title')}</h2>
         <p class="mt-1 text-sm leading-relaxed text-neutral-400">{locale.t('prompt_studio.v2.writing_hint')}</p>
@@ -174,7 +179,7 @@
                 <textarea bind:value={result} rows="5" class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm leading-relaxed text-neutral-200 outline-none focus:border-amber-400"></textarea>
               </label>
               <div class="flex flex-wrap items-end gap-3">
-                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.group_name')}</span><input bind:value={groupName} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-amber-400" /></label>
+                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.library.chunk_name')}</span><input bind:value={groupName} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-amber-400" /></label>
                 <button type="button" disabled={!result.trim() || !groupName.trim()} class="touch-target flex items-center gap-2 rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 hover:bg-amber-300 disabled:opacity-40" onclick={addResult}><Plus size={15} />{locale.t('prompt_studio.v2.ai_add_group')}</button>
               </div>
             </div>

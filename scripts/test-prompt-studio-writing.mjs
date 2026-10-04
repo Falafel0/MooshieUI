@@ -23,6 +23,7 @@ const assistant = {
   },
 };
 const boundaries = {
+  '../../prompt-studio/tool-state.js': { restoreTool: (_name, defaults) => defaults, saveTool() {} },
   svelte: { onDestroy: callback => destroys.push(callback), untrack: callback => callback() },
   '../../prompt-studio/studio.svelte.js': { studio: { selected: [], groups: [], rawPrompt: undefined, addGroup: (name, content) => groups.push({ name, content }) } },
   '../../stores/promptAssistant.svelte.js': { promptAssistant: assistant },

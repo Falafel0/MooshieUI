@@ -1,6 +1,8 @@
+import type { CollectionEntry } from './collections.js';
 /** User-authored catalog. There are no built-in categories or tag recipes. */
-export type CatalogCategory = { id: string; name: string; icon: string; subs: { id: string; name: string }[] };
-export type CustomCatalogEntry = { id: string; name: string; tag: string; subId: string; preview?: string; description?: string; aliases?: string[]; contextualTags?: string[] };
+export type CatalogDomain = 'character' | 'wardrobe' | 'scene';
+export type CatalogCategory = { domains?: CatalogDomain[]; id: string; name: string; icon: string; subs: { id: string; name: string }[] };
+export type CustomCatalogEntry = { collectionData?: CollectionEntry; id: string; name: string; tag: string; subId: string; preview?: string; description?: string; aliases?: string[]; contextualTags?: string[] };
 export type CatalogData = { categories: CatalogCategory[]; entries: CustomCatalogEntry[] };
 
 export function normalizeEntries(value: unknown): CustomCatalogEntry[] {
@@ -17,6 +19,7 @@ export function normalizeEntries(value: unknown): CustomCatalogEntry[] {
     ids.add(id);
     rows.set(key, {
       id, tag, subId,
+      collectionData: raw.collectionData && typeof raw.collectionData === 'object' && typeof raw.collectionData.tag === 'string' ? raw.collectionData : previous?.collectionData,
       name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : tag.replaceAll('_', ' '),
       preview: typeof raw.preview === 'string' && raw.preview.length <= 400000 && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(raw.preview) ? raw.preview : previous?.preview,
       contextualTags: Array.isArray(raw.contextualTags) ? [...new Set<string>(raw.contextualTags.filter((v: unknown): v is string => typeof v === 'string' && !!v.trim()).map((v: string) => v.trim()))] : previous?.contextualTags,
@@ -36,7 +39,7 @@ export function normalizeCatalog(value: unknown): CatalogData {
     for (const raw of data.categories) {
       if (!raw || typeof raw.id !== 'string' || !raw.id.trim() || typeof raw.name !== 'string' || !raw.name.trim() || ids.has(raw.id.trim())) continue;
       ids.add(raw.id.trim());
-      categories.push({ id: raw.id.trim(), name: raw.name.trim(), icon: typeof raw.icon === 'string' ? raw.icon : 'sparkles', subs: [] });
+      categories.push({ id: raw.id.trim(), name: raw.name.trim(), icon: typeof raw.icon === 'string' ? raw.icon : 'sparkles', domains: Array.isArray(raw.domains) ? [...new Set(raw.domains.filter(domain => ['character', 'wardrobe', 'scene'].includes(domain)))] : undefined, subs: [] });
     }
     for (const category of categories) {
       const raw = data.categories.find(row => typeof row?.id === 'string' && row.id.trim() === category.id);
@@ -53,4 +56,19 @@ export function normalizeCatalog(value: unknown): CatalogData {
     categories.push({ id: entry.subId, name: entry.subId.replaceAll('_', ' '), icon: 'sparkles', subs: [] });
   }
   return { categories, entries };
+}
+
+/** JSON preserves all metadata; TXT is one complete tag per line. No data-size cap. */
+export function parseGlobalSet(text: string, format: 'json' | 'txt', subId: string, baseline: CustomCatalogEntry[] = []): CustomCatalogEntry[] {
+  if (format === 'json') {
+    const data = JSON.parse(text);
+    const rows: unknown = Array.isArray(data) ? data : data?.entries;
+    if (!Array.isArray(rows) || rows.some(row => !row || typeof row.tag !== 'string' || !row.tag.trim())) throw new Error('Invalid set entries');
+    const fallback = subId || '__new_set__';
+    return normalizeEntries(rows.map(row => ({ ...row, subId: typeof row.subId === 'string' && row.subId.trim() ? row.subId : fallback })))
+      .map(row => !subId && row.subId === fallback ? { ...row, subId: '' } : row);
+  }
+  const existing = new Map(baseline.map(row => [row.tag, row]));
+  const tags = [...new Set(text.split(/\r?\n/).map(line => line.trim()).filter(Boolean))];
+  return tags.map(tag => existing.get(tag) ?? { id: crypto.randomUUID(), tag, name: tag.replaceAll('_', ' '), subId });
 }

@@ -1,11 +1,17 @@
 <script lang="ts">
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
+  import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
+  import { library } from '../../prompt-studio/library.svelte.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
   import PromptStudioPromptArea from './PromptStudioPromptArea.svelte';
   import { Ban, Pin, PinOff, X, ListFilter } from '@lucide/svelte';
   let { onApply, onCopy }: { onApply: () => void; onCopy: () => void } = $props();
-  let showTags = $state(false);
-  let query = $state('');
+  const initial = restoreTool('draft-inspector', { showTags: true, query: '' });
+  let showTags = $state(initial.showTags);
+  let query = $state(initial.query);
+  $effect(() => { saveTool('draft-inspector', { showTags, query }); });
+  const suppliedTags = $derived.by(() => { const index = new Map(); for (const id of ['characters', 'wardrobe', 'composition']) for (const row of library.databases[id] ?? []) if (row.context?.length) index.set(row.tag, row); return index; });
   const selected = $derived(studio.selected.filter(item => `${item.name} ${item.tag}`.toLowerCase().includes(query.toLowerCase())));
 </script>
 <aside class="flex h-full min-h-0 flex-col bg-neutral-900/30" aria-label={locale.t('prompt_studio.v2.draft')}>
@@ -27,8 +33,12 @@
       <div class="mt-2 flex items-center gap-2"><input type="search" class="touch-target min-w-0 flex-1 rounded-lg border border-neutral-800 bg-neutral-950 px-3 text-xs text-neutral-300" aria-label={locale.t('prompt_studio.v2.search_selected')} placeholder={locale.t('prompt_studio.v2.search_selected')} bind:value={query} /><button type="button" class="touch-target px-2 text-xs text-neutral-500 disabled:opacity-30" disabled={!studio.selected.length} onclick={() => studio.clear()}>{locale.t('prompt_studio.reset')}</button></div>
       <p class="my-2 text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.v2.pin_hint')}</p>
       {#each selected as item (item.tag)}
+        {@const authored = customCatalog.entries.find(row => row.tag === item.tag && row.subId === item.category)}
+        {@const supplied = suppliedTags.get(item.tag)}
+        {@const modifiers = [...new Set([...(authored?.contextualTags ?? supplied?.context ?? []), ...studio.detail(item.tag).mods])]}
         <div class="mb-2 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2">
           <div class="flex items-start gap-2"><div class="min-w-0 flex-1"><p class="break-words text-xs text-neutral-200">{item.name}</p>{#if item.name !== item.tag}<p class="mt-0.5 truncate text-[10px] text-neutral-600" title={item.tag}>{item.tag}</p>{/if}</div><button type="button" class="touch-target -mr-2 -mt-2 shrink-0 rounded-lg p-2 text-neutral-500 hover:text-neutral-200" aria-label={`${locale.t('prompt_studio.remove_tag')}: ${item.name}`} onclick={() => studio.remove(item.tag)}><X size={14} /></button></div>
+          {#if modifiers.length}<div class="mt-2 rounded-lg border border-neutral-800 p-2"><p class="mb-1 text-[11px] text-neutral-500">{locale.t('prompt_studio.contextual_tags')}</p><div class="flex flex-wrap gap-1">{#each modifiers as modifier (modifier)}<button type="button" aria-pressed={studio.detail(item.tag).mods.includes(modifier)} class="touch-target break-words rounded-lg border px-2 text-xs {studio.detail(item.tag).mods.includes(modifier) ? 'border-amber-400/50 bg-amber-400/10 text-amber-300' : 'border-neutral-700 text-neutral-400'}" onclick={() => studio.toggleModifier(item.tag, modifier)}>{modifier}</button>{/each}</div></div>{/if}
           <div class="mt-1 flex items-center gap-2">
             <label class="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-neutral-500">{locale.t('prompt_studio.weight')}<input type="number" min="0.1" max="2" step="0.05" value={item.weight} onchange={event => studio.weight(item.tag, Number(event.currentTarget.value))} class="h-8 w-20 rounded-md border border-neutral-800 bg-neutral-900 px-2 text-xs tabular-nums text-neutral-200" /></label>
             <button type="button" aria-pressed={studio.pinned.includes(item.tag)} aria-label={`${locale.t('prompt_studio.v2.pin')}: ${item.name}`} title={locale.t('prompt_studio.v2.pin')} class="touch-target rounded-lg p-2 {studio.pinned.includes(item.tag) ? 'text-amber-300' : 'text-neutral-500'}" onclick={() => studio.pin(item.tag)}>{#if studio.pinned.includes(item.tag)}<PinOff size={14} />{:else}<Pin size={14} />{/if}</button>

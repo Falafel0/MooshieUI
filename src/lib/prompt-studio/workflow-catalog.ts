@@ -1,10 +1,11 @@
 import type { Choice } from './studio.svelte.js';
 import type { StudioKind } from './presets.js';
 
-export type WorkflowOption = { tag: string; labelKey: string };
+export type WorkflowOption = { tag: string; labelKey: string; name?: string };
 export type WorkflowGroup = {
   id: string;
   labelKey: string;
+  name?: string;
   mode: StudioKind;
   multi?: boolean;
   optional?: boolean;
@@ -129,6 +130,7 @@ export type RandomizeOptions = {
   pinned: readonly string[];
   banned: readonly string[];
   random?: () => number;
+  freshLimit?: number;
 };
 
 /** Produces replacements only for unlocked groups; no store or browser dependencies. */
@@ -136,6 +138,11 @@ export function randomizeWorkflow(selected: readonly Choice[], groups: readonly 
   const random = options.random ?? Math.random;
   const targets = groups.filter(group => !options.locked.includes(group.id));
   const categories = targets.map(group => group.id);
+  if (options.freshLimit !== undefined) for (let i = targets.length - 1; i > 0; i--) {
+    const j = Math.min(i, Math.max(0, Math.floor(random() * (i + 1))));
+    [targets[i], targets[j]] = [targets[j], targets[i]];
+  }
+  let remaining = options.freshLimit === undefined ? Infinity : Math.max(0, Math.floor(options.freshLimit));
   const targetIds = new Set(categories);
   const pinned = selected.filter(choice => targetIds.has(choice.category) && options.pinned.includes(choice.tag));
   const used = new Set(selected.filter(choice => !targetIds.has(choice.category)).map(choice => choice.tag));
@@ -149,10 +156,10 @@ export function randomizeWorkflow(selected: readonly Choice[], groups: readonly 
     if (!group.multi && kept.length) continue;
     const available = group.options.filter(option => option.tag && !used.has(option.tag) && !options.banned.includes(option.tag));
     if (!available.length || (group.optional && !kept.length && random() < 0.25)) continue;
-    const count = group.multi ? Math.min(available.length, Math.max(0, 2 - kept.length)) : 1;
+    const count = Math.min(remaining, group.multi ? Math.min(available.length, Math.max(0, 2 - kept.length)) : 1);
     for (let index = 0; index < count && available.length; index++) {
       const [option] = available.splice(pick(available.length), 1);
-      used.add(option.tag);
+      used.add(option.tag); remaining--;
       entries.push({ tag: option.tag, name: option.tag.replaceAll('_', ' '), category: group.id, weight: 1 });
     }
   }

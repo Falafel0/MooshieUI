@@ -198,7 +198,6 @@ export function downloadSnapshot(snapshot: StudioSnapshotV1): void {
 }
 
 export async function readSnapshotFile(file: File): Promise<unknown> {
-  if (file.size > 5 * 1024 * 1024) throw new Error('Preset file exceeds 5 MB');
   const text = await file.text();
   return /\.txt$/i.test(file.name) ? { name: file.name.replace(/\.txt$/i, ''), rawPrompt: text } : JSON.parse(text);
 }

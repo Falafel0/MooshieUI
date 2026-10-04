@@ -11,7 +11,7 @@ export function resolveTemplate(input: string, dictionaries: Dictionaries, rando
     if (next === text) break;
     text = next;
   }
-  return { text: text.replace(/,\s*,/g, ',').trim(), unresolved: /(?<!\\)\{(?:@|[^{}]*\|)/.test(text) };
+  return { text: text.replace(/,\s*,/g, ',').trim(), unresolved: hasTemplateVariables(text) };
 }
 export function artistPrompt(tag: string, prefix: boolean): string {
   return `${prefix ? '@' : ''}${tag.replace(/[()[\]{}]/g, '\\$&')}`;
@@ -56,4 +56,8 @@ export function wardrobeCompatibility(data: Relations, tag: string, selected: st
     if (level) result.push({ other, level, score, worlds: wa >= 0 && wb >= 0 ? [data.worlds.worlds[wa], data.worlds.worlds[wb]] : undefined });
   }
   return result;
+}
+
+export function hasTemplateVariables(text: string): boolean {
+  return /(?<!\\)\{(?:@|[^{}]*\|)/.test(text);
 }
