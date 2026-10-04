@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { tagMatches } from '../../prompt-studio/tag-presentation.js';
+  import { tagPreviews } from '../../prompt-studio/tag-previews.svelte.js';
+  import PromptStudioTagVisual from './PromptStudioTagVisual.svelte';
   import { hasTemplateVariables } from '../../prompt-studio/collection-tools.js';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { untrack } from 'svelte';
@@ -7,7 +10,7 @@
   import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
   import PromptStudioStructure from './PromptStudioStructure.svelte';
-  import { Plus, Search, List, Grid2X2, Image, Check, Settings2, Library, ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { Plus, Search, List, Grid2X2, Image, Check, Settings2, Library, ChevronLeft, ChevronRight, Info } from '@lucide/svelte';
   let { management = false }: { management?: boolean } = $props();
   const initial = restoreTool('catalog', { query: '', list: false, images: true, size: 180, selectedOnly: false, page: 0 });
   let query = $state(initial.query);
@@ -20,9 +23,9 @@
   let viewport = $state<HTMLDivElement>();
   let structure = $state<{ id?: string; categoryId?: string } | undefined>();
   const category = $derived(studio.currentCategory);
-  const entries = $derived(customCatalog.entries.filter(entry => entry.subId === studio.activeSubId
+  const entries = $derived(customCatalog.entries.filter(entry => (entry.subId === studio.activeSubId || (studio.activeSubId === category?.id && category.subs.some(sub => sub.id === entry.subId)))
     && (!selectedOnly || studio.isChosen(entry.tag))
-    && [entry.name, entry.tag, entry.description, ...(entry.aliases ?? []), ...(entry.contextualTags ?? [])].join(' ').toLowerCase().includes(query.trim().toLowerCase())));
+    && tagMatches(entry, query)));
   const pageCount = $derived(Math.max(1, Math.ceil(entries.length / PAGE_SIZE)));
   const currentPage = $derived(Math.min(page, pageCount - 1));
   const visibleEntries = $derived(entries.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE));
@@ -36,12 +39,13 @@
     untrack(() => viewport?.scrollTo({ top: 0 }));
   });
   $effect(() => { saveTool('catalog', { query, list, images, size, selectedOnly, page }); });
+  $effect(() => { void tagPreviews.load(); });
   function add() { studio.catalogEntryId = 'new'; }
 </script>
 <section class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950" aria-label={locale.t('prompt_studio.v2.catalog')}>
   {#if category}
     <nav aria-label={locale.t('prompt_studio.v2.subcategories')} class="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-neutral-800 p-3">
-      <button type="button" aria-pressed={studio.activeSubId === category.id} class="touch-target shrink-0 rounded-lg px-3 text-xs {studio.activeSubId === category.id ? 'bg-amber-400 font-medium text-neutral-950' : 'bg-neutral-900 text-neutral-400'}" onclick={() => studio.selectSub(category.id)}>{category.name}</button>
+      <button type="button" aria-pressed={studio.activeSubId === category.id} class="touch-target shrink-0 rounded-lg px-3 text-xs {studio.activeSubId === category.id ? 'bg-amber-400 font-medium text-neutral-950' : 'bg-neutral-900 text-neutral-400'}" onclick={() => studio.selectSub(category.id)}>{locale.t('prompt_studio.polish.all_tags')}</button>
       {#each category.subs as sub (sub.id)}
         <div class="flex shrink-0 items-center rounded-lg {studio.activeSubId === sub.id ? 'bg-amber-400 text-neutral-950' : 'bg-neutral-900 text-neutral-400'}">
           <button type="button" aria-pressed={studio.activeSubId === sub.id} class="touch-target px-3 text-xs" onclick={() => studio.selectSub(sub.id)}>{sub.name}</button>
@@ -62,7 +66,7 @@
   </div>
   <div class="flex shrink-0 items-center gap-3 border-b border-neutral-800 px-3 pb-3">
     <button type="button" aria-pressed={selectedOnly} class="touch-target flex items-center gap-2 rounded-lg border px-3 text-xs {selectedOnly ? 'border-amber-400/50 bg-amber-400/10 text-amber-300' : 'border-neutral-800 text-neutral-400'}" onclick={() => selectedOnly = !selectedOnly}><Check size={14} />{locale.t('prompt_studio.v2.selected_only')}</button>
-    <span class="ml-auto text-[11px] text-neutral-500">{locale.t('prompt_studio.v2.tag_results', { count: locale.formatInteger(entries.length) })}</span>
+    <span class="ml-auto text-xs text-neutral-500">{locale.t('prompt_studio.v2.tag_results', { count: locale.formatInteger(entries.length) })}</span>
     {#if !list}<input type="range" min="140" max="260" step="20" bind:value={size} aria-label={locale.t('prompt_studio.v2.card_size')} class="w-16 accent-amber-400" />{/if}
   </div>
   <div bind:this={viewport} class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
@@ -78,11 +82,11 @@
           {@const selected = studio.isChosen(entry.tag)}
           <article class="group relative flex min-w-0 overflow-hidden rounded-xl border transition-colors {list ? 'items-stretch' : 'flex-col'} {selected ? 'border-amber-400/70 bg-amber-400/5 ring-1 ring-amber-400/15' : 'border-neutral-800 bg-neutral-900 hover:border-neutral-600'}">
             <button type="button" aria-pressed={selected} aria-label={locale.t(management ? 'prompt_studio.v2.edit_named' : selected ? 'prompt_studio.v2.remove_named' : 'prompt_studio.v2.select_named', { name: entry.name })} class="min-w-0 flex-1 text-left {list ? 'flex items-center gap-3 p-3 pr-14' : 'pb-3'}" onclick={() => { if (management) studio.catalogEntryId = entry.id; else if (hasTemplateVariables(entry.tag)) void library.previewRecipe(entry.name, entry.tag); else studio.choose(entry.tag, entry.name, entry.subId); }}>
-              {#if images && entry.preview}<img src={entry.preview} alt="" loading="lazy" class="object-cover {list ? 'h-16 w-20 shrink-0 rounded-lg' : 'h-28 w-full'}" />{:else if images}<div class="flex items-center justify-center bg-neutral-800/30 text-neutral-600 {list ? 'h-16 w-20 shrink-0 rounded-lg' : 'h-28'}"><Image size={23} /></div>{/if}
-              <span class="block min-w-0 {list ? 'flex-1' : 'px-3 pt-3'}"><span class="block truncate pr-7 text-xs font-medium text-neutral-200">{entry.name}</span><span class="mt-1 block truncate font-mono text-[10px] text-neutral-500" title={entry.tag}>{entry.tag}</span>{#if entry.description}<span class="mt-2 line-clamp-2 text-[11px] leading-relaxed text-neutral-400">{entry.description}</span>{/if}{#if entry.contextualTags?.length}<span class="mt-2 inline-block rounded-md bg-neutral-800/60 px-1.5 py-1 text-[10px] text-neutral-400">{locale.t('prompt_studio.v2.modifier_count', { count: locale.formatInteger(entry.contextualTags.length) })}</span>{/if}</span>
+              {#if images}<span class="flex items-center justify-center bg-neutral-800/30 {list ? 'h-20 w-20 shrink-0 rounded-lg' : 'h-28'}"><PromptStudioTagVisual tag={entry.tag} preview={entry.preview} group={entry.collectionData?.group} large={true} /></span>{/if}
+              <span class="block min-w-0 {list ? 'flex-1' : 'px-3 pt-3'}"><span class="block break-words pr-7 text-xs font-medium text-neutral-200">{entry.name}</span><span class="mt-1 block break-words font-mono text-xs text-neutral-500" title={entry.tag}>{entry.tag}</span>{#if entry.description}<span class="mt-2 line-clamp-2 text-xs leading-relaxed text-neutral-400">{entry.description}</span>{/if}{#if entry.contextualTags?.length}<span class="mt-2 inline-block rounded-md bg-neutral-800/60 px-1.5 py-1 text-xs text-neutral-400">{locale.t('prompt_studio.v2.modifier_count', { count: locale.formatInteger(entry.contextualTags.length) })}</span>{/if}</span>
             </button>
             {#if selected}<span aria-hidden="true" class="pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-neutral-950"><Check size={14} /></span>{/if}
-
+            {#if !management}<button type="button" class="touch-target absolute right-1 top-1 flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/90 text-neutral-400 hover:text-neutral-100" aria-label={`${locale.t('prompt_studio.polish.tag_details')}: ${entry.name}`} onclick={() => library.inspectedTag = { tag: entry.tag, name: entry.name, group: entry.subId, description: entry.description, aliases: entry.aliases, context: entry.contextualTags, preview: entry.preview }}><Info size={16} /></button>{/if}
           </article>
         {/each}
       </div>
@@ -90,7 +94,7 @@
   </div>
   {#if customCatalog.ready && category && entries.length > PAGE_SIZE}
     <nav aria-label={locale.t('prompt_studio.v2.catalog_pagination')} class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-neutral-800 p-3">
-      <p aria-live="polite" aria-atomic="true" class="text-[11px] tabular-nums text-neutral-500">{locale.t('prompt_studio.v2.catalog_page_range', { start: locale.formatInteger(currentPage * PAGE_SIZE + 1), end: locale.formatInteger(Math.min((currentPage + 1) * PAGE_SIZE, entries.length)), total: locale.formatInteger(entries.length) })}</p>
+      <p aria-live="polite" aria-atomic="true" class="text-xs tabular-nums text-neutral-500">{locale.t('prompt_studio.v2.catalog_page_range', { start: locale.formatInteger(currentPage * PAGE_SIZE + 1), end: locale.formatInteger(Math.min((currentPage + 1) * PAGE_SIZE, entries.length)), total: locale.formatInteger(entries.length) })}</p>
       <div class="flex items-center gap-2">
         <button type="button" disabled={currentPage === 0} class="touch-target flex items-center gap-1 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-300 hover:border-neutral-600 disabled:opacity-35" onclick={() => page = currentPage - 1}><ChevronLeft size={15} />{locale.t('prompt_studio.v2.catalog_previous_page')}</button>
         <button type="button" disabled={currentPage === pageCount - 1} class="touch-target flex items-center gap-1 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-300 hover:border-neutral-600 disabled:opacity-35" onclick={() => page = currentPage + 1}>{locale.t('prompt_studio.v2.catalog_next_page')}<ChevronRight size={15} /></button>

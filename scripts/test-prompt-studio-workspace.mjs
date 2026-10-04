@@ -230,3 +230,26 @@ assert.equal(isolatedCatalog.ready, true);
 assert.equal(isolatedCatalog.storageError, false);
 userScope = '';
 console.log('IndexedDB account switches reject stale reads, scope queued writes, repair duplicates and allow retry.');
+
+// Workspace navigation and draft part preferences migrate without changing content.
+const { workspace } = load('src/lib/prompt-studio/workspace.svelte.ts');
+userScope = ':preferences';
+storage.set('mooshie.prompt-studio.tool.library.v1' + userScope, JSON.stringify({ tab: 'sets', management: true }));
+storage.set('mooshie.prompt-studio.tool.prompt-panel.v1' + userScope, JSON.stringify({ active: 'output' }));
+workspace.load();
+assert.equal(workspace.librarySection, 'sets');
+assert.equal(workspace.libraryManagement, true);
+assert.equal(workspace.draftPart, 'chunk:output', 'Old chunk IDs never collide with the output selector');
+workspace.setDraftPart('output'); workspace.setLibrarySection('sources'); workspace.setLibraryManagement(false);
+const preferences = JSON.parse(storage.get('mooshie.prompt-studio.workspace.v2' + userScope));
+assert.equal(preferences.draftPart, 'output'); assert.equal(preferences.librarySection, 'sources');
+userScope = ':other-preferences'; workspace.load();
+assert.equal(workspace.draftPart, 'base'); assert.equal(workspace.librarySection, 'collections');
+userScope = ':preferences';
+storage.set('mooshie.prompt-studio.tool.library.v1' + userScope, '{broken');
+storage.set('mooshie.prompt-studio.tool.prompt-panel.v1' + userScope, 'null');
+workspace.load();
+assert.equal(workspace.librarySection, 'sources'); assert.equal(workspace.draftPart, 'output');
+assert.equal(workspace.storageError, false, 'Corrupt retired preferences cannot prevent current preferences loading');
+userScope = '';
+console.log('Workspace section, management and draft-part preferences persist, migrate and remain isolated by account.');
