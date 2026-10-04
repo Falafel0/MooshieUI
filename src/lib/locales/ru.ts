@@ -1,5 +1,11 @@
 /** Russian translations. */
 const ru: Record<string, string> = {
+  "prompt_studio.library.recipe_review": "Проверить шаблон",
+  "prompt_studio.library.import_chunks": "Импорт чанков промпта",
+  "prompt_studio.library.chunk_separator": "Разделять чанки по",
+  "prompt_studio.library.chunk_name": "Чанк промпта",
+  "prompt_studio.library.import_chunks_hint": "Вставьте промпт или загрузите TXT. Разделяйте чанки пустыми строками, заголовками или по одному чанку в строке. Запятые и выражения расписания сохраняются.",
+
   "prompt_studio.library.new_detail_limit": "Максимум новых деталей при случайной сборке",
   "prompt_studio.library.from_draft": "Собрать теги черновика в набор",
   "prompt_studio.library.weight_randomization": "Случайные веса",
@@ -725,9 +731,9 @@ const ru: Record<string, string> = {
   "prompt_studio.save_catalogue": "Сохранить отфильтрованный каталог",
   "prompt_studio.add_saved_results": "Добавить найденное в черновик",
   "prompt_studio.saved_empty": "Нет сохранённых результатов. Сохраняйте теги и наборы в браузере источников.",
-  "prompt_studio.import_blocks": "Импорт чанков промпта",
+  "prompt_studio.import_blocks": "Импорт блоков промпта",
   "prompt_studio.import_blocks_hint": "Вставьте промпт или загрузите текстовый файл. Разделяйте блоки пустыми строками, отдельными строками или заголовками # Персонаж. Заголовки сохраняют многострочное содержимое вместе. Запятые и выражения scheduling не разделяются. Существующие блоки сохраняются.",
-  "prompt_studio.block_separator": "Разделять чанки по",
+  "prompt_studio.block_separator": "Разделять блоки по",
   "prompt_studio.block_paragraphs": "Пустым строкам / заголовкам",
   "prompt_studio.block_lines": "Каждой строке / заголовкам",
   "prompt_studio.send_as_blocks": "Вставить отдельными именованными чанками промпта",
@@ -758,7 +764,7 @@ const ru: Record<string, string> = {
   "prompt_studio.anima_composer_hint": "Воспроизводимые сочетания художников, персонажей, одежды и сцен с помощью seed.",
   "prompt_studio.anima_mixer_hint": "Настройка смешивания художников из активных стилей через ноды Anima.",
   "prompt_studio.prompt_groups": "Чанки промпта",
-  "prompt_studio.group_name": "Чанк промпта",
+  "prompt_studio.group_name": "Новая группа",
   "prompt_studio.group_enabled": "Включать в результат",
   "prompt_studio.group_up": "Переместить группу выше",
   "prompt_studio.group_down": "Переместить группу ниже",

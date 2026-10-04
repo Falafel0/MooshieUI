@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, Copy, Lock, Palette, Plus, Shuffle, Unlock, X } from '@lucide/svelte';
   import { library } from '../../prompt-studio/library.svelte.js';
-  import { artistPrompt } from '../../prompt-studio/collection-tools.js';
+  import { artistPrompt, hasTemplateVariables } from '../../prompt-studio/collection-tools.js';
   import { collectionIndex } from '../../prompt-studio/collections.js';
   import PromptStudioDatabase from './PromptStudioDatabase.svelte';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
@@ -39,8 +39,9 @@
     { id: 'backlight', tag: 'backlighting, glowing silhouette', family: 'light', key: 'backlight' },
     { id: 'studio', tag: 'studio lighting, softbox illumination', family: 'light', key: 'studio' },
   ];
-  const initial = restoreTool('mixer', { choices: [curated[0], curated[8], curated[16]].map((item, index) => ({ ...item, weight: [1, 0.85, 1.1][index], locked: false })), excluded: [] as StyleOption[], family: 'all', bucket: '', query: '', count: 3, format: 'sd', groupName: '', page: 0, artistSet: -1, artistPrefix: false, minWeight: 0.6, maxWeight: 1.3 });
+  const initial = restoreTool('mixer', { choices: [curated[0], curated[8], curated[16]].map((item, index) => ({ ...item, weight: [1, 0.85, 1.1][index], locked: false })), excluded: [] as StyleOption[], family: 'all', bucket: '', query: '', count: 3, format: 'sd', groupName: '', page: 0, artistSet: -1, advanced: false, artistPrefix: false, minWeight: 0.6, maxWeight: 1.3 });
   let choices = $state<StyleChoice[]>(initial.choices.filter(item => item && typeof item.tag === 'string' && Number.isFinite(item.weight)));
+  let advanced = $state(initial.advanced);
   let artistPrefix = $state(initial.artistPrefix), minWeight = $state(initial.minWeight), maxWeight = $state(initial.maxWeight);
   let artistSet = $state(initial.artistSet);
   let page = $state(initial.page);
@@ -65,7 +66,7 @@
   const visible = $derived(options.filter(item => `${name(item)} ${item.tag}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
   const currentPage = $derived(Math.min(page, Math.max(0, Math.ceil(visible.length / 60) - 1)));
   $effect(() => { if (family === 'artists') void library.fetch('artists'); if (family === 'style' || family === 'all') { void library.fetch('generation-styles'); void library.fetch('composition'); } });
-  $effect(() => { saveTool('mixer', { choices, excluded, family, bucket, query, count, format, groupName, page, artistSet, artistPrefix, minWeight, maxWeight }); });
+  $effect(() => { saveTool('mixer', { choices, excluded, family, bucket, query, count, format, groupName, page, artistSet, artistPrefix, minWeight, maxWeight, advanced }); });
   const lockedCount = $derived(choices.filter(item => item.locked).length);
   const pool = $derived(options.filter(item => !excluded.some(value => value.tag === item.tag) && !choices.some(value => value.locked && value.tag === item.tag)));
   const canShuffle = $derived(lockedCount < count && new Set(pool.map(item => item.tag)).size >= count - lockedCount);
@@ -137,6 +138,7 @@
   }
   function add() {
     if (choices.length < 2 || choices.length > 6) return;
+    if (hasTemplateVariables(output)) { void library.previewRecipe(groupName.trim() || locale.t('prompt_studio.v2.mixer.group_name'), output); return; }
     studio.addGroup(groupName.trim() || locale.t('prompt_studio.v2.mixer.group_name'), output);
     feedback = locale.t('prompt_studio.v2.tools.group_added'); failed = false;
   }
@@ -193,7 +195,7 @@
           <label class="text-xs text-neutral-400">{locale.t('prompt_studio.v2.mixer.count')}<select value={count} onchange={event => changeCount(Number(event.currentTarget.value))} class="touch-target mt-2 block min-w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200">{#each [2, 3, 4, 5, 6] as value}<option value={value} disabled={value < lockedCount}>{value}</option>{/each}</select></label>
           <button type="button" disabled={!canShuffle} class="touch-target flex items-center gap-2 rounded-lg border border-neutral-700 px-4 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-40" onclick={shuffle}><Shuffle size={15} />{locale.t('prompt_studio.v2.mixer.shuffle')}</button>
         </div>
-        <details class="mt-3 rounded-xl border border-neutral-800 p-3"><summary class="touch-target cursor-pointer text-xs text-neutral-400">{locale.t('prompt_studio.library.weight_randomization')}</summary><div class="mt-2 flex flex-wrap items-end gap-2"><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.min_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={minWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.max_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={maxWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><button type="button" disabled={choices.every(item => item.locked) || !Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || minWeight < .1 || maxWeight > 2 || minWeight > maxWeight} onclick={rerollWeights} class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 disabled:opacity-30">{locale.t('prompt_studio.library.reroll_weights')}</button></div></details>
+        <details open={advanced} ontoggle={event => advanced = event.currentTarget.open} class="mt-3 rounded-xl border border-neutral-800 p-3"><summary class="touch-target cursor-pointer text-xs text-neutral-400">{locale.t('prompt_studio.library.weight_randomization')}</summary><div class="mt-2 flex flex-wrap items-end gap-2"><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.min_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={minWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><label class="text-xs text-neutral-400">{locale.t('prompt_studio.library.max_weight')}<input type="number" min="0.1" max="2" step="0.05" bind:value={maxWeight} class="touch-target mt-1 block w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2" /></label><button type="button" disabled={choices.every(item => item.locked) || !Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || minWeight < .1 || maxWeight > 2 || minWeight > maxWeight} onclick={rerollWeights} class="touch-target rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 disabled:opacity-30">{locale.t('prompt_studio.library.reroll_weights')}</button></div></details>
         <div class="mt-4 space-y-2">
           {#each choices as item, index (item.id)}
             <article class="rounded-xl border border-neutral-800 bg-neutral-950 p-3">

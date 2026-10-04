@@ -6,6 +6,8 @@
   import { workspace, type StudioView, type GuidedMode } from '../../prompt-studio/workspace.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
   import { gallery } from '../../stores/gallery.svelte.js';
+  import PromptStudioRecipe from './PromptStudioRecipe.svelte';
+  import { library } from '../../prompt-studio/library.svelte.js';
   import PromptStudioSend from './PromptStudioSend.svelte';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import PromptStudioCollections from './PromptStudioCollections.svelte';
@@ -95,6 +97,7 @@
     <div class="min-h-0 min-w-0 flex-col overflow-hidden border-neutral-800 xl:border-l {workspace.mobileDraft ? 'flex' : 'hidden xl:flex'}"><PromptStudioDraft onApply={apply} onCopy={copy} /></div>
   </div>
 </div>
+{#if library.recipePreview}<PromptStudioRecipe />{/if}
 {#if sending}<PromptStudioSend onCancel={() => sending = false} onDone={() => { sending = false; (onApply ?? onClose)?.(); }} />{/if}
 
 {/key}

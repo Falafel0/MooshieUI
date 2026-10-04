@@ -1,3 +1,4 @@
+import { hasTemplateVariables } from './collection-tools.js';
 import { library } from './library.svelte.js';
 import { studio } from './studio.svelte.js';
 import { locale } from '../stores/locale.svelte.js';
@@ -54,6 +55,7 @@ class Workflow {
     const group = library.groups(mode).find(group => group.id === id);
     const option = group?.options.find(option => option.tag === tag);
     if (!group || !option) return;
+    if (hasTemplateVariables(tag)) { void library.previewRecipe(option.name || locale.t(option.labelKey), tag); return; }
     // An existing catalog or imported selection belongs to its original source.
     if (studio.selected.some(choice => choice.tag === tag && choice.category !== id)) return;
     const chosen = studio.selected.some(choice => choice.category === id && choice.tag === tag);
@@ -69,6 +71,7 @@ class Workflow {
     this.load(); studio.load();
     const groups = library.groups(mode).filter(group => !id || group.id === id);
     const { categories, entries } = randomizeWorkflow(studio.selected, groups, { locked: this.locked, pinned: studio.pinned, banned: studio.banned, freshLimit: !id && library.sources[mode] !== 'starter' ? this.detailCount : undefined });
+    if (entries.some(entry => hasTemplateVariables(entry.tag))) { void library.previewRecipe(locale.t('prompt_studio.library.recipe_review'), entries.map(entry => entry.tag).join(', ')); return; }
     studio.replaceChoices(entries.map(entry => {
       const option = groups.find(group => group.id === entry.category)?.options.find(option => option.tag === entry.tag);
       // Preserve the authored name and weight of pinned selections.

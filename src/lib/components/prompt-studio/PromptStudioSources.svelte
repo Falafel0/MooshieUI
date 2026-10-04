@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import PromptStudioGlobalSets from './PromptStudioGlobalSets.svelte';
   import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { normalizeCatalog } from '../../prompt-studio/catalog-model.js';
@@ -10,9 +11,11 @@
 
   let { view = 'sources', management = false }: { view?: 'sources' | 'sets'; management?: boolean } = $props();
   let input = $state<HTMLInputElement>();
-  let url = $state('');
-  let setName = $state('');
-  let query = $state('');
+  const initial = restoreTool('sources', { url: '', setName: '', query: '' });
+  let url = $state(initial.url);
+  let setName = $state(initial.setName);
+  let query = $state(initial.query);
+  $effect(() => { saveTool('sources', { url, setName, query }); });
   let busy = $state(false);
   let error = $state('');
   let result = $state('');

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { hasTemplateVariables } from '../../prompt-studio/collection-tools.js';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { library } from '../../prompt-studio/library.svelte.js';
   import { workspace } from '../../prompt-studio/workspace.svelte.js';
@@ -7,19 +8,21 @@
   import { locale } from '../../stores/locale.svelte.js';
   import PromptStudioSetPicker from './PromptStudioSetPicker.svelte';
   import type { StudioKind } from '../../prompt-studio/presets.js';
-  const initial = restoreTool('database', { mode: 'character', query: '', page: 0 });
+  const initial = restoreTool('database', { mode: 'character', query: '', page: 0, opened: false });
+  let opened = $state(initial.opened);
   let mode = $state<StudioKind>(initial.mode as StudioKind);
   let query = $state(initial.query), page = $state(initial.page);
   function insert(row: { tag: string; name?: string; labelKey: string; category: string }) {
+    if (hasTemplateVariables(row.tag)) { void library.previewRecipe(row.name || locale.t(row.labelKey), row.tag); return; }
     if (workspace.view === 'editor' && studio.rawPrompt !== undefined) studio.editPrompt(insertPrompt(studio.rawPrompt, row.tag, 'append'));
     else studio.choose(row.tag, row.name || locale.t(row.labelKey), row.category);
   }
   const rows = $derived(library.groups(mode).flatMap(group => group.options.map(option => ({ ...option, category: group.id }))));
   const matching = $derived(rows.filter(row => `${row.tag} ${row.name || locale.t(row.labelKey)}`.toLowerCase().includes(query.trim().toLowerCase())));
   const current = $derived(Math.min(page, Math.max(0, Math.ceil(matching.length / 60) - 1)));
-  $effect(() => { saveTool('database', { mode, query, page }); });
+  $effect(() => { saveTool('database', { mode, query, page, opened }); });
 </script>
-<details class="mb-4 rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+<details open={opened} ontoggle={event => opened = event.currentTarget.open} class="mb-4 rounded-xl border border-neutral-800 bg-neutral-950 p-3">
   <summary class="touch-target cursor-pointer text-xs font-medium text-neutral-300">{locale.t('prompt_studio.library.insert_database')}</summary>
   <div class="mt-3 flex flex-wrap gap-1">{#each ['character', 'wardrobe', 'scene'] as domain}<button type="button" aria-pressed={mode === domain} onclick={() => mode = domain as StudioKind} class="touch-target rounded-lg px-3 text-xs {mode === domain ? 'bg-neutral-800 text-amber-300' : 'text-neutral-400'}">{locale.t(`prompt_studio.v2.mode_${domain}`)}</button>{/each}</div>
   <PromptStudioSetPicker {mode} />

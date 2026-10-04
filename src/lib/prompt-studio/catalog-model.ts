@@ -64,7 +64,9 @@ export function parseGlobalSet(text: string, format: 'json' | 'txt', subId: stri
     const data = JSON.parse(text);
     const rows: unknown = Array.isArray(data) ? data : data?.entries;
     if (!Array.isArray(rows) || rows.some(row => !row || typeof row.tag !== 'string' || !row.tag.trim())) throw new Error('Invalid set entries');
-    return rows as CustomCatalogEntry[];
+    const fallback = subId || '__new_set__';
+    return normalizeEntries(rows.map(row => ({ ...row, subId: typeof row.subId === 'string' && row.subId.trim() ? row.subId : fallback })))
+      .map(row => !subId && row.subId === fallback ? { ...row, subId: '' } : row);
   }
   const existing = new Map(baseline.map(row => [row.tag, row]));
   const tags = [...new Set(text.split(/\r?\n/).map(line => line.trim()).filter(Boolean))];

@@ -43,7 +43,7 @@
     library.fetch(id).then(() => { if (library.failed.includes(id)) throw new Error('Collection unavailable'); return library.databases[id] ?? []; }).then(result => { if (alive && revision === sequence && owner === userScopedKey('mooshie.prompt-studio.collections')) rows = result; }).catch(() => { if (alive && revision === sequence) failed = true; }).finally(() => { if (alive && revision === sequence) busy = false; });
   });
   $effect(() => { const value = query.toLowerCase().trim(); const timer = setTimeout(() => { search = value; }, 150); return () => clearTimeout(timer); });
-  $effect(() => { if (page >= pages) page = pages - 1; });
+  $effect(() => { if (!busy && page >= pages) page = pages - 1; });
   loadCollectionAsset<Dictionaries>('dictionaries.json').then(value => { if (alive) dictionaries = value; }).catch(() => { if (alive) failed = true; });
   loadCollectionAsset<Relations>('wardrobe-relations.json').then(value => { if (alive) relations = value; }).catch(() => {});
   loadCollectionAsset<NonNullable<typeof previews>>('preview-info.json').then(value => { if (alive) previews = value; }).catch(() => {});

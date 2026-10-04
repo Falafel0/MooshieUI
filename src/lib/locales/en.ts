@@ -1,5 +1,11 @@
 /** English translations — source of truth for all UI strings. */
 const en: Record<string, string> = {
+  "prompt_studio.library.recipe_review": "Review template",
+  "prompt_studio.library.import_chunks": "Import prompt chunks",
+  "prompt_studio.library.chunk_separator": "Split chunks by",
+  "prompt_studio.library.chunk_name": "Prompt chunk",
+  "prompt_studio.library.import_chunks_hint": "Paste a prompt or load TXT. Separate chunks with blank lines, headings or one line per chunk. Commas and scheduling expressions remain intact.",
+
   "prompt_studio.library.new_detail_limit": "Maximum new details when randomizing",
   "prompt_studio.library.from_draft": "Collect draft tags into a set",
   "prompt_studio.library.weight_randomization": "Weight randomization",
@@ -725,9 +731,9 @@ const en: Record<string, string> = {
   "prompt_studio.save_catalogue": "Save filtered catalogue",
   "prompt_studio.add_saved_results": "Add filtered tags to draft",
   "prompt_studio.saved_empty": "No saved source entries match. Save tags or recipes from the browser.",
-  "prompt_studio.import_blocks": "Import prompt chunks",
+  "prompt_studio.import_blocks": "Import prompt blocks",
   "prompt_studio.import_blocks_hint": "Paste a prompt or load a text file. Separate blocks with blank lines, one block per line, or headings such as # Character. Headings keep multiline content together. Commas and scheduling expressions stay intact. Existing blocks are kept.",
-  "prompt_studio.block_separator": "Split chunks by",
+  "prompt_studio.block_separator": "Split blocks by",
   "prompt_studio.block_paragraphs": "Blank lines / headings",
   "prompt_studio.block_lines": "Each line / headings",
   "prompt_studio.send_as_blocks": "Insert as separate named prompt chunks",
@@ -758,7 +764,7 @@ const en: Record<string, string> = {
   "prompt_studio.anima_composer_hint": "Generate reproducible combinations of artists, characters, clothes and scenes with a seed.",
   "prompt_studio.anima_mixer_hint": "Configure how artists in active styles are mixed by the Anima nodes.",
   "prompt_studio.prompt_groups": "Prompt chunks",
-  "prompt_studio.group_name": "Prompt chunk",
+  "prompt_studio.group_name": "New group",
   "prompt_studio.group_enabled": "Include in output",
   "prompt_studio.group_up": "Move group earlier",
   "prompt_studio.group_down": "Move group later",

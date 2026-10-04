@@ -179,7 +179,7 @@
                 <textarea bind:value={result} rows="5" class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm leading-relaxed text-neutral-200 outline-none focus:border-amber-400"></textarea>
               </label>
               <div class="flex flex-wrap items-end gap-3">
-                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.group_name')}</span><input bind:value={groupName} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-amber-400" /></label>
+                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.library.chunk_name')}</span><input bind:value={groupName} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-amber-400" /></label>
                 <button type="button" disabled={!result.trim() || !groupName.trim()} class="touch-target flex items-center gap-2 rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 hover:bg-amber-300 disabled:opacity-40" onclick={addResult}><Plus size={15} />{locale.t('prompt_studio.v2.ai_add_group')}</button>
               </div>
             </div>

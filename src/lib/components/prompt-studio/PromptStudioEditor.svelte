@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { hasTemplateVariables } from '../../prompt-studio/collection-tools.js';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
   import { untrack } from 'svelte';
+  import { library } from '../../prompt-studio/library.svelte.js';
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { customCatalog } from '../../prompt-studio/custom-catalog.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
@@ -28,7 +30,7 @@
     query; selectedOnly; studio.activeSubId;
     untrack(() => viewport?.scrollTo({ top: 0 }));
   });
-  $effect(() => { if (page >= pageCount) page = pageCount - 1; });
+  $effect(() => { if (customCatalog.current && page >= pageCount) page = pageCount - 1; });
   $effect(() => {
     currentPage;
     untrack(() => viewport?.scrollTo({ top: 0 }));
@@ -75,7 +77,7 @@
         {#each visibleEntries as entry (entry.id)}
           {@const selected = studio.isChosen(entry.tag)}
           <article class="group relative flex min-w-0 overflow-hidden rounded-xl border transition-colors {list ? 'items-stretch' : 'flex-col'} {selected ? 'border-amber-400/70 bg-amber-400/5 ring-1 ring-amber-400/15' : 'border-neutral-800 bg-neutral-900 hover:border-neutral-600'}">
-            <button type="button" aria-pressed={selected} aria-label={locale.t(management ? 'prompt_studio.v2.edit_named' : selected ? 'prompt_studio.v2.remove_named' : 'prompt_studio.v2.select_named', { name: entry.name })} class="min-w-0 flex-1 text-left {list ? 'flex items-center gap-3 p-3 pr-14' : 'pb-3'}" onclick={() => { if (management) studio.catalogEntryId = entry.id; else studio.choose(entry.tag, entry.name, entry.subId); }}>
+            <button type="button" aria-pressed={selected} aria-label={locale.t(management ? 'prompt_studio.v2.edit_named' : selected ? 'prompt_studio.v2.remove_named' : 'prompt_studio.v2.select_named', { name: entry.name })} class="min-w-0 flex-1 text-left {list ? 'flex items-center gap-3 p-3 pr-14' : 'pb-3'}" onclick={() => { if (management) studio.catalogEntryId = entry.id; else if (hasTemplateVariables(entry.tag)) void library.previewRecipe(entry.name, entry.tag); else studio.choose(entry.tag, entry.name, entry.subId); }}>
               {#if images && entry.preview}<img src={entry.preview} alt="" loading="lazy" class="object-cover {list ? 'h-16 w-20 shrink-0 rounded-lg' : 'h-28 w-full'}" />{:else if images}<div class="flex items-center justify-center bg-neutral-800/30 text-neutral-600 {list ? 'h-16 w-20 shrink-0 rounded-lg' : 'h-28'}"><Image size={23} /></div>{/if}
               <span class="block min-w-0 {list ? 'flex-1' : 'px-3 pt-3'}"><span class="block truncate pr-7 text-xs font-medium text-neutral-200">{entry.name}</span><span class="mt-1 block truncate font-mono text-[10px] text-neutral-500" title={entry.tag}>{entry.tag}</span>{#if entry.description}<span class="mt-2 line-clamp-2 text-[11px] leading-relaxed text-neutral-400">{entry.description}</span>{/if}{#if entry.contextualTags?.length}<span class="mt-2 inline-block rounded-md bg-neutral-800/60 px-1.5 py-1 text-[10px] text-neutral-400">{locale.t('prompt_studio.v2.modifier_count', { count: locale.formatInteger(entry.contextualTags.length) })}</span>{/if}</span>
             </button>

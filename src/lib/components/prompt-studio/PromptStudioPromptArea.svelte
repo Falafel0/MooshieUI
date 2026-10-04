@@ -8,7 +8,10 @@
   import { insertPrompt } from '../../prompt-studio/insertion.js';
   import { ArrowUp, ArrowDown, Copy, CopyPlus, Trash2 } from '@lucide/svelte';
   let { onApply, onCopy }: { onApply: () => void; onCopy: () => void } = $props();
-  const initial = restoreTool('prompt-panel', { active: '', chunksOpen: false, chunkQuery: '', chunkName: '', chunkId: '', chunkContent: '', showPreview: false });
+  // Restore prompt groups before validating the persisted active chunk.
+  studio.load();
+  const initial = restoreTool('prompt-panel', { active: '', chunksOpen: false, chunkQuery: '', chunkName: '', chunkId: '', chunkContent: '', showPreview: false, helpers: false });
+  let helpers = $state(initial.helpers);
   let active = $state(initial.active);
   let importing = $state(false);
   let chunksOpen = $state(initial.chunksOpen);
@@ -18,7 +21,7 @@
   let chunkId = $state(initial.chunkId);
   let chunkContent = $state(initial.chunkContent);
   let showPreview = $state(initial.showPreview);
-  $effect(() => { saveTool('prompt-panel', { active, chunksOpen, chunkQuery, chunkName, chunkId, chunkContent, showPreview }); });
+  $effect(() => { saveTool('prompt-panel', { active, chunksOpen, chunkQuery, chunkName, chunkId, chunkContent, showPreview, helpers }); });
   const group = $derived(studio.groups.find(group => group.id === active));
   const content = $derived(group?.content ?? studio.basePrompt);
   const canSaveChunk = $derived(chunkName.trim() && chunkContent.trim() && !promptPresets.presets.some(p => p.id !== chunkId && p.name.toLowerCase() === chunkName.trim().toLowerCase()));
@@ -38,7 +41,7 @@
     <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label={locale.t('prompt_studio.prompt_groups')}>
       <button type="button" aria-pressed={!group} class="touch-target shrink-0 rounded-lg px-3 py-2 text-xs {!group ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}" onclick={() => active = ''}>{locale.t('prompt_studio.v2.draft')}</button>
       {#each studio.groups as item (item.id)}
-        <button type="button" aria-pressed={active === item.id} class="touch-target max-w-40 shrink-0 truncate rounded-lg px-3 py-2 text-xs {active === item.id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'} {item.enabled ? '' : 'opacity-50'}" onclick={() => active = item.id}>{item.name || locale.t('prompt_studio.group_name')}</button>
+        <button type="button" aria-pressed={active === item.id} class="touch-target max-w-40 shrink-0 truncate rounded-lg px-3 py-2 text-xs {active === item.id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'} {item.enabled ? '' : 'opacity-50'}" onclick={() => active = item.id}>{item.name || locale.t('prompt_studio.library.chunk_name')}</button>
       {/each}
     </nav>
     <button type="button" class="touch-target rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 disabled:opacity-40" disabled={!studio.prompt.trim()} onclick={onCopy} aria-label={locale.t('prompt_studio.copy')}><Copy size={16} /></button>
@@ -46,7 +49,7 @@
   </div>
   {#if group}
     <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-      <input class="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 p-2 text-neutral-200" value={group.name} aria-label={locale.t('prompt_studio.group_name')} onchange={event => studio.updateGroup(group!.id, { name: event.currentTarget.value })} />
+      <input class="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 p-2 text-neutral-200" value={group.name} aria-label={locale.t('prompt_studio.library.chunk_name')} onchange={event => studio.updateGroup(group!.id, { name: event.currentTarget.value })} />
       <label class="flex items-center gap-2"><input type="checkbox" checked={group.enabled} onchange={event => studio.updateGroup(group!.id, { enabled: event.currentTarget.checked })} />{locale.t('prompt_studio.group_enabled')}</label>
       <button type="button" class="touch-target rounded p-2 disabled:opacity-30" disabled={studio.groups[0]?.id === group.id} aria-label={locale.t('prompt_studio.group_up')} onclick={() => studio.moveGroup(group!.id, -1)}><ArrowUp size={16} /></button>
       <button type="button" class="touch-target rounded p-2 disabled:opacity-30" disabled={studio.groups.at(-1)?.id === group.id} aria-label={locale.t('prompt_studio.group_down')} onclick={() => studio.moveGroup(group!.id, 1)}><ArrowDown size={16} /></button>
@@ -63,12 +66,12 @@
     <PromptTextarea bind:value={() => content, value => edit(value)} rows={3} minHeight="min-h-24" storageKey={`studio-prompt-${active || 'base'}`} placeholder={locale.t('generation.prompts.positive_placeholder')} />
   {/key}
   <div class="mt-1 flex flex-wrap items-start gap-x-4">
-  <details class="min-w-0 flex-1">
+  <details open={helpers} ontoggle={event => helpers = event.currentTarget.open} class="min-w-0 flex-1">
     <summary class="touch-target flex cursor-pointer items-center text-xs text-neutral-400">{locale.t('prompt_studio.prompt_helpers')}</summary>
     <div class="flex flex-wrap gap-2 pb-2">
     <button type="button" disabled={!content.trim()} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => { chunkId = ''; chunkName = ''; chunkContent = content; chunksOpen = true; }}>{locale.t('prompt_studio.save_chunk')}</button>
-      <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => active = studio.addGroup(locale.t('prompt_studio.group_name'))}>+ {locale.t('prompt_studio.prompt_groups')}</button>
-      <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
+      <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => active = studio.addGroup(locale.t('prompt_studio.library.chunk_name'))}>+ {locale.t('prompt_studio.prompt_groups')}</button>
+      <button type="button" class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => importing = true}>{locale.t('prompt_studio.library.import_chunks')}</button>
       <button type="button" aria-expanded={chunksOpen} class="touch-target rounded-lg bg-neutral-800 px-3 py-2 text-xs text-neutral-300" onclick={() => chunksOpen = !chunksOpen}>{locale.t('prompt_studio.macros')}</button>
       {#if studio.groups.length}
         <button type="button" disabled={studio.groups.every(group => group.enabled)} class="touch-target rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300 disabled:opacity-40" onclick={() => studio.setGroupsEnabled(true)}>{locale.t('prompt_studio.groups_enable_all')}</button>
@@ -105,4 +108,4 @@
   {/if}
 </section>
 
-{#if importing}<PromptBlockImport onClose={() => importing = false} onImport={blocks => { studio.importGroups(blocks.map((block, index) => ({ ...block, name: block.name || `${locale.t('prompt_studio.group_name')} ${index + 1}` }))); active = studio.groups.at(-1)?.id ?? ''; importing = false; }} />{/if}
+{#if importing}<PromptBlockImport chunks={true} onClose={() => importing = false} onImport={blocks => { studio.importGroups(blocks.map((block, index) => ({ ...block, name: block.name || `${locale.t('prompt_studio.library.chunk_name')} ${index + 1}` }))); active = studio.groups.at(-1)?.id ?? ''; importing = false; }} />{/if}

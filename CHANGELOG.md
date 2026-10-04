@@ -10,6 +10,7 @@
 - Custom tag modifiers are visible and switchable in the draft panel. Mixer includes the complete artist catalog, artist selections and style tags, with independent weight rerolls and artist-prefix formatting.
 - Working sources, mixer terms and weights, filters, open groups, editor input and chunk drafts persist per account. Large groups render only when opened and use pagination; full-database randomization has an explicit detail budget.
 - Reusable prompt fragments consistently use the existing Mooshie chunk library. Shared set actions and redundant transfer/edit controls have been consolidated.
+- Imported template choices and dictionary variables are resolved in an editable preview before adding a chunk. JSON entries without identifiers are normalized safely for metadata editing.
 
 ---
 

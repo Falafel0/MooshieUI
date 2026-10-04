@@ -1,8 +1,9 @@
 import type { CustomCatalogEntry } from './catalog-model.js';
 import { customCatalog } from './custom-catalog.svelte.js';
 import { locale } from '../stores/locale.svelte.js';
-import { collectionIndex, loadCollection, collectionGroupKey, type CollectionEntry } from './collections.js';
+import { loadCollection, loadCollectionAsset, collectionGroupKey, type CollectionEntry } from './collections.js';
 import { workflowGroups, type WorkflowGroup } from './workflow-catalog.js';
+import { artistPrompt, resolveTemplate, type Dictionaries } from './collection-tools.js';
 import type { StudioKind } from './presets.js';
 import { userScopedKey } from '../utils/ipc.js';
 
@@ -18,12 +19,15 @@ class StudioLibrary {
   editingSet = $state<string | undefined>();
   mixerSet = $state('');
   newSetDraft = $state.raw<{ name: string; entries: CustomCatalogEntry[] } | undefined>();
+  recipePreview = $state<{ name: string; text: string; scope: string } | undefined>();
+  recipeLoading = $state(false);
+  private recipeRevision = 0;
   private owner = '';
   private requests = new Map<string, Promise<void>>();
   load() {
     const owner = key();
     if (owner === this.owner) return;
-    this.owner = owner; this.editingSet = undefined; this.mixerSet = ''; this.newSetDraft = undefined;
+    this.owner = owner; this.editingSet = undefined; this.mixerSet = ''; this.newSetDraft = undefined; this.clearRecipe();
     this.sources = { character: 'database', wardrobe: 'database', scene: 'database' };
     try {
       const raw = JSON.parse(localStorage.getItem(owner) ?? '{}');
@@ -44,6 +48,18 @@ class StudioLibrary {
       .catch(error => { this.failed = [...this.failed, id]; console.warn('Prompt Studio database:', error); })
       .finally(() => { this.pending = this.pending.filter(row => row !== id); this.requests.delete(id); });
     this.requests.set(id, request); return request;
+  }
+  clearRecipe() { this.recipeRevision++; this.recipePreview = undefined; this.recipeLoading = false; }
+  async previewRecipe(name: string, text: string) {
+    this.load(); this.clearRecipe();
+    const revision = this.recipeRevision, scope = customCatalog.scope;
+    this.recipeLoading = true;
+    try {
+      const dictionaries = await loadCollectionAsset<Dictionaries>('dictionaries.json');
+      if (revision !== this.recipeRevision || scope !== customCatalog.scope) return;
+      this.recipePreview = { name, text: resolveTemplate(text, dictionaries).text, scope };
+    } catch (error) { console.warn('Prompt Studio recipe preview:', error); }
+    finally { if (revision === this.recipeRevision) this.recipeLoading = false; }
   }
   activateSet(id: string): StudioKind | undefined {
     const category = customCatalog.categories.find(row => row.id === id);
@@ -77,7 +93,7 @@ class StudioLibrary {
     const domain = (Object.keys(domainCollection) as StudioKind[]).find(mode => domainCollection[mode] === id);
     const imported = customCatalog.import({ kind: 'mooshie-tag-pack', version: 1,
       categories: [{ id: categoryId, name: locale.t(`prompt_studio.collections.${id}`), icon: 'library', domains: domain ? [domain] : [], subs: groups.map(group => ({ id: ids.get(group), name: locale.t(collectionGroupKey(group)) })) }],
-      entries: rows.map(row => ({ id: crypto.randomUUID(), subId: ids.get(row.group), tag: row.tag, name: row.name, description: row.description, contextualTags: row.context, collectionData: row })),
+      entries: rows.map(row => ({ id: crypto.randomUUID(), subId: ids.get(row.group), tag: id === 'artists' ? artistPrompt(row.tag, false) : row.tag, name: row.name, description: row.description, contextualTags: row.context, collectionData: row })),
     });
     if (!imported) return;
     this.editingSet = categoryId;

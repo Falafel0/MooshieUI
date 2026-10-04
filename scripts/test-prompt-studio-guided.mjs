@@ -12,7 +12,7 @@ const cache = new Map();
 let userScope = '';
 const fixtures = JSON.parse(fs.readFileSync(new URL('src/lib/prompt-studio/data/characters.json', root), 'utf8'));
 const boundaries = {
-  './collections.js': { collectionGroupKey: group => `prompt_studio.library.group.${group}`, collectionIndex: { collections: [{ id: 'characters', label: 'Characters' }] }, loadCollection: async id => id === 'characters' ? fixtures : [] },
+  './collections.js': { loadCollectionAsset: async () => ({ colors: ['red'] }), collectionGroupKey: group => `prompt_studio.library.group.${group}`, collectionIndex: { collections: [{ id: 'characters', label: 'Characters' }] }, loadCollection: async id => id === 'characters' ? fixtures : [] },
   '../utils/ipc.js': { userScopedKey: key => `${key}${userScope}` },
   '../stores/locale.svelte.js': { locale: { t: key => key } },
 };
@@ -201,3 +201,22 @@ assert.equal(limited.categories.length, 20);
 assert.equal(limited.entries.filter(row => row.tag.startsWith('new')).length, 4);
 assert.equal(limited.entries.find(row => row.tag === 'pinned').weight, 1.6);
 console.log('Full database randomization respects the requested detail budget and preserves pinned weights.');
+
+const rawMetadata = parseGlobalSet(JSON.stringify([{ tag: 'a' }, { tag: 'b', id: 'reused', aliases: 'invalid' }, { tag: 'c', id: 'reused' }]), 'json', '');
+assert.equal(rawMetadata.length, 3);
+assert.equal(new Set(rawMetadata.map(row => row.id)).size, 3, 'Raw JSON rows get stable distinct editor identities before rendering');
+assert.ok(rawMetadata.every(row => typeof row.name === 'string' && row.subId === ''));
+assert.equal(rawMetadata[1].aliases, undefined);
+console.log('Raw JSON metadata editing repairs missing or duplicate IDs and validates optional fields.');
+
+await customCatalog.load(); studio.load();
+const recipeSet = customCatalog.addCategory('Recipes');
+assert.ok(customCatalog.add({ tag: '{@colors} dress', name: 'Dress recipe', subId: recipeSet }));
+library.select('wardrobe', recipeSet);
+const recipeBefore = studio.prompt;
+workflow.choose('wardrobe', recipeSet, '{@colors} dress');
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(studio.prompt, recipeBefore, 'Template options require review before touching the draft');
+assert.equal(library.recipePreview.text, 'red dress');
+library.clearRecipe();
+console.log('Shared template sets resolve variables into a reviewed preview before insertion.');
