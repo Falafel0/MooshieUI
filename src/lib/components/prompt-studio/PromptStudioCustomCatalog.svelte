@@ -5,6 +5,7 @@
   import { studio } from '../../prompt-studio/studio.svelte.js';
   import { locale } from '../../stores/locale.svelte.js';
   import { Image, Copy, Trash2, X } from '@lucide/svelte';
+  let { showSelection = true }: { showSelection?: boolean } = $props();
   const entry = $derived(customCatalog.entries.find(row => row.id === studio.catalogEntryId));
   let name = $state(''), tag = $state(''), description = $state(''), preview = $state('');
   let aliases = $state(''), context = $state('');
@@ -69,7 +70,7 @@
       {#if error}<p role="alert" class="mt-3 text-xs text-amber-300">{error}</p>{/if}
     </section>
   {/if}
-  <section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+  {#if showSelection}<section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
     <header class="mb-3 flex items-center justify-between gap-2"><h3 class="text-xs font-semibold">{locale.t('prompt_studio.selected_tags')} ({studio.selected.length})</h3><button type="button" class="touch-target px-2 text-xs text-neutral-500" onclick={() => studio.clear()}>{locale.t('prompt_studio.reset')}</button></header>
     {#if !studio.selected.length}<p class="text-xs text-neutral-500">{locale.t('prompt_studio.empty')}</p>{/if}
     {#if !editing && studio.currentCategory}<button type="button" class="touch-target mb-3 rounded border border-neutral-700 px-3 text-xs text-neutral-400" onclick={() => studio.catalogEntryId = 'new'}>{locale.t('prompt_studio.add_tag')}</button>{/if}
@@ -81,5 +82,5 @@
         <button type="button" aria-label={`${locale.t('prompt_studio.remove_tag')}: ${item.name}`} class="touch-target shrink-0 rounded p-2 text-neutral-500" onclick={() => studio.remove(item.tag)}><X size={14} /></button>
       </div>
     {/each}
-  </section>
+  </section>{/if}
 </aside>

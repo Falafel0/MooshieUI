@@ -1,5 +1,19 @@
 # Changelog
 
+## What's New in v2.3.9-fork.2
+
+### Rebuilt Prompt Studio
+- Four focused workspaces: Build, Mix, Editor and Library, with one shared draft, undo/redo and a reviewed handoff to generation.
+- Guided character, wardrobe and scene recipes with independent locks, pinned tags, exclusions and selective randomization.
+- Weighted style and artist blends, SD/NovelAI weight conversion, editable prompt blocks and optional integration with the configured Mooshie prompt assistant.
+- Offline collections compiled from all 92 supplied files: 5,965 consolidated tags, 1,967 unique outfit/pose/background templates, five non-empty style presets, dictionary choices and 364,080 unique artists. Artist memberships and artwork counts remain metadata. Large collections load when the library opens.
+- Template variables resolve before insertion. Optional context and negative tags remain separate. Wardrobe pairing advice uses world rules, co-occurrence graphs, incompatibility bitmaps and pair scores.
+- Preview availability and history are preserved as metadata; embedded blurred thumbnails are included, while original images are absent.
+- Local catalogs, saved sets and portable imports remain supported. Rename and category-move collisions preserve existing data, imported sets require a preview, and large catalogs use pagination.
+- Responsive layouts, keyboard tab navigation, account-scoped storage and protection against late assistant/import responses.
+
+---
+
 ## What's New in v2.3.9-fork.1
 
 ### Local Prompt Studio

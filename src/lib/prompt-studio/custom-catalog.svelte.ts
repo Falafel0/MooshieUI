@@ -50,7 +50,9 @@ class CustomCatalog {
   }
   add(entry: Omit<CustomCatalogEntry, 'id'> & { id?: string }) {
     if (!this.ready || this.loadedKey !== scopedKey() || !this.hasBucket(entry.subId)) return false;
-    const existing = this.entries.find(row => entry.id && row.id === entry.id)
+    const editing = this.entries.find(row => entry.id && row.id === entry.id);
+    if (editing && this.entries.some(row => row.id !== editing.id && row.tag === entry.tag.trim() && row.subId === entry.subId.trim())) return false;
+    const existing = editing
       ?? this.entries.find(row => row.tag === entry.tag.trim() && row.subId === entry.subId.trim());
     const rows = normalizeEntries([{ ...existing, ...entry, id: existing?.id ?? crypto.randomUUID(), preview: entry.preview === undefined ? existing?.preview : entry.preview }]);
     if (entry.preview === '') rows.forEach(row => { row.preview = undefined; });
@@ -113,12 +115,15 @@ class CustomCatalog {
     this.save();
   }
   removeSub(id: string) {
-    if (!this.writable()) return;
+    if (!this.writable()) return false;
     const parent = this.categories.find(category => category.subs.some(sub => sub.id === id));
-    if (!parent) return;
+    if (!parent) return false;
+    const targetTags = new Set(this.entries.filter(entry => entry.subId === parent.id).map(entry => entry.tag));
+    if (this.entries.some(entry => entry.subId === id && targetTags.has(entry.tag))) return false;
     this.categories = this.categories.map(category => category.id === parent.id ? { ...category, subs: category.subs.filter(sub => sub.id !== id) } : category);
     this.entries = normalizeEntries(this.entries.map(entry => entry.subId === id ? { ...entry, subId: parent.id } : entry));
     this.save();
+    return true;
   }
   move(id: string, direction: number) {
     if (!this.writable()) return;

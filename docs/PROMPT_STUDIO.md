@@ -1,52 +1,43 @@
 # Prompt Studio
 
-Prompt Studio is a local, user-authored tag constructor. It starts with an empty catalog. It has no built-in categories, subcategories, tag recipes, palettes, clothing rules, dependency tags or Danbooru connection.
+Prompt Studio builds and edits prompts inside Mooshie. Open it from the sidebar. All four workspaces use one draft; switching between them preserves unfinished input during the session. The draft and personal catalog are stored separately for each browser user.
 
-## Layout
+## Build
 
-- Left: a vertical category rail, category search, add/edit/reorder controls, tag-pack import/export.
-- Top of the center panel: the active category's own tags, user-defined subcategory tabs, and Add subcategory.
-- Center: searchable tag cards with optional local previews. Switch between grid/list, adjust card size or hide images. The plus/check selects or removes a tag; the card opens its inspector.
-- Right: the selected card's preview, name, prompt fragment, description, aliases and contextual tags, followed by selected tags. Upload PNG/JPEG/WebP previews, save, duplicate or delete an entry. Choose contextual tags to supplement that entry in the assembled prompt. Weight editing is available for selected entries.
-- Bottom: the shared generation prompt editor, copy/send, Save as chunk, and optional user-created prompt blocks/macros. Character and wardrobe are one workspace.
+Choose Character, Wardrobe or Scene. Pick only the details you need; None leaves a group open. Lock a group to keep it during randomization. Pin a selected tag to retain it during randomization and reset, or exclude it from random picks. Clear this mode removes only its recipe choices. Undo and redo cover draft changes, including a whole reroll.
 
-Categories and subcategories can be renamed and reordered. Deleting a subcategory moves its entries into its parent category. Deleting a category removes its catalog entries after an in-app confirmation. These operations keep the assembled prompt. A category can contain tags directly; it does not need any subcategories.
+## Mix
 
-On narrower screens, switch between the catalog and selected tags. Editing a card opens its inspector above the workspace; close it to return to the catalog.
+Blend two to six styles with individual weights, locks and exclusions. Use the curated media, styles and lighting, your own catalog, or artists selected from Library into the draft. Choose SD or NAI syntax, inspect the result and add it as a named block. Randomization refreshes unlocked slots. Adding a blend is one undoable operation.
 
-## Tag packs
+## Editor
 
-Export the whole catalog or only the active category. One JSON file carries the category hierarchy, entries, contextual tags, aliases, descriptions and embedded previews. It works without a network connection or an expiring image cache.
+Write directly into the shared draft or use Weights to convert explicit SD `(phrase:1.2)` and NAI `1.2::phrase::` syntax. Conversion preserves escaped names and shows warnings for unsupported schedules or ambiguous nesting. Review the converted text before adding a block. Returning to the constructor restores the underlying selected tags.
 
-The portable format is `kind: "mooshie-tag-pack"`, `version: 1`:
+The optional prompt assistant uses the existing Mooshie configuration. Its result remains editable and is added only by an explicit action. Results from a request that finishes after leaving the editor, closing the assistant or changing account are discarded. Completed results survive workspace navigation.
 
-```json
-{
-  "kind": "mooshie-tag-pack",
-  "version": 1,
-  "categories": [],
-  "entries": []
-}
-```
+## Library
 
-Each category has `id`, `name`, `icon` and `subs`. Each subcategory has `id` and `name`. Entries have `id`, `name`, `tag` and `subId`; `subId` refers to either a category or a subcategory. Optional entry fields are `contextualTags` (a list of user-defined prompt fragments), `aliases` (search aliases), `description` and `preview` (embedded PNG/JPEG/WebP data URL). Contextual tags are selected explicitly; aliases and descriptions do not enter the generated prompt.
+Collections contains offline character, wardrobe, scene, artist, outfit, pose, background, texture, color and generation-style data. Search names and descriptions, choose a category or artist selection, and browse 60 entries at a time. Artist prefixes are explicit; artwork counts never become prompt text. Artist selections distinguish Anima, NoobAI and the supplied curated lists.
 
-Import merges a pack into the existing catalog. It preserves existing order and avoids duplicate entries by bucket and tag. Colliding identifiers across unrelated buckets are remapped consistently. Unknown pack versions and invalid hierarchies are rejected before mutation. The file-picker limit is 32 MiB. Previews uploaded through the UI are limited to 8 MiB and reduced to a maximum edge of 320 pixels.
+Click a tag to add or remove it. Templates open for review and variation before becoming a named block. Dictionary references and nested choices resolve locally; unknown variables require editing. Open Details for accompanying tags, separate negative tags and wardrobe pairing advice. Pairing advice is statistical; it never automatically removes your choices. Preview records describe availability and history, and include supplied blurred thumbnails; original images are absent.
 
-Older `mooshie-custom-catalog` exports (versions 1 and 2) remain importable. Old stored user entries recover their own category buckets using their saved IDs. Built-in catalog data is never restored. Account-scoped IndexedDB storage retains previews and rejects stale account reads/writes.
+Your catalog retains the editable category rail, subcategories, aliases, context and uploaded previews. Saved sets are snapshots of the complete draft. Import/export accepts portable JSON packs and text lists, as well as explicitly requested HTTPS or loopback HTTP URLs. Imported sets are previewed before loading; they do not replace a same-named saved set. Repeated tag-pack imports merge without duplicating entries. Conflicting renames and category moves leave both entries intact.
 
-## Prompt output
+## Draft and generation
 
-Only chosen tags and chosen user contexts enter the constructor output. There are no automatic gender, clothing, fashion or implication tags. Existing auto-added/dependency selections are discarded when loading old drafts; authored tags and saved prompt blocks remain.
+The draft appears on the right on wide screens. On smaller screens, use the Draft button beside Send to switch between the workspace and draft. Adjust tags and weights exposes pinning, exclusions and individual weights. Prompt helpers contains named blocks and reusable chunks. Combined prompt shows the assembled output.
 
-Editing the base output keeps a literal override. Return to constructor restores the generated base while keeping user-created prompt blocks. Blocks can be imported, renamed, duplicated, enabled/disabled, reordered and deleted. Macros use the existing chunk library. Save as chunk opens the name/content editor for the current field.
+Send opens a review dialog with replace, append and prepend choices. It uses Mooshie's existing generation prompt and mode; creating a prompt does not start generation. Keyboard shortcuts outside text fields: Ctrl/Cmd+Z for undo, Ctrl/Cmd+Shift+Z for redo and Ctrl/Cmd+Enter for Send. Arrow keys, Home and End navigate the four workspace tabs.
 
-Send selects the generation destination, positive/negative field and append/prepend/replace method. It can also send the draft as additional prompt blocks. Generation prompts no longer display Tag groups or Anima tools panels.
+## Supplied collection data
 
-## Removed integration
+All 92 uploaded files are audited in `src/lib/prompt-studio/data/coverage.json`, including SHA-256 hashes, duplicate relationships and semantic roles. They contain 39 distinct parsed contents. JSON/CSV exports and repeated copies are cross-checked rather than inflated into duplicate collections. The compiled library contains 5,965 consolidated tags, 1,967 distinct templates, five non-empty style presets, 212 dictionary entries and 364,080 unique artists. The empty style is a no-op and is not emitted as a prompt entry.
 
-The old source browser, Danbooru tag/group/post search, automatic preview lookup, upstream catalog/image proxy and their UI components are removed. The corresponding desktop command registrations and browser IPC routes are removed too. Danbooru credentials no longer appear in settings; legacy config fields remain only for migration/redaction. Existing Gelbooru/e621 credential settings and backend support are outside this constructor and remain available.
+Wardrobe world rules and axes, co-occurrence graphs, veto bitmaps and pair scores are stored separately from prompt tags. Dictionaries preserve empty shade choices and escaped literal parentheses. Preview access, extension inventory, status, history and pose identifiers are metadata; supplied blurred thumbnails are included; no remote preview URL or credential is included. Large JSON assets are separate from the startup JavaScript and are fetched from the application's own files when opening collections.
+
+To rebuild supplied data, run `python3 scripts/build-prompt-studio-data.py --manifest <local-manifest.json>` with a private manifest containing `name` and `path` entries. Do not commit local paths or upload identifiers. Optional `--exclude-terms` removes private branding from strings. The original uploads are not required to run the compiled library.
 
 ## Validation
 
-The v2.3.9-fork.1 integration is checked with frontend build/type checks, the pack and account-scoping regressions, Node tests, localization parity, release-artifact checks and Rust desktop/server CI on Windows. A real-checkpoint GPU render and a manual runtime UI walkthrough are not part of these checks.
+The release checks frontend compilation, type errors, localization parity, catalog and account boundaries, atomic history, template expansion, source coverage, artist formatting, bitmap indexing, weight conversion, async assistant guards and release artifacts. Browser checks exercise the actual app, collections, editor, draft handoff and narrow layouts. Windows CI validates Rust desktop and server targets. Local checks do not perform a GPU render or contact a configured assistant model.

@@ -39,6 +39,9 @@ function load(path) {
   return module.exports;
 }
 const { insertPrompt } = load('src/lib/prompt-studio/insertion.ts');
+const { fromSnapshot } = load('src/lib/prompt-studio/presets.ts');
+assert.equal(fromSnapshot({ prefix: { injected: true }, suffix: 42 }), null, 'Malformed prefix/suffix cannot turn arbitrary JSON into a set');
+assert.equal(fromSnapshot({ groups: [{ id: 'block', name: 'Scene', content: 'forest' }] }).groups[0].content, 'forest', 'Group-only sets remain portable');
 assert.equal(insertPrompt('old,', '[red|blue]', 'append'), 'old, [red|blue]');
 const { customCatalog } = load('src/lib/prompt-studio/custom-catalog.svelte.ts');
 const { studio } = load('src/lib/prompt-studio/studio.svelte.ts');
@@ -92,7 +95,50 @@ assert.equal(new Set(customCatalog.entries.map(row=>row.id)).size,customCatalog.
 const invalid = {...padded,categories:[...padded.categories,{id:'padded',name:'Duplicate ID',subs:[]}]};
 assert.equal(customCatalog.import(invalid),false);
 assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeRepeat,'Invalid packs must not partly mutate the catalog');
-customCatalog.removeSub(sub);
+// Editing a known row must not overwrite another row with the same target tag.
+const safeCategory = customCatalog.addCategory('Preserve authored entries');
+const safeSub = customCatalog.addSub(safeCategory, 'Preserve subcategory');
+const alphaPreview = 'data:image/webp;base64,YWxwaGE=';
+const betaPreview = 'data:image/png;base64,YmV0YQ==';
+assert.equal(customCatalog.add({tag:'alpha',name:'Alpha',subId:safeSub,preview:alphaPreview,description:'Alpha description',aliases:['Alpha alias'],contextualTags:['alpha_modifier']}),true);
+assert.equal(customCatalog.add({tag:'beta',name:'Beta',subId:safeSub,preview:betaPreview,description:'Beta description',aliases:['Beta alias'],contextualTags:['beta_modifier']}),true);
+const alphaEntry = customCatalog.entries.find(row => row.tag === 'alpha' && row.subId === safeSub);
+const beforeEditConflict = JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries});
+const beforeStudioConflict = JSON.stringify(studio.state());
+await new Promise(resolve => setImmediate(resolve));
+const storedBeforeEditConflict = storage.get('mooshie.studio.custom-catalog.v1');
+assert.equal(customCatalog.add({...alphaEntry,tag:' beta ',name:'Overwrite attempt'}),false,'Renaming onto an existing tag must be rejected');
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeEditConflict,'A rejected edit preserves both rows, IDs and authored metadata');
+assert.equal(JSON.stringify(studio.state()),beforeStudioConflict,'A rejected edit preserves selected tags and details');
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(storage.get('mooshie.studio.custom-catalog.v1'),storedBeforeEditConflict,'A rejected edit must not persist a changed catalog');
+assert.equal(customCatalog.entries.find(row => row.tag === 'beta' && row.subId === safeSub).preview,betaPreview);
+
+// Deleting a subcategory moves its rows; reject a move that would merge two tags.
+assert.equal(customCatalog.add({tag:'shared_tag',name:'Parent tag',subId:safeCategory,preview:alphaPreview,description:'Parent description',aliases:['Parent alias'],contextualTags:['parent_modifier']}),true);
+assert.equal(customCatalog.add({tag:'shared_tag',name:'Child tag',subId:safeSub,preview:betaPreview,description:'Child description',aliases:['Child alias'],contextualTags:['child_modifier']}),true);
+const childEntry = customCatalog.entries.find(row => row.tag === 'shared_tag' && row.subId === safeSub);
+const beforeMoveConflict = JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries});
+await new Promise(resolve => setImmediate(resolve));
+const storedBeforeMoveConflict = storage.get('mooshie.studio.custom-catalog.v1');
+assert.equal(customCatalog.removeSub(safeSub),false,'A subcategory move must reject colliding tags in its parent');
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeMoveConflict,'A rejected move preserves category structure and every field of both rows');
+assert.equal(JSON.stringify(studio.state()),beforeStudioConflict,'A rejected move preserves the current draft');
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(storage.get('mooshie.studio.custom-catalog.v1'),storedBeforeMoveConflict,'A rejected move must not persist a changed catalog');
+assert.equal(customCatalog.add({...alphaEntry,tag:'shared_tag',subId:safeCategory}),false,'Moving a known tag onto a parent tag must also reject the edit');
+assert.equal(JSON.stringify({categories:customCatalog.categories,entries:customCatalog.entries}),beforeMoveConflict);
+assert.equal(customCatalog.add({...childEntry,tag:'child_unique_tag'}),true,'Resolve a collision by renaming the child tag');
+assert.equal(customCatalog.removeSub(safeSub),true,'The subcategory can be removed once its tags are unique');
+const movedChild = customCatalog.entries.find(row => row.id === childEntry.id);
+assert.equal(movedChild.subId,safeCategory);
+assert.equal(movedChild.preview,betaPreview);
+assert.equal(movedChild.description,'Child description');
+assert.deepEqual(Array.from(movedChild.aliases),['Child alias']);
+assert.deepEqual(Array.from(movedChild.contextualTags),['child_modifier']);
+assert.equal(customCatalog.entries.find(row => row.tag === 'shared_tag' && row.subId === safeCategory).description,'Parent description');
+customCatalog.removeCategory(safeCategory);
+assert.equal(customCatalog.removeSub(sub),true);
 assert.equal(customCatalog.entries[0].subId,category,'Deleting a subcategory keeps its entries');
 const group = studio.addGroup('My block'); studio.updateGroup(group,{content:'manual prose'});
 assert.ok(studio.prompt.endsWith('manual prose')); studio.undo();

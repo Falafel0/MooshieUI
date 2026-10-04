@@ -1,6 +1,6 @@
 # MooshieUI documentation
 
-Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for **v2.3.9-fork.1**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
+Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for **v2.3.9-fork.2**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
 
 ## Feature and technical references
 

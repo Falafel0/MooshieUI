@@ -8,6 +8,7 @@
   const sub = customCatalog.categories.flatMap(row => row.subs).find(row => row.id === id);
   let name = $state(category?.name ?? sub?.name ?? '');
   let deleting = $state(false);
+  let error = $state('');
   let dialog: HTMLDialogElement;
   const title = $derived(id ? 'common.edit' : categoryId ? 'prompt_studio.add_subcategory' : 'prompt_studio.add_category');
   onMount(() => dialog.showModal());
@@ -19,7 +20,9 @@
     onClose();
   }
   function remove() {
-    if (category) customCatalog.removeCategory(id); else customCatalog.removeSub(id);
+    error = '';
+    if (category) customCatalog.removeCategory(id);
+    else if (!customCatalog.removeSub(id)) { error = locale.t('prompt_studio.v2.subcategory_move_conflict'); return; }
     studio.ensureActive(); studio.save(); onClose();
   }
 </script>
@@ -34,8 +37,9 @@
     </div>{/if}
     {#if deleting}<div role="alert" class="mt-3 rounded border border-red-900 bg-red-950/30 p-3 text-xs text-neutral-300">
       <p>{locale.t(category ? 'prompt_studio.delete_category_hint' : 'prompt_studio.delete_subcategory_hint')}</p>
-      <button type="button" class="touch-target mt-2 rounded bg-red-900 px-3" onclick={remove}>{locale.t('common.confirm')}</button>
+      <button type="button" disabled={!customCatalog.ready} class="touch-target mt-2 rounded bg-red-900 px-3 disabled:opacity-40" onclick={remove}>{locale.t('common.confirm')}</button>
     </div>{/if}
+    {#if error}<p role="alert" class="mt-3 text-xs leading-relaxed text-amber-300">{error}</p>{/if}
     <div class="mt-4 flex justify-end gap-2">
       <button type="button" class="touch-target rounded border border-neutral-700 px-3 text-xs" onclick={onClose}>{locale.t('common.cancel')}</button>
       <button type="submit" disabled={!customCatalog.ready || !name.trim()} class="touch-target rounded bg-amber-400 px-4 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
