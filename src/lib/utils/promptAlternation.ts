@@ -111,6 +111,9 @@ export const ALTERNATION_MODEL_FAMILIES: ReadonlySet<string> = new Set([
 ]);
 export const ALTERNATION_SAMPLERS: ReadonlySet<string> = new Set([
   "euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde",
+  "euler_cfg_pp", "euler_ancestral_cfg_pp", "dpmpp_2m_cfg_pp",
   "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu",
   "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "lcm", "lms", "ddpm", "er_sde",
+  "res_multistep", "res_multistep_cfg_pp",
+  "res_multistep_ancestral", "res_multistep_ancestral_cfg_pp",
 ]);

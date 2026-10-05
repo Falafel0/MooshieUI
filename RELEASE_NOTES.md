@@ -1,3 +1,13 @@
+## What's New in v2.3.9-fork.5
+
+### Prompt alternation sampler compatibility
+- Scheduled artist alternation such as `<fromto[0.875]:[(artist a:1.35)|(artist b:1.25)]||painting>` now works with RES multistep samplers, including ancestral and CFG++ variants. Compatible samplers are no longer incorrectly rejected as multi-evaluation samplers.
+- Euler CFG++, Euler ancestral CFG++ and DPM++ 2M CFG++ also support every-step `[a|b]` alternation. The selected sampler, prompt weights and scheduling are preserved.
+- Added workflow, runtime adapter and cross-language compatibility regression checks. Adaptive and off-schedule multi-evaluation samplers remain unsupported.
+- Release packaging starts from the version tag only, avoiding duplicate builds and uploads after a release PR merges. Manual dispatch remains available.
+
+---
+
 ## What's New in v2.3.9-fork.4
 
 ### Prompt Studio usability and persistence

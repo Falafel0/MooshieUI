@@ -27,6 +27,10 @@ Anima can run sequential inpainting from a painted prompt region without a separ
 
 Layer nodes and viewport survive mode changes and canvas remounts. Named projects save document dimensions, base and layer pixels, and generation settings; use the project bar's Save action before closing or switching projects. An older settings-only project can still open without canvas pixels.
 
+## Prompt alternation
+
+Every-step `[a|b]` alternation works with RES multistep, its ancestral and CFG++ variants, and Euler/DPM++ 2M CFG++ samplers. It can appear inside a schedule, for example `<fromto[0.875]:[(artist a:1.35)|(artist b:1.25)]||painting>`. Artist weights and the selected sampler are preserved. Adaptive samplers and samplers that evaluate intermediate off-schedule timesteps remain unsupported. Restart the managed ComfyUI process after updating so it loads the new prompt-alternation adapter.
+
 ## Validation
 
 Focused tests cover mask processing, regional ordering, final-only upscaling, frozen layer settings, cancellation, stale result rejection and the inpainting nodes. Browser interaction checks cover drawing, duplication, rename cancellation, hidden-layer protection, per-layer properties, resizing and viewport preservation.

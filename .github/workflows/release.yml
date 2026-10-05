@@ -1,9 +1,6 @@
 name: Build & Release
 
 on:
-  pull_request_target:
-    types: [closed]
-    branches: [main]
   push:
     tags:
       - 'v*'
@@ -24,13 +21,8 @@ permissions:
 # as well, because it asserts the exact bundle set it expects to find.
 jobs:
   build:
-    # Execute only the already-merged commit from this fork's release branch.
-    # This event also permits packaging after a checkless [skip ci] release PR.
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      (github.event.pull_request.merged == true &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       startsWith(github.event.pull_request.head.ref, 'release/v'))
+    # A release tag is pushed only after its PR merges. Building on both PR
+    # closure and tag push creates duplicate installers and release uploads.
     runs-on: windows-latest
     outputs:
       release_tag: ${{ steps.release-version.outputs.tag }}
@@ -41,10 +33,10 @@ jobs:
         id: release-version
         shell: bash
         env:
-          SOURCE_TAG: ${{ github.event.inputs.tag || github.event.pull_request.head.ref || github.ref_name }}
-          SOURCE_REF: ${{ github.event.inputs.tag || github.event.pull_request.merge_commit_sha || github.sha }}
+          SOURCE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          SOURCE_REF: ${{ github.event.inputs.tag || github.sha }}
         run: |
-          printf 'tag=%s\n' "${SOURCE_TAG#release/}" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$SOURCE_TAG" >> "$GITHUB_OUTPUT"
           printf 'ref=%s\n' "$SOURCE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout

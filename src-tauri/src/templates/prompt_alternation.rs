@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 pub const SUPPORTED_SAMPLERS: &[&str] = &[
     "euler",
     "euler_ancestral",
+    "euler_cfg_pp",
+    "euler_ancestral_cfg_pp",
     "dpmpp_2m",
+    "dpmpp_2m_cfg_pp",
     "dpmpp_2m_sde",
     "dpmpp_2m_sde_gpu",
     "dpmpp_2m_sde_heun",
@@ -18,6 +21,10 @@ pub const SUPPORTED_SAMPLERS: &[&str] = &[
     "lms",
     "ddpm",
     "er_sde",
+    "res_multistep",
+    "res_multistep_cfg_pp",
+    "res_multistep_ancestral",
+    "res_multistep_ancestral_cfg_pp",
 ];
 
 fn escaped(bytes: &[u8], at: usize) -> bool {
@@ -230,5 +237,57 @@ pub fn inject(result: &mut WorkflowResult) {
             id
         };
         result.workflow.get_mut(&consumer).unwrap()["inputs"]["model"] = json!([patch_id, 0]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::templates::{build_workflow, graph_test_util};
+
+    #[test]
+    fn res_and_cfg_pp_samplers_build_scheduled_artist_alternation_without_changing_sampler() {
+        for sampler in [
+            "res_multistep",
+            "res_multistep_cfg_pp",
+            "res_multistep_ancestral",
+            "res_multistep_ancestral_cfg_pp",
+            "euler_cfg_pp",
+            "euler_ancestral_cfg_pp",
+            "dpmpp_2m_cfg_pp",
+        ] {
+            let mut params = graph_test_util::params("txt2img", "anima");
+            params.sampler_name = sampler.into();
+            params.positive_prompt =
+                "<fromto[0.875]:[(@mik uneki:1.35)|(@artist:1.25)]||(painting:2.0)>".into();
+            assert!(validate(&params).is_ok(), "{sampler}");
+            let workflow = build_workflow(&params, 42, false);
+            let encodes = graph_test_util::nodes(&workflow, "MooshieAlternatingTextEncode");
+            assert!(
+                !encodes.is_empty(),
+                "{sampler}: alternation must be encoded"
+            );
+            let patches = graph_test_util::nodes(&workflow, "MooshiePromptAlternation");
+            assert!(!patches.is_empty(), "{sampler}: model must be patched");
+            let samplers = graph_test_util::nodes(&workflow, "KSampler");
+            assert!(!samplers.is_empty(), "{sampler}");
+            for (_, node) in samplers {
+                assert_eq!(node["inputs"]["sampler_name"], sampler);
+                let model_id = node["inputs"]["model"][0].as_str().unwrap();
+                assert_eq!(workflow[model_id]["class_type"], "MooshiePromptAlternation");
+            }
+        }
+    }
+
+    #[test]
+    fn multi_evaluation_and_adaptive_samplers_still_reject_alternation() {
+        let mut params = graph_test_util::params("txt2img", "anima");
+        params.positive_prompt = "[artist a|artist b]".into();
+        for sampler in ["heun", "dpmpp_2s_ancestral_cfg_pp", "dpm_adaptive"] {
+            params.sampler_name = sampler.into();
+            assert!(validate(&params).unwrap_err().contains("single-evaluation"));
+        }
+        params.positive_prompt = "ordinary prompt".into();
+        assert!(validate(&params).is_ok());
     }
 }
