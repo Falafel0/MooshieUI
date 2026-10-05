@@ -63,6 +63,11 @@ jobs:
       - name: i18n parity
         run: node scripts/check-i18n-parity.mjs
 
+      - name: Prompt alternation sampler regressions
+        run: |
+          node --test tests/prompt-alternation.test.mjs
+          python3 scripts/comfyui-compat/test_prompt_alternation.py
+
       - name: Release artifact checks
         run: python3 -m unittest discover -s scripts -p test_release_artifacts.py
 

@@ -1779,6 +1779,13 @@ class MooshieAlternatingTextEncode:
 
 _ALTERNATION_SAMPLER_FUNCTIONS = {
     "sample_euler", "sample_euler_ancestral", "sample_dpmpp_2m",
+    # CFG++ variants still evaluate once at each scheduled sigma. Their
+    # post-CFG hook retains the unconditional output without an extra step.
+    "sample_euler_cfg_pp", "sample_euler_ancestral_cfg_pp", "sample_dpmpp_2m_cfg_pp",
+    # RES multistep reuses the previous denoised result; it does not make
+    # intermediate/off-schedule model evaluations.
+    "sample_res_multistep", "sample_res_multistep_cfg_pp",
+    "sample_res_multistep_ancestral", "sample_res_multistep_ancestral_cfg_pp",
     "sample_dpmpp_2m_sde", "sample_dpmpp_2m_sde_gpu",
     "sample_dpmpp_2m_sde_heun", "sample_dpmpp_2m_sde_heun_gpu",
     "sample_dpmpp_3m_sde", "sample_dpmpp_3m_sde_gpu",
