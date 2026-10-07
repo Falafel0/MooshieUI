@@ -4134,26 +4134,11 @@ async fn dispatch_command(
             }
             let dir = user_gallery_dir(username).ok_or("Cannot find gallery directory")?;
             let path = dir.join(&filename);
-            if path.exists() {
-                if filename.ends_with(".mp4") {
-                    commands::video_drafts::delete_draft(&state, &dir, &filename)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
-                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-            }
-            crate::gallery_index::remove(&path);
-            // Videos own a poster sidecar that listings never surface; delete it
-            // together with its mp4, matching the desktop `delete_gallery_image`
-            // command. Without this, deleting a video in browser mode orphans the
-            // poster file and its index row forever.
-            if let Some(stem) = filename.strip_suffix(".mp4") {
-                let poster = path.with_file_name(format!("{stem}_poster.webp"));
-                if poster.is_file() {
-                    let _ = std::fs::remove_file(&poster);
-                    crate::gallery_index::remove(&poster);
-                }
-            }
+            // Same path as the desktop command: recycle bin, index rows, and
+            // a video's poster sidecar.
+            commands::api::delete_gallery_file(&state, &dir, &filename, &path)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(serde_json::json!(null))
         }
         "rename_gallery_image" => {
@@ -6699,9 +6684,9 @@ pub async fn run_prompt_assistant_headless(
             .map(|e| e.purpose)
             .unwrap_or_else(|| "natural_language".to_string())
     };
-    let tag_only = grounding::is_tag_only(&purpose, family);
-    let candidates = grounding::retrieve_candidates(input, 40);
-    let system = grounding::system_prompt(tag_only, mode, &candidates, include_artists);
+    let style = grounding::prompt_style(&purpose, family);
+    let candidates = grounding::candidates_for(style, input);
+    let system = grounding::system_prompt(style, mode, &candidates, include_artists);
     // Mirror the desktop token budget so browser Enhance/Compose honors the
     // user's length pick instead of always generating at the medium default.
     let max_tokens = match length {
@@ -6714,11 +6699,10 @@ pub async fn run_prompt_assistant_headless(
     );
     let system = crate::prompt_assistant::history::with_session_clause(&system, &history);
     let raw = chat_any_headless(state, &system, &history, input, max_tokens, &[]).await?;
-    let cleaned = grounding::repair(&raw, tag_only);
     // Enhance is additive: keep every user tag and don't let the model swap a
-    // pinned attribute. No-op for Compose. The desktop path runs this too;
-    // omitting it here made browser Enhance silently drop user tags.
-    Ok(grounding::reconcile_enhance(input, &cleaned, mode))
+    // pinned attribute. No-op for Compose and for prose families. The desktop path
+    // runs this too; omitting it here made browser Enhance silently drop user tags.
+    Ok(grounding::finish(input, &raw, mode, style))
 }
 
 // ---------------------------------------------------------------------------

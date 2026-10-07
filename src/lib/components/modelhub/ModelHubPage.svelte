@@ -23,6 +23,7 @@
   import { modelRequests } from "../../stores/modelRequests.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { showError } from "../../stores/errorModal.svelte.js";
+  import { portal } from "../../utils/portal.js";
 
   const CIVITAI_API_KEY_KEY = "mooshieui.civitai.apiKey.v1";
   const CIVITAI_COLUMNS_KEY = "mooshieui.civitai.columns.v1";
@@ -119,6 +120,12 @@
       url: "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
       filename: "qwen3vl_4b_fp8_scaled.safetensors",
       category: "text_encoders",
+    },
+    {
+      label: "Krea 2 - Wulver v0.5 FP8 (Turbo)",
+      url: "https://huggingface.co/Vaelico/Wulver/resolve/main/Wulver_v0.5_fp8_e4m3fn.safetensors",
+      filename: "Wulver_v0.5_fp8_e4m3fn.safetensors",
+      category: "diffusion_models",
     },
   ] as const;
 
@@ -1409,6 +1416,7 @@
           {@const expanded = isCardExpanded(model.id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
+            use:portal
             class="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
             onmousedown={(e) => { if (e.target === e.currentTarget) selectedModel = null; }}
             onkeydown={(e) => { if (e.key === "Escape") selectedModel = null; }}

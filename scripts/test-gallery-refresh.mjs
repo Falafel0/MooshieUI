@@ -23,7 +23,7 @@ const output = (filename, saved = false) => ({
 });
 function harness(desktop = false) {
   const disk = { entries: [], metadata: new Map(), listGate: null, metadataGate: null, fail: false };
-  const calls = { lists: 0, metadata: [], revoked: [] };
+  const calls = { lists: 0, metadata: [], revoked: [], deleted: [] };
   const api = {
     listGalleryImageEntries: async () => {
       calls.lists++;
@@ -40,6 +40,7 @@ function harness(desktop = false) {
     },
     getStorageInfo: async () => ({ usage_bytes: 0, limit_bytes: 0, expiry_secs: 0, images: [] }),
     deleteGalleryImage: async filename => {
+      calls.deleted.push(filename);
       disk.entries = disk.entries.filter(item => item.filename !== filename);
     },
     saveToGalleryBytes: async () => { await disk.saveGate.promise; return "saved.png"; },
@@ -229,6 +230,28 @@ console.log("PASS: refresh waits for earlier metadata reads before reloading");
   assert.equal(gallery.sessionImages[0], saving);
 }
 console.log("PASS: a file discovered before its save response does not duplicate the session image");
+
+{
+  const { gallery, disk, calls } = harness();
+  const [saving] = gallery.addImages([output("pending-delete.png")]);
+  disk.saveGate = deferred();
+  const save = gallery.persistImages([saving], undefined, [new Blob(["synthetic image"])]);
+  let deletionFinished = false;
+  const deletion = gallery.deleteImage(saving).then(() => { deletionFinished = true; });
+  await tick();
+  assert.equal(deletionFinished, false, "Deletion waits for the in-flight save");
+  assert.deepEqual(calls.deleted, [], "There is no filename to delete until save completes");
+  disk.entries = [entry("saved.png")];
+  disk.saveGate.resolve();
+  await Promise.all([save, deletion]);
+  assert.deepEqual(calls.deleted, ["saved.png"]);
+  assert.equal(disk.entries.length, 0, "The saved file is removed from disk");
+  assert.equal(gallery.images.length, 0);
+  assert.equal(gallery.sessionImages.length, 0);
+  await gallery.refresh();
+  assert.equal(gallery.images.length, 0, "Refresh cannot resurrect the deleted result");
+}
+console.log("PASS: deleting a saving session result waits, deletes on disk and cannot resurrect");
 
 {
   const { gallery, disk } = harness(true);
