@@ -2749,6 +2749,9 @@ const es: Record<string, string> = {
   "lora.likes": "Me gusta",
 
   // ── Panel inferior ──────────────────────────────────────
+  "bottom_panel.workspace": "Herramientas de generación",
+  "bottom_panel.select_hint": "Selecciona un resultado para ver sus acciones",
+  "bottom_panel.open": "Abrir",
   "bottom_panel.tab.loras": "LoRAs",
   "bottom_panel.tab.checkpoints": "Checkpoints",
   "checkpoint.search_placeholder": "Buscar checkpoints...",

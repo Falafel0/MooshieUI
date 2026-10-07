@@ -10,13 +10,17 @@
   import { stripArtistSigil } from "../../utils/artistTag.js";
   import type { StyleArtist } from "../../stores/styles.svelte.js";
 
+  $effect(() => {
+    if (connection.artistGalleryManifestUrl) void gallery.loadArtistIndex(connection.artistGalleryManifestUrl);
+  });
+
   let anchorInput = $state("");
   let anchorUnresolved = $state(false);
 
   const hasAnchor = $derived(styleCreator.anchor.length > 0);
   const indexReady = $derived(gallery.artistIndexReady);
   // Without a manifest URL, gallery.loadArtistIndex is never called (see
-  // BottomPanel.svelte), so indexReady would stay false forever with no
+  // this component), so indexReady would stay false forever with no
   // explanation of why.
   const noManifest = $derived(!connection.artistGalleryManifestUrl);
   // NovelAI generates server-side, so a round is impossible without a key.

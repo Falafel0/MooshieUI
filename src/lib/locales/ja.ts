@@ -2712,6 +2712,9 @@ const ja: Record<string, string> = {
   "lora.likes": "いいね",
 
   // ── 下部パネル ──────────────────────────────────────────
+  "bottom_panel.workspace": "生成ツール",
+  "bottom_panel.select_hint": "結果を選択すると操作が表示されます",
+  "bottom_panel.open": "開く",
   "bottom_panel.tab.loras": "LoRA",
   "bottom_panel.tab.checkpoints": "チェックポイント",
   "checkpoint.search_placeholder": "チェックポイントを検索...",

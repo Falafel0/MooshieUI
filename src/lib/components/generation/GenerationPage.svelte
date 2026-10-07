@@ -1009,12 +1009,12 @@
 
   const LEFT_DEFAULT = 360;
   const RIGHT_DEFAULT = 310;
-  const BOTTOM_DEFAULT = 180;
+  const BOTTOM_DEFAULT = 260;
   const LEFT_MIN = 260;
   const LEFT_MAX = 520;
   const RIGHT_MIN = 240;
   const RIGHT_MAX = 450;
-  const BOTTOM_MIN = 100;
+  const BOTTOM_MIN = 220;
   const BOTTOM_MAX = 500;
 
   const _savedLayout = loadPanelLayout();
@@ -1363,6 +1363,21 @@
 
   function resetBottomHeight() {
     bottomHeight = BOTTOM_DEFAULT;
+    savePanelLayout();
+  }
+
+  function resizeBottomWithKeyboard(event: KeyboardEvent) {
+    if (bottomCollapsed) return;
+    let height: number;
+    if (event.key === "ArrowUp") height = bottomHeight + 20;
+    else if (event.key === "ArrowDown") height = bottomHeight - 20;
+    else if (event.key === "Home") height = BOTTOM_MIN;
+    else if (event.key === "End") height = BOTTOM_MAX;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    bottomHeight = Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, height));
+    savePanelLayout();
   }
 
   $effect(() => {
@@ -2660,8 +2675,19 @@
     <!-- Bottom panel (LoRAs / Images / Prompts) — full width, below the side panels -->
     {#if !mobileFriendly}
       <div class="relative shrink-0 flex items-center group">
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- A focusable ARIA separator is the window-splitter keyboard control. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={locale.t('generation.drag_to_resize')}
+          aria-valuemin={BOTTOM_MIN}
+          aria-valuemax={BOTTOM_MAX}
+          aria-valuenow={bottomHeight}
+          aria-controls="desktop-bottom-panel"
+          aria-disabled={bottomCollapsed}
+          tabindex={bottomCollapsed ? -1 : 0}
+          onkeydown={resizeBottomWithKeyboard}
           class="h-1 flex-1 cursor-row-resize hover:bg-indigo-500/40 transition-colors {dragging === 'bottom' ? 'bg-indigo-500/60' : 'bg-neutral-800'}"
           onmousedown={(e) => onDividerDown("bottom", e)}
           ondblclick={resetBottomHeight}
@@ -2669,6 +2695,9 @@
         ></div>
         <button
           onclick={toggleBottomPanel}
+          aria-expanded={!bottomCollapsed}
+          aria-controls="desktop-bottom-panel"
+          aria-label={bottomCollapsed ? locale.t('generation.panel.expand_bottom') : locale.t('generation.panel.collapse_bottom')}
           class="absolute left-1/2 -translate-x-1/2 bottom-0 z-20 h-6 w-12 flex items-center justify-center rounded-t border border-b-0 transition-colors {bottomCollapsed
             ? 'bg-indigo-600 border-indigo-500/70 text-white hover:bg-indigo-500'
             : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'}"
@@ -2679,6 +2708,7 @@
       </div>
       {#if !bottomCollapsed}
         <div
+          id="desktop-bottom-panel"
           class="overflow-hidden shrink-0 min-w-0 border-t border-neutral-800/50"
           style="height: {bottomHeight}px"
         >

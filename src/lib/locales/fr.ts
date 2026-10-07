@@ -2712,6 +2712,9 @@ const fr: Record<string, string> = {
   "lora.likes": "J'aime",
 
   // ── Panneau inférieur ───────────────────────────────────
+  "bottom_panel.workspace": "Outils de génération",
+  "bottom_panel.select_hint": "Sélectionnez un résultat pour afficher ses actions",
+  "bottom_panel.open": "Ouvrir",
   "bottom_panel.tab.loras": "LoRAs",
   "bottom_panel.tab.checkpoints": "Checkpoints",
   "checkpoint.search_placeholder": "Rechercher des checkpoints...",

@@ -3040,6 +3040,9 @@ const en: Record<string, string> = {
   "gallery.persisted_only_thumb": "Save this image to the gallery first (generated images in the session cannot be used yet)",
 
   // ── Bottom Panel ────────────────────────────────────────
+  "bottom_panel.workspace": "Generation tools",
+  "bottom_panel.select_hint": "Select a result to show its actions",
+  "bottom_panel.open": "Open",
   "bottom_panel.tab.loras": "LoRAs",
   "bottom_panel.tab.checkpoints": "Checkpoints",
   "bottom_panel.tab.images": "Images",

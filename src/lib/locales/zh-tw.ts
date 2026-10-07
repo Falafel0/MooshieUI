@@ -2690,6 +2690,9 @@ const zhTw: Record<string, string> = {
   "lora.likes": "按讚",
 
   // ── 底部面板 ────────────────────────────────────────────
+  "bottom_panel.workspace": "生成工具",
+  "bottom_panel.select_hint": "選取結果以顯示可用操作",
+  "bottom_panel.open": "開啟",
   "bottom_panel.tab.loras": "LoRA",
   "bottom_panel.tab.checkpoints": "檢查點",
   "checkpoint.search_placeholder": "搜尋檢查點...",

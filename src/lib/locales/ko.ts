@@ -2690,6 +2690,9 @@ const ko: Record<string, string> = {
   "lora.likes": "좋아요",
 
   // ── 하단 패널 ──────────────────────────────────────────
+  "bottom_panel.workspace": "생성 도구",
+  "bottom_panel.select_hint": "결과를 선택하면 작업이 표시됩니다",
+  "bottom_panel.open": "열기",
   "bottom_panel.tab.loras": "LoRA",
   "bottom_panel.tab.checkpoints": "체크포인트",
   "checkpoint.search_placeholder": "체크포인트 검색...",

@@ -2690,6 +2690,9 @@ const ru: Record<string, string> = {
   "lora.likes": "Нравится",
 
   // ── Нижняя панель ───────────────────────────────────────
+  "bottom_panel.workspace": "Инструменты генерации",
+  "bottom_panel.select_hint": "Выберите результат, чтобы открыть действия с ним",
+  "bottom_panel.open": "Открыть",
   "bottom_panel.tab.loras": "LoRA",
   "bottom_panel.tab.checkpoints": "Чекпоинты",
   "checkpoint.search_placeholder": "Поиск чекпоинтов...",

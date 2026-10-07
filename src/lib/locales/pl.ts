@@ -2994,6 +2994,9 @@ const pl: Record<string, string> = {
   "gallery.persisted_only_thumb": "Najpierw zapisz ten obraz do galerii (obrazy wygenerowane w tej sesji nie mogą być jeszcze użyte)",
 
   // ── Bottom Panel ────────────────────────────────────────
+  "bottom_panel.workspace": "Narzędzia generowania",
+  "bottom_panel.select_hint": "Wybierz wynik, aby wyświetlić działania",
+  "bottom_panel.open": "Otwórz",
   "bottom_panel.tab.loras": "LoRAs",
   "bottom_panel.tab.checkpoints": "Checkpoints",
   "bottom_panel.tab.images": "Obrazy",

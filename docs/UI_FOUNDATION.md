@@ -47,3 +47,15 @@ Collapse/Expand affects the available top-level sections, preserving the separat
 Check a setting after collapsing its accordion and its side panel, then repeat after swapping panels. Switch between Txt2Img, Img2Img, and Inpainting and verify that search only offers applicable sections. Collapse sections, reload, and check that their state persists. Check both full-size and smaller desktop windows.
 
 `npm run check:types` now returns Svelte's actual exit status, so a type error fails the check.
+
+## Bottom generation panel
+
+The bottom panel separates navigation, session results, prompt history, and favourite artists into dedicated components. Its local UI store remembers the active tool independently for image generation, NovelAI, and video. Search text survives tab changes and panel collapse. Existing tab and card-size preferences migrate to the new validated settings; unavailable tools fall back without discarding the remembered selection.
+
+Tabs use a single keyboard stop: Left/Right wrap, Home/End jump, and the selected tab scrolls into view. Each tab labels its content panel. Controls follow the interface density and theme.
+
+In Images, click a result to select it. Its actions stay in a toolbar below the scrolling grid. **Open**, double-click, or Enter on an already selected result opens the viewer. Save, copy, refine, image-to-image, inpaint, video-frame/reference actions, and deletion retain their existing behavior and video restrictions. Deleting advances selection to the next result in that slot. The desktop panel starts at 260px and can resize down to 220px to keep navigation, results, and actions usable. Focus the horizontal divider and use Up/Down to resize by 20px, Home/End for the limits. Double-click restores the default height; changes persist.
+
+Prompt history uses a responsive card grid with labelled favourite/remove controls. Favourite artists retain category filters and shared preview variants. Notes flush pending saves when the panel closes. Style Creator now loads its own artist index rather than depending on its parent.
+
+Verify a migrated tab/card-size preference, keyboard tab navigation, result selection and actions, search after switching tabs/collapsing, prompt favourites, notes, and remembered tools after a video/image mode round trip. `tests/bottom-panel.test.mjs` covers capability gates, label selection, and corrupt preferences.

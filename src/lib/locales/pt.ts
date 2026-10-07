@@ -2690,6 +2690,9 @@ const pt: Record<string, string> = {
   "lora.likes": "Curtidas",
 
   // ── Painel Inferior ─────────────────────────────────────
+  "bottom_panel.workspace": "Ferramentas de geração",
+  "bottom_panel.select_hint": "Selecione um resultado para mostrar as ações",
+  "bottom_panel.open": "Abrir",
   "bottom_panel.tab.loras": "LoRAs",
   "bottom_panel.tab.checkpoints": "Checkpoints",
   "checkpoint.search_placeholder": "Pesquisar checkpoints...",
