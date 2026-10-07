@@ -374,6 +374,10 @@ pub fn ensure_mooshie_nodes(comfyui_path: &str) -> Result<(), String> {
             "h3_upscaler.LICENSE",
             include_str!("../../../comfyui-nodes/h3_upscaler.LICENSE"),
         ),
+        (
+            "gguf_compat.py",
+            include_str!("../../../comfyui-nodes/gguf_compat.py"),
+        ),
     ] {
         std::fs::write(mooshie_dir.join(name), content).map_err(|e| e.to_string())?;
     }
@@ -2258,6 +2262,35 @@ mod tests {
             !DOCKERFILE.contains("git clone"),
             "Dockerfile must not clone node packs from an unpinned HEAD"
         );
+    }
+
+    /// The macOS release smoke test deploys the bundled nodes from its own file
+    /// map. A file the app deploys but the map omits fails the import of the
+    /// whole pack there (v2.3.13 shipped `gguf_compat.py` this way). Unlike the
+    /// install.sh parity test this runs on every platform.
+    #[test]
+    fn smoke_test_deploys_every_bundled_node_file() {
+        const NODES_RS: &str = include_str!("nodes.rs");
+        const SMOKE_TEST: &str = include_str!("../../../scripts/comfyui-compat/smoke_test.py");
+        const NEEDLE: &str = "include_str!(\"../../../comfyui-nodes/";
+        let mut seen = 0;
+        for (start, _) in NODES_RS.match_indices(NEEDLE) {
+            let rest = &NODES_RS[start + NEEDLE.len()..];
+            let file = &rest[..rest.find('"').unwrap()];
+            // Package files may be mapped by a comprehension over their names:
+            // f"comfyui-nodes/minimax_director/{name}" for name in ("LICENSE", ...).
+            let listed = SMOKE_TEST.contains(&format!("\"comfyui-nodes/{file}\""))
+                || file.split_once('/').is_some_and(|(dir, name)| {
+                    SMOKE_TEST.contains(&format!("comfyui-nodes/{dir}/{{name}}"))
+                        && SMOKE_TEST.contains(&format!("\"{name}\""))
+                });
+            assert!(
+                listed,
+                "scripts/comfyui-compat/smoke_test.py NODE_FILE_MAP is missing comfyui-nodes/{file}"
+            );
+            seen += 1;
+        }
+        assert!(seen >= 10, "expected nodes.rs to bundle the node files");
     }
 
     fn git_available() -> bool {

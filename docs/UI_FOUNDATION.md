@@ -65,3 +65,7 @@ Prompt history uses readable cards with labelled favourite/remove controls. Favo
 This stage preserves the existing Compare parameter-grid tool. Central viewport comparison of generated variants, project-local Notes, mode-specific Prompt/Instruction layouts and the full Current-versus-Library Inspector redesign are subsequent work; the Shelf does not pretend these features already exist.
 
 Verify pin/reorder/open behavior, migrated preferences, keyboard navigation, horizontal/grid views, reference search, result actions, Styles subviews, Jobs, notes, and per-mode state across collapse/reload. `tests/bottom-panel.test.mjs` covers groups, capability gates, labels, default/invalid pins, transient panels and mode keys.
+
+## Upstream integration
+
+This branch merges upstream `main` at `14a7ca6` (v2.3.16), including Krea 2 GGUF compatibility, stale ComfyUI restart after app updates, and optional Krea 2 encoder selection. Fork package identity, updater destination and Windows packaging remain intact. Encoder selection combines upstream's installed Krea 2 preference with the fork's family-only loader detection and inventory guards; regression checks exercise both paths.
