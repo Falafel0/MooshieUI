@@ -1959,6 +1959,8 @@ const zh: Record<string, string> = {
   "generation.sampler.anima_rdbt_toggle": "RDBT-Anima LoRA",
   "generation.sampler.anima_rdbt_tip": "下载并应用社区制作的 RDBT-Anima 引导蒸馏 LoRA（约 92MB，非官方镜像）。通过取消 CFG 需求加快生成速度。",
   "generation.sampler.anima_rdbt_downloading": "正在下载 RDBT-Anima LoRA…",
+  "generation.sampler.anima_beta57_toggle": "绘画质感 (beta57)",
+  "generation.sampler.anima_beta57_tip": "将调度器切换为 RES4LYF 节点包中的 beta57，Anima 模型卡建议用它获得更具绘画感或更写实的效果。步数、CFG 和采样器保持不变。关闭后恢复常用调度器。",
   "generation.sampler.sih_recommended": "SIH 推荐设置",
   "generation.sampler.sih_hint": "无公开 SIH 模型卡设置。使用项目默认值：20 步，CFG 1.4，euler_cfg_pp，sgm_uniform。",
   "generation.sampler.juice_recommended": "Juice 推荐设置",
@@ -2490,6 +2492,14 @@ const zh: Record<string, string> = {
   "generation.sampler.dmd2_toggle": "使用 DMD2（4 步，CFG 1）",
   "generation.sampler.dmd2_tip": "加载 DMD2 蒸馏 LoRA，并设置 4 步、CFG 1、LCM 采样器、SGM uniform 调度器——以极短的时间获得接近完整质量的效果。关闭后将移除 LoRA，但采样器设置保留以供手动还原。",
   "generation.sampler.dmd2_downloading": "正在下载 DMD2 LoRA...",
+  "generation.sampler.krea_steps_title": "Krea 2 Turbo 步数",
+  "generation.sampler.krea_steps_8": "8 步",
+  "generation.sampler.krea_steps_4": "4 步",
+  "generation.sampler.krea_steps_2": "2 步",
+  "generation.sampler.krea_steps_8_hint": "原版 Turbo，不加加速 LoRA。",
+  "generation.sampler.krea_steps_4_hint": "社区 4 步 LoRA（418 MB）。约快 1.6 倍，画质几乎不变。若纹理过重，可将强度降到 0.75。",
+  "generation.sampler.krea_steps_2_hint": "社区 2 步预览 LoRA（418 MB）。适合近景主体；小脸和远景可能模糊。最终出图请用 4 步。",
+  "generation.sampler.krea_steps_downloading": "正在下载 Krea 2 Turbo LoRA...",
 
   "generation.upscale_history.title": "精炼历史",
 
@@ -2667,7 +2677,7 @@ const zh: Record<string, string> = {
   "bottom_panel.no_videos": "本次会话未生成视频",
   "bottom_panel.no_video_results": "没有符合搜索条件的视频",
   "bottom_panel.video_search_placeholder": "搜索视频...",
-  "bottom_panel.delete_all_videos_confirm": "删除本次会话生成的全部 {count} 个视频？此操作无法撤销。",
+  "bottom_panel.delete_all_videos_confirm": "删除本次会话生成的全部 {count} 个视频？将移至回收站。",
   "bottom_panel.tab.prompts": "提示词",
   "bottom_panel.no_images": "本次会话未生成图像",
   "bottom_panel.no_prompts": "生成后提示词历史将显示在这里",
@@ -2688,7 +2698,7 @@ const zh: Record<string, string> = {
   "bottom_panel.no_prompt_results": "没有符合搜索条件的提示词",
   "bottom_panel.card_size": "卡片大小",
   "bottom_panel.delete_all": "全部删除",
-  "bottom_panel.delete_all_confirm": "删除本次会话生成的全部 {count} 张图片？此操作无法撤销。",
+  "bottom_panel.delete_all_confirm": "删除本次会话生成的全部 {count} 张图片？将移至回收站。",
 
   // ── 下载 ────────────────────────────────────────────────
   "downloads.cancel": "取消下载",

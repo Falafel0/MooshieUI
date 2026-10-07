@@ -2814,26 +2814,86 @@ pub async fn delete_gallery_image(
     let dir = crate::config::gallery_dir()
         .ok_or_else(|| AppError::Other("Cannot find gallery directory".into()))?;
     match resolve_gallery_image_path(&dir, &filename) {
-        Ok(path) => {
-            if filename.ends_with(".mp4") {
-                super::video_drafts::delete_draft(state.inner(), &dir, &filename).await?;
-            }
-            std::fs::remove_file(&path)?;
-            crate::gallery_index::remove(&path);
-            // Videos own a poster sidecar that listings never surface; delete it
-            // together with its mp4.
-            if let Some(stem) = filename.strip_suffix(".mp4") {
-                let poster = path.with_file_name(format!("{stem}_poster.webp"));
-                if poster.is_file() {
-                    let _ = std::fs::remove_file(&poster);
-                    crate::gallery_index::remove(&poster);
-                }
-            }
-        }
+        Ok(path) => delete_gallery_file(state.inner(), &dir, &filename, &path).await?,
         Err(GalleryPathResolveError::NotFound) => {}
         Err(e) => return Err(AppError::Other(format!("{}: {}", e, filename))),
     }
     Ok(())
+}
+
+/// Delete one gallery file, for both the desktop command and the browser-mode
+/// route: release a video's retained draft, send the file to the OS recycle
+/// bin, and drop it from the gallery index. Videos own a poster sidecar that
+/// listings never surface; it goes to the bin with its mp4 so restoring both
+/// brings the thumbnail back. A file already gone only loses its index rows.
+pub(crate) async fn delete_gallery_file(
+    state: &AppState,
+    dir: &std::path::Path,
+    filename: &str,
+    path: &std::path::Path,
+) -> Result<(), AppError> {
+    if path.exists() {
+        if filename.ends_with(".mp4") {
+            super::video_drafts::delete_draft(state, dir, filename).await?;
+        }
+        trash_or_remove(path).await?;
+    }
+    crate::gallery_index::remove(path);
+    if let Some(stem) = filename.strip_suffix(".mp4") {
+        let poster = path.with_file_name(format!("{stem}_poster.webp"));
+        if poster.is_file() {
+            let _ = trash_or_remove(&poster).await;
+            crate::gallery_index::remove(&poster);
+        }
+    }
+    Ok(())
+}
+
+/// Move `path` to the OS recycle bin (Windows Recycle Bin, macOS Trash,
+/// freedesktop trash on Linux) so a gallery delete can be undone from the
+/// file manager. When the platform has no usable bin for the path (a network
+/// share, a headless server without a home trash) the file is deleted for
+/// good instead: a delete that silently fails brings the image back on the
+/// next launch.
+pub(crate) async fn trash_or_remove(path: &std::path::Path) -> std::io::Result<()> {
+    let target = path.to_path_buf();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // A fresh thread per call: on Windows `trash` initialises COM on the
+    // calling thread and panics if that thread already joined another
+    // apartment, which a reused tokio worker may have. A panic drops `tx`
+    // and lands in the fallback below.
+    std::thread::Builder::new()
+        .name("gallery-trash".into())
+        .spawn(move || {
+            let _ = tx.send(move_to_trash(&target));
+        })?;
+    let reason = match rx.await {
+        Ok(Ok(())) => return Ok(()),
+        Ok(Err(e)) => e.to_string(),
+        Err(_) => "trash worker panicked".to_string(),
+    };
+    log::warn!(
+        "[gallery] Recycle bin unavailable for {} ({reason}); deleting permanently",
+        path.display()
+    );
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+fn move_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    // The default Finder method needs Automation permission and fails without
+    // it; NSFileManager needs none, and the file is still restorable by
+    // dragging it out of the Trash.
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx.delete(path)
 }
 
 #[cfg(feature = "desktop")]
@@ -4672,10 +4732,13 @@ fn model_family_from_filename(filename: &str) -> Option<&'static str> {
     if name.contains("ideogram4") {
         return Some("ideogram4");
     }
+    // Wulver (Vaelico/Wulver) is a Krea 2 Raw fine-tune whose filenames carry no
+    // Krea marker (e.g. "Wulver_v0.5_fp8_e4m3fn.safetensors").
     if name.contains("krea2")
         || name.contains("krea-2")
         || name.contains("krea_2")
         || name.contains("krea 2")
+        || name.contains("wulver")
     {
         return Some("krea2");
     }
@@ -4759,6 +4822,15 @@ fn turbo_model_variant_from_filename(filename: &str) -> &'static str {
         || name.contains(" zit")
         || name.starts_with("zit")
     {
+        return "turbo";
+    }
+    // "non_turbo" names the undistilled weights, not a Turbo variant.
+    if name.contains("non_turbo") || name.contains("non-turbo") || name.contains("nonturbo") {
+        return "none";
+    }
+    // Wulver ships its Turbo-merged files without "turbo" in the name; only the
+    // non_turbo files (caught above) are undistilled.
+    if name.contains("wulver") {
         return "turbo";
     }
     if name.contains("dmd2") {
@@ -5109,6 +5181,38 @@ mod split_model_pairing_tests {
         assert_eq!(
             turbo_model_variant_from_filename("anima-aesthetic-v1.1.safetensors"),
             "none"
+        );
+    }
+
+    #[test]
+    fn wulver_files_resolve_to_krea2_with_turbo_variant() {
+        for name in [
+            "Wulver_v0.5_fp8_e4m3fn.safetensors",
+            "Wulver_v0.5_w4a8-convrot.safetensors",
+            "Wulver_v0.5_non_turbo_bf16.safetensors",
+            "Wulver_v0.5_non_turbo_int8-convrot.safetensors",
+        ] {
+            assert_eq!(model_family_from_filename(name), Some("krea2"), "{name}");
+        }
+        assert_eq!(
+            turbo_model_variant_from_filename("Wulver_v0.5_fp8_e4m3fn.safetensors"),
+            "turbo"
+        );
+        assert_eq!(
+            turbo_model_variant_from_filename("Wulver_v0.5_bf16.safetensors"),
+            "turbo"
+        );
+        assert_eq!(
+            turbo_model_variant_from_filename("Wulver_v0.5_non_turbo_bf16.safetensors"),
+            "none"
+        );
+        assert_eq!(
+            turbo_model_variant_from_filename("Wulver_v0.5_non_turbo_int8-convrot.safetensors"),
+            "none"
+        );
+        assert_eq!(
+            turbo_model_variant_from_filename("Krea-2-Turbo-Q5_K_S.gguf"),
+            "turbo"
         );
     }
 
@@ -5963,10 +6067,13 @@ pub(crate) async fn read_modelspec_internal(
             .get_models_list("text_encoders")
             .await
             .unwrap_or_default();
-        if let Ok(legacy) = state.get_models_list("clip").await {
-            for encoder in legacy {
-                if !encoders.contains(&encoder) {
-                    encoders.push(encoder);
+        // `.gguf` encoders are only listed under ComfyUI-GGUF's `clip_gguf`.
+        for extra in ["clip", "clip_gguf"] {
+            if let Ok(more) = state.get_models_list(extra).await {
+                for encoder in more {
+                    if !encoders.contains(&encoder) {
+                        encoders.push(encoder);
+                    }
                 }
             }
         }

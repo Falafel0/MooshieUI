@@ -1980,6 +1980,8 @@ const de: Record<string, string> = {
   "generation.sampler.anima_rdbt_toggle": "RDBT-Anima LoRA",
   "generation.sampler.anima_rdbt_tip": "Lädt die von der Community erstellte RDBT-Anima Guidance-Distilled-LoRA herunter und wendet sie an (~92MB, inoffizieller Mirror). Beschleunigt die Generierung, da kein CFG mehr nötig ist.",
   "generation.sampler.anima_rdbt_downloading": "RDBT-Anima LoRA wird heruntergeladen…",
+  "generation.sampler.anima_beta57_toggle": "Malerische Texturen (beta57)",
+  "generation.sampler.anima_beta57_tip": "Stellt den Scheduler auf beta57 aus dem RES4LYF-Node-Paket um, das die Anima-Modellkarte für einen malerischeren oder realistischeren Look empfiehlt. Schritte, CFG und Sampler bleiben unverändert. Ausschalten stellt den üblichen Scheduler wieder her.",
   "generation.sampler.sih_recommended": "Empfohlene SIH-Einstellungen",
   "generation.sampler.sih_hint": "Keine öffentlichen SIH-Modellkarteneinstellungen. Projekt-Standardwerte: 20 Schritte, CFG 1.4, euler_cfg_pp, sgm_uniform.",
   "generation.sampler.juice_recommended": "Empfohlene Juice-Einstellungen",
@@ -2511,6 +2513,14 @@ const de: Record<string, string> = {
   "generation.sampler.dmd2_toggle": "DMD2 verwenden (4 Schritte, CFG 1)",
   "generation.sampler.dmd2_tip": "Lädt die DMD2-Destillations-LoRA und setzt 4 Schritte, CFG 1, LCM-Sampler, SGM uniform-Scheduler — nahezu volle Qualität in einem Bruchteil der Zeit. Das Deaktivieren entfernt die LoRA, lässt aber die Sampler-Einstellungen zur manuellen Wiederherstellung.",
   "generation.sampler.dmd2_downloading": "DMD2-LoRA wird heruntergeladen...",
+  "generation.sampler.krea_steps_title": "Krea 2 Turbo Schritte",
+  "generation.sampler.krea_steps_8": "8 Schritte",
+  "generation.sampler.krea_steps_4": "4 Schritte",
+  "generation.sampler.krea_steps_2": "2 Schritte",
+  "generation.sampler.krea_steps_8_hint": "Standard-Turbo, ohne Speed-LoRA.",
+  "generation.sampler.krea_steps_4_hint": "Community-LoRA für 4 Schritte (418 MB). Etwa 1,6x schneller bei fast voller Qualität. Stärke auf 0,75 senken, wenn die Textur zu stark wirkt.",
+  "generation.sampler.krea_steps_2_hint": "Community-Vorschau-LoRA für 2 Schritte (418 MB). Gut für nahe Motive; kleine Gesichter und weite Szenen können verschmieren. Für finale Bilder 4 Schritte nutzen.",
+  "generation.sampler.krea_steps_downloading": "Krea 2 Turbo LoRA wird heruntergeladen...",
 
   "generation.upscale_history.title": "Refiner-Verlauf",
 
@@ -2688,7 +2698,7 @@ const de: Record<string, string> = {
   "bottom_panel.no_videos": "Keine Videos in dieser Sitzung erzeugt",
   "bottom_panel.no_video_results": "Keine Videos entsprechen Ihrer Suche",
   "bottom_panel.video_search_placeholder": "Videos suchen...",
-  "bottom_panel.delete_all_videos_confirm": "Alle {count} in dieser Sitzung erzeugten Videos löschen? Dies kann nicht rückgängig gemacht werden.",
+  "bottom_panel.delete_all_videos_confirm": "Alle {count} in dieser Sitzung erzeugten Videos löschen? Sie werden in den Papierkorb verschoben.",
   "bottom_panel.tab.prompts": "Prompts",
   "bottom_panel.no_images": "Keine Bilder in dieser Sitzung erzeugt",
   "bottom_panel.no_prompts": "Prompt-Verlauf wird nach dem Erzeugen hier angezeigt",
@@ -2709,7 +2719,7 @@ const de: Record<string, string> = {
   "bottom_panel.no_prompt_results": "Keine Prompts entsprechen Ihrer Suche",
   "bottom_panel.card_size": "Kartengröße",
   "bottom_panel.delete_all": "Alle löschen",
-  "bottom_panel.delete_all_confirm": "Alle {count} in dieser Sitzung erzeugten Bilder löschen? Dies kann nicht rückgängig gemacht werden.",
+  "bottom_panel.delete_all_confirm": "Alle {count} in dieser Sitzung erzeugten Bilder löschen? Sie werden in den Papierkorb verschoben.",
 
   // ── Downloads ───────────────────────────────────────────
   "downloads.cancel": "Download abbrechen",

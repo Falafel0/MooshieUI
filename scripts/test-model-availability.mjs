@@ -25,6 +25,8 @@ assert.deepEqual(Array.from(localOnlyModels(["local.safetensors"], ["server.safe
 // Run the real store with synthetic API/disk responses. No Svelte component or
 // ComfyUI process is needed to check the inventory boundary and refresh races.
 let apiModels = ["server.safetensors"];
+let categoryModels = {};
+let missingCategories = new Set();
 let fail = false;
 let hold;
 let config = { server_mode: "remote", server_url: "https://server-a.invalid", comfyui_path: "local-comfyui", extra_model_paths: null };
@@ -32,7 +34,8 @@ const api = {
   getConfig: async () => ({ ...config }),
   getModels: async (category) => {
     if (fail) throw new Error("Synthetic connection failure");
-    const result = category === "checkpoints" ? [...apiModels] : [];
+    if (missingCategories.has(category)) throw new Error("Model category not found");
+    const result = category === "checkpoints" ? [...apiModels] : [...(categoryModels[category] ?? [])];
     if (hold) await hold;
     return result;
   },
@@ -72,3 +75,28 @@ assert.equal(await oldRefresh, false);
 assert.deepEqual(Array.from(store.checkpoints), ["new-server.safetensors"]);
 assert.notEqual(store.cacheScope, firstScope);
 console.log("Model availability checks passed: stale cache, server subfolders, ambiguity, local-only files, failed refresh, and server-switch races.");
+
+categoryModels = {
+  diffusion_models: ["base.safetensors", "shared.gguf"],
+  unet: ["legacy.safetensors"],
+  unet_gguf: ["Krea-2-Turbo-Q5_K_S.gguf", "shared.gguf"],
+  text_encoders: ["encoder.safetensors", "shared-encoder.gguf"],
+  clip: ["legacy-clip.safetensors"],
+  clip_gguf: ["encoder-Q4_K.gguf", "shared-encoder.gguf"],
+};
+assert.equal(await store.refresh(), true);
+assert.deepEqual(Array.from(store.diffusionModels), [
+  "base.safetensors", "shared.gguf", "legacy.safetensors", "Krea-2-Turbo-Q5_K_S.gguf",
+]);
+assert.deepEqual(Array.from(store.textEncoders), [
+  "encoder.safetensors", "shared-encoder.gguf", "legacy-clip.safetensors", "encoder-Q4_K.gguf",
+]);
+missingCategories = new Set(["unet_gguf", "clip_gguf"]);
+assert.equal(await store.refresh(), true, "Missing optional GGUF nodes do not break refresh");
+assert.deepEqual(Array.from(store.diffusionModels), [
+  "base.safetensors", "shared.gguf", "legacy.safetensors",
+]);
+assert.deepEqual(Array.from(store.textEncoders), [
+  "encoder.safetensors", "shared-encoder.gguf", "legacy-clip.safetensors",
+]);
+console.log("GGUF inventory checks passed: diffusion models, text encoders, deduplication and optional-node fallback.");

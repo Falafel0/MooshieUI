@@ -2004,6 +2004,8 @@ const es: Record<string, string> = {
   "generation.sampler.anima_rdbt_toggle": "LoRA RDBT-Anima",
   "generation.sampler.anima_rdbt_tip": "Descarga y aplica la LoRA comunitaria RDBT-Anima con destilación de guía (~92MB, mirror no oficial). Acelera la generación al eliminar la necesidad de CFG.",
   "generation.sampler.anima_rdbt_downloading": "Descargando LoRA RDBT-Anima…",
+  "generation.sampler.anima_beta57_toggle": "Texturas pictóricas (beta57)",
+  "generation.sampler.anima_beta57_tip": "Cambia el scheduler a beta57 del paquete de nodos RES4LYF, que la ficha del modelo Anima sugiere para un aspecto más pictórico o realista. Los pasos, el CFG y el sampler no cambian. Desactívalo para volver al scheduler habitual.",
   "generation.sampler.sih_recommended": "Ajustes recomendados para SIH",
   "generation.sampler.sih_hint": "No se encontraron ajustes públicos del modelo SIH; usando valores predeterminados: 20 pasos, CFG 1.4, euler_cfg_pp, sgm_uniform.",
   "generation.sampler.juice_recommended": "Ajustes recomendados para Juice",
@@ -2542,6 +2544,14 @@ const es: Record<string, string> = {
   "generation.sampler.dmd2_toggle": "Usar DMD2 (4 pasos, CFG 1)",
   "generation.sampler.dmd2_tip": "Carga la LoRA de destilación DMD2 y establece 4 pasos, CFG 1, muestreador LCM, planificador SGM uniform: calidad casi completa en una fracción del tiempo. Desactivarlo elimina la LoRA pero deja los ajustes del muestreador para que los restaures.",
   "generation.sampler.dmd2_downloading": "Descargando la LoRA DMD2...",
+  "generation.sampler.krea_steps_title": "Pasos de Krea 2 Turbo",
+  "generation.sampler.krea_steps_8": "8 pasos",
+  "generation.sampler.krea_steps_4": "4 pasos",
+  "generation.sampler.krea_steps_2": "2 pasos",
+  "generation.sampler.krea_steps_8_hint": "Turbo estándar, sin LoRA de velocidad.",
+  "generation.sampler.krea_steps_4_hint": "LoRA comunitaria de 4 pasos (418 MB). Unas 1,6x más rápida con calidad casi completa. Baja su fuerza a 0,75 si la textura se ve demasiado marcada.",
+  "generation.sampler.krea_steps_2_hint": "LoRA comunitaria de vista previa de 2 pasos (418 MB). Buena para sujetos cercanos; las caras pequeñas y las escenas amplias pueden emborronarse. Usa 4 pasos para los renders finales.",
+  "generation.sampler.krea_steps_downloading": "Descargando la LoRA de Krea 2 Turbo...",
 
   // Historial de escalado
   "generation.upscale_history.title": "Historial de escalado",
@@ -2726,7 +2736,7 @@ const es: Record<string, string> = {
   "bottom_panel.no_videos": "No se generaron vídeos en esta sesión",
   "bottom_panel.no_video_results": "Ningún vídeo coincide con tu búsqueda",
   "bottom_panel.video_search_placeholder": "Buscar vídeos...",
-  "bottom_panel.delete_all_videos_confirm": "¿Eliminar los {count} vídeos generados en esta sesión? Esta acción no se puede deshacer.",
+  "bottom_panel.delete_all_videos_confirm": "¿Eliminar los {count} vídeos generados en esta sesión? Se moverán a la papelera.",
   "bottom_panel.tab.prompts": "Prompts",
   "bottom_panel.no_images": "No se generaron imágenes en esta sesión",
   "bottom_panel.no_prompts": "El historial de prompts aparecerá aquí después de generar",
@@ -2747,7 +2757,7 @@ const es: Record<string, string> = {
   "bottom_panel.no_prompt_results": "Ningún prompt coincide con tu búsqueda",
   "bottom_panel.card_size": "Tamaño de tarjeta",
   "bottom_panel.delete_all": "Eliminar todo",
-  "bottom_panel.delete_all_confirm": "¿Eliminar las {count} imágenes generadas en esta sesión? Esta acción no se puede deshacer.",
+  "bottom_panel.delete_all_confirm": "¿Eliminar las {count} imágenes generadas en esta sesión? Se moverán a la papelera.",
 
   // ── Descargas ───────────────────────────────────────────
   "downloads.cancel": "Cancelar descarga",
