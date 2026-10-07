@@ -63,6 +63,37 @@
 
 ---
 
+## What's New in v2.3.11
+
+### Gallery
+- **Deletes stick**: deleting an image generated in the current session from the Gallery page now removes it from disk too. Before, it disappeared from the list and came back on the next launch. Deleting an image that is still saving waits for the save and then deletes it.
+- **Touch screens**: hidden tile buttons no longer catch taps, so tapping near the edge of a tile opens the preview like it should. Touch screens get an **Actions** button in the corner of each tile that opens its action tray, and keyboard focus inside a tile shows the tray too. Fixes #736.
+- **Delete confirmation**: one-off deletes (the tile button, list rows and both right-click menus) now ask **Delete this image?** first. The lightbox trash button and the bottom panel's selection bar stay one click for quick culling.
+- **Lightbox culling**: the lightbox trash button moves to the next image (or the previous one at the end) instead of closing.
+
+### Models
+- **Models Hub window on screen**: opening a model in the Models Hub after scrolling down no longer puts its window off screen at the top of the list. Fixes #738.
+- **AMD on Windows**: the ROCm install no longer fails to resolve torch, because the ROCm SDK, its libraries and torch are now installed in one step. This was checked against the package index but not yet on a real AMD Windows machine, so please report it if setup still fails. Fixes #730.
+
+### Artists and LoRAs
+- **Favourite artist previews**: favourite artist cards in the bottom panel now follow the preview image picked on the Artists page, with an **Image 1** / **Image 2** toggle in the toolbar and a flip button on each card.
+- **LoRA trigger words**: turning a LoRA back on re-adds the trigger words that turning it off removed.
+
+---
+
+## What's New in v2.3.10
+
+### NovelAI
+- **Quality tags and Undesired Content presets now apply**: NovelAI does not apply these settings itself. Its own web client writes the tags into the prompt before sending, and MooshieUI never did, so neither setting changed any NovelAI generation. Both are now written into the prompt the same way the official client does it.
+- **Light quality tags**: **Quality tags** is now a dropdown with **Standard**, **Light** and **None**. Light is offered on V5 models only.
+- **Furry focus**: a new Undesired Content preset. Both dropdowns list only what the selected model supports, and saved settings keep their meaning.
+- **PNG metadata**: quality and preset choices read back correctly from NovelAI images.
+
+### Prompt enhancer
+- **Enhance for V5 accuracy**: checked against NovelAI's documentation. The rewrite now uses the real V5 visual novel tags (`visual novel sprite`, not bare `sprite`), knows exactly which tags each Undesired Content preset already adds, and no longer writes `no text`, which the quality tags already include.
+
+---
+
 ## What's New in v2.3.9
 
 ### macOS

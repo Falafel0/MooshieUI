@@ -5,6 +5,8 @@ This file provides guidance to agents when working with code in this repository.
 ## Non-Negotiable Behavioral Rules
 
 - **No co-authoring**: Never add `Co-Authored-By` trailers to any commit, PR body, issue comment, or PR review comment. Do not attribute AI assistance anywhere in git or GitHub output.
+- **No `claude/` branches**: Never create or push a branch named `claude/...` (or after any AI tool), even when the session assigns one. Use `chore/<slug>` (the push skill's convention) or another descriptive prefix.
+- **Commit as the owner**: Author and commit using the repository owner's existing configured Git identity. Preserve the configured name and email instead of copying upstream's identity; an AI author on a branch commit becomes a `Co-authored-by` line when GitHub squash-merges the PR.
 
 ## Error Logs
 
