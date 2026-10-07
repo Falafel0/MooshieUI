@@ -1,5 +1,12 @@
 /** Portuguese (Brazilian) translations. */
 const pt: Record<string, string> = {
+  "commands.open": "Pesquisar comandos",
+  "commands.title": "Navegação rápida",
+  "commands.search": "Pesquisar seções e comandos…",
+  "commands.no_results": "Nenhum comando correspondente",
+  "commands.navigation": "Áreas de trabalho",
+  "commands.hint": "Navegar · Enter para abrir · Esc para fechar",
+
   "settings.interface.title": "Conforto da interface",
   "settings.interface.density_hint": "Ajuste os controles dos painéis de geração e menus. Telas sensíveis ao toque sempre usam botões maiores.",
   "settings.interface.compact": "Compacta",

@@ -2,58 +2,43 @@
   import { progress } from "../../stores/progress.svelte.js";
   import { connection } from "../../stores/connection.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
-  import { videoWorkspaceVisible, musicWorkspaceVisible } from "../../utils/workspaces.js";
+  import { availableWorkspaces, type WorkspaceId } from "../../utils/workspaces.js";
+  import { workspace } from "../../stores/workspace.svelte.js";
+  import { generation } from "../../stores/generation.svelte.js";
 
-export type MobileTab = "generate" | "video" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "settings";
+export type MobileTab = WorkspaceId;
 
   interface Props {
-    current: MobileTab;
     onChange: (tab: MobileTab) => void;
     showModelhub?: boolean;
     showVideo?: boolean;
   }
 
-  let { current, onChange, showModelhub = true, showVideo = true }: Props = $props();
+  let { onChange, showModelhub = true, showVideo = true }: Props = $props();
+  const current = $derived(workspace.current === "generate" && generation.mode === "video" ? "video" : workspace.current);
+  let nav: HTMLElement | undefined = $state();
 
   const tabs = $derived(
-    (
-      [
-        { id: "generate", labelKey: "nav.generate" },
-        ...(showVideo && videoWorkspaceVisible ? [{ id: "video", labelKey: "generation.mode.video" }] : []),
-        ...(musicWorkspaceVisible ? [{ id: "music", labelKey: "nav.music" }] : []),
-        { id: "gallery", labelKey: "nav.gallery" },
-        ...(showModelhub ? [{ id: "modelhub", labelKey: "nav.modelhub" }] : []),
-        { id: "artists", labelKey: "nav.artists" },
-        { id: "characters", labelKey: "artist_gallery.tab_characters" },
-        { id: "settings", labelKey: "nav.settings" },
-      ] as { id: MobileTab; labelKey: string }[]
-    )
+    availableWorkspaces({ canUseModelhub: showModelhub, canUseVideo: showVideo })
   );
 
-  function tabLabel(id: MobileTab, labelKey: string): string {
-    const fallback: Record<MobileTab, string> = {
-      generate: "Generate",
-      video: "Video",
-      music: "Music",
-      gallery: "Gallery",
-      modelhub: "Models",
-      artists: "Artists",
-      characters: "Characters",
-      settings: "Settings",
-    };
-    const t = locale.t(labelKey);
-    return t === labelKey ? fallback[id] : t;
-  }
+  $effect(() => {
+    current;
+    tabs;
+    nav?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
 </script>
 
 <nav
+  bind:this={nav}
+  aria-label={locale.t("commands.navigation")}
   class="shrink-0 flex items-stretch gap-0.5 overflow-x-auto bg-neutral-950/95 backdrop-blur border-t border-neutral-800 px-1 pt-1 pb-[max(env(safe-area-inset-bottom),0.25rem)] tap-highlight-none"
 >
   {#each tabs as tab}
     {@const active = current === tab.id}
     <button
       type="button"
-      class="touch-target flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-lg transition-colors relative
+      class="touch-target min-w-16 shrink-0 flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors relative
         {active ? 'text-indigo-400' : 'text-neutral-500 active:bg-neutral-800/60'}"
       onclick={() => onChange(tab.id)}
       aria-current={active ? "page" : undefined}
@@ -61,6 +46,8 @@ export type MobileTab = "generate" | "video" | "music" | "gallery" | "modelhub" 
       <span class="w-5 h-5 flex items-center justify-center">
         {#if tab.id === "generate"}
           <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+        {:else if tab.id === "studio"}
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8m-7.2 7.2-2.8 2.8" /></svg>
         {:else if tab.id === "video"}
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg>
         {:else if tab.id === "music"}
@@ -88,7 +75,7 @@ export type MobileTab = "generate" | "video" | "music" | "gallery" | "modelhub" 
           ></span>
         {/if}
       </span>
-      <span class="text-[10px] font-medium leading-none">{tabLabel(tab.id, tab.labelKey)}</span>
+      <span class="max-w-20 truncate text-[10px] font-medium leading-none">{locale.t(tab.labelKey)}</span>
     </button>
   {/each}
 </nav>

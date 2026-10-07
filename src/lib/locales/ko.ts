@@ -1,5 +1,12 @@
 /** Korean translations. */
 const ko: Record<string, string> = {
+  "commands.open": "명령 검색",
+  "commands.title": "빠른 이동",
+  "commands.search": "섹션 및 명령 검색…",
+  "commands.no_results": "일치하는 명령이 없습니다",
+  "commands.navigation": "작업 공간",
+  "commands.hint": "이동 · Enter로 열기 · Esc로 닫기",
+
   "settings.interface.title": "인터페이스 편의성",
   "settings.interface.density_hint": "생성 패널과 메뉴의 컨트롤 크기를 조정합니다. 터치 화면에서는 항상 더 큰 버튼을 사용합니다.",
   "settings.interface.compact": "간결하게",

@@ -1,5 +1,12 @@
 /** Italian translations. */
 const it: Record<string, string> = {
+  "commands.open": "Cerca comandi",
+  "commands.title": "Navigazione rapida",
+  "commands.search": "Cerca sezioni e comandi…",
+  "commands.no_results": "Nessun comando corrispondente",
+  "commands.navigation": "Aree di lavoro",
+  "commands.hint": "Naviga · Invio per aprire · Esc per chiudere",
+
   "settings.interface.title": "Comfort dell’interfaccia",
   "settings.interface.density_hint": "Regola i controlli nei pannelli di generazione e nei menu. Gli schermi touch usano sempre pulsanti più grandi.",
   "settings.interface.compact": "Compatta",

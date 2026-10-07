@@ -23,3 +23,15 @@ Run `npm run build`, `npm run check:i18n`, and `npx --no-install svelte-check`.
 In a desktop browser, select each density, return to Generate, and inspect section headers and mode controls. Reload and verify the selected density persists. Open a context menu and check the keyboard actions above, focus after Escape, and scrolling in a long menu. Repeat near each viewport edge and at a narrow window size.
 
 On a touch device, select Compact and verify controls remain easy to tap. With the system's reduced motion setting enabled, animations should shorten even when the application checkbox is off. Check both built-in palettes and a custom theme.
+
+## Quick navigation
+
+Open **Search commands** from the desktop rail or the mobile header. The shortcuts are **Ctrl/Cmd+K** and **Ctrl/Cmd+Shift+P**. Search matches translated names and English aliases, without requiring exact case or accents.
+
+Use Up/Down to select a result, Home/End to jump to the first/last result, and Enter to open it. Escape closes the palette and returns focus to its trigger. Tab stays within the dialog. Clicking the backdrop also closes it. Keyboard input in the palette does not reach underlying editors or generation shortcuts.
+
+The first command set opens workspaces and Appearance settings. Projects is a desktop-only shortcut. Model Hub follows the user's permission, and hidden video/music workspaces stay hidden. The palette can be extended through the command registry in `src/lib/stores/commands.svelte.ts`.
+
+Desktop and mobile share workspace state. Prompt Studio is available in the mobile tab bar, including its existing draft and send controls. Tab bars scroll the active item into view. Gallery actions and generation completion notifications return to Generate through this same state, preserving the mode those actions selected.
+
+For verification, open Prompt Studio from a mobile tab and from the palette, move to Gallery and back, and check the active tab. Use the Appearance command, select another settings category manually, then use Appearance again. A normal return to Settings should retain the last manually selected category. Check the palette with an empty result, an alternate locale, a narrow viewport, and an account without Model Hub permission.

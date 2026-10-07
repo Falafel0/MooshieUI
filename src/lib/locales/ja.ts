@@ -1,5 +1,12 @@
 /** Japanese translations. */
 const ja: Record<string, string> = {
+  "commands.open": "コマンドを検索",
+  "commands.title": "クイックナビゲーション",
+  "commands.search": "セクションとコマンドを検索…",
+  "commands.no_results": "一致するコマンドはありません",
+  "commands.navigation": "ワークスペース",
+  "commands.hint": "移動 · Enterで開く · Escで閉じる",
+
   "settings.interface.title": "インターフェースの使いやすさ",
   "settings.interface.density_hint": "生成パネルとメニューの操作項目のサイズを調整します。タッチ画面では常に大きなボタンを使用します。",
   "settings.interface.compact": "コンパクト",

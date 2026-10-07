@@ -1,5 +1,12 @@
 /** English translations — source of truth for all UI strings. */
 const en: Record<string, string> = {
+  "commands.open": "Search commands",
+  "commands.title": "Quick navigation",
+  "commands.search": "Search sections and commands…",
+  "commands.no_results": "No matching commands",
+  "commands.navigation": "Workspace navigation",
+  "commands.hint": "Navigate · Enter to open · Esc to close",
+
   "settings.interface.title": "Interface comfort",
   "settings.interface.density_hint": "Adjust generation panels and menu controls. Touch screens always use larger targets.",
   "settings.interface.compact": "Compact",

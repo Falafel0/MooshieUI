@@ -21,6 +21,7 @@
   import LlmProviderPanel from "./LlmProviderPanel.svelte";
   import ProjectsSection from "./ProjectsSection.svelte";
   import InterfacePreferences from "./InterfacePreferences.svelte";
+  import { workspace } from "../../stores/workspace.svelte.js";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, authHeaders, clearAuthToken } from "../../utils/ipc.js";
   import { requestOsNotificationPermission } from "../../utils/osNotify.js";
   import { useMobileLayout, isMobileUA, setForceDesktopOverride } from "../../utils/device.js";
@@ -42,11 +43,9 @@
   interface Props {
     userRole?: string;
     mobileFriendly?: boolean;
-    /** Section to open, set when another part of the app asks for one. */
-    section?: string | null;
   }
 
-  let { userRole = "admin", mobileFriendly = false, section = null }: Props = $props();
+  let { userRole = "admin", mobileFriendly = false }: Props = $props();
 
   // Layout override: only meaningful on a mobile-capable device in browser mode,
   // where the mobile shell exists. The control lets the user flip between the
@@ -1145,14 +1144,14 @@
    *
    * This page is conditionally mounted, so a listener here would miss an event
    * fired in the same tick that switches to Settings. App.svelte owns the page
-   * switch and passes the section down as a prop instead. Applied once per
-   * distinct request, so navigating to another section afterwards sticks.
+   * switch and stores the requested section in the shared workspace state.
+   * Consume each request once so normal visits retain the user's last category.
    */
-  let appliedSection = $state<string | null>(null);
   $effect(() => {
-    if (!section || section === appliedSection) return;
-    appliedSection = section;
+    const section = workspace.settingsSection;
+    if (!section) return;
     selectCategory(section);
+    workspace.settingsSection = null;
   });
 
   const sections = [

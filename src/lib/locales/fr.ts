@@ -1,5 +1,12 @@
 /** French translations. */
 const fr: Record<string, string> = {
+  "commands.open": "Rechercher des commandes",
+  "commands.title": "Navigation rapide",
+  "commands.search": "Rechercher des sections et commandes…",
+  "commands.no_results": "Aucune commande correspondante",
+  "commands.navigation": "Espaces de travail",
+  "commands.hint": "Naviguer · Entrée pour ouvrir · Échap pour fermer",
+
   "settings.interface.title": "Confort de l’interface",
   "settings.interface.density_hint": "Ajustez les commandes des panneaux de génération et des menus. Les écrans tactiles gardent des boutons plus grands.",
   "settings.interface.compact": "Compact",

@@ -1,5 +1,12 @@
 /** Polish translations. */
 const pl: Record<string, string> = {
+  "commands.open": "Szukaj poleceń",
+  "commands.title": "Szybka nawigacja",
+  "commands.search": "Szukaj sekcji i poleceń…",
+  "commands.no_results": "Brak pasujących poleceń",
+  "commands.navigation": "Obszary robocze",
+  "commands.hint": "Nawiguj · Enter otwiera · Esc zamyka",
+
   "settings.interface.title": "Wygoda interfejsu",
   "settings.interface.density_hint": "Dostosuj kontrolki paneli generowania i menu. Ekrany dotykowe zawsze używają większych przycisków.",
   "settings.interface.compact": "Kompaktowy",

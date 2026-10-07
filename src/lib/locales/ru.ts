@@ -1,5 +1,12 @@
 /** Russian translations. */
 const ru: Record<string, string> = {
+  "commands.open": "Поиск команд",
+  "commands.title": "Быстрый переход",
+  "commands.search": "Поиск разделов и команд…",
+  "commands.no_results": "Подходящих команд нет",
+  "commands.navigation": "Рабочие разделы",
+  "commands.hint": "Выбор · Enter — открыть · Esc — закрыть",
+
   "settings.interface.title": "Удобство интерфейса",
   "settings.interface.density_hint": "Размер элементов в панелях генерации и меню. На сенсорных экранах кнопки всегда крупнее.",
   "settings.interface.compact": "Компактно",

@@ -1,5 +1,12 @@
 /** Traditional Chinese (Taiwan) translations. */
 const zhTw: Record<string, string> = {
+  "commands.open": "搜尋指令",
+  "commands.title": "快速導覽",
+  "commands.search": "搜尋分區和指令…",
+  "commands.no_results": "沒有符合的指令",
+  "commands.navigation": "工作區導覽",
+  "commands.hint": "選擇 · Enter 開啟 · Esc 關閉",
+
   "settings.interface.title": "介面舒適度",
   "settings.interface.density_hint": "調整生成面板與選單的控制項大小。觸控螢幕一律使用較大的按鈕。",
   "settings.interface.compact": "緊湊",

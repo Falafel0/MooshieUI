@@ -1,5 +1,12 @@
 /** German translations. */
 const de: Record<string, string> = {
+  "commands.open": "Befehle suchen",
+  "commands.title": "Schnellnavigation",
+  "commands.search": "Bereiche und Befehle suchen…",
+  "commands.no_results": "Keine passenden Befehle",
+  "commands.navigation": "Arbeitsbereiche",
+  "commands.hint": "Navigieren · Enter zum Öffnen · Esc zum Schließen",
+
   "settings.interface.title": "Bedienkomfort",
   "settings.interface.density_hint": "Größe der Bedienelemente in Generierungsfeldern und Menüs. Auf Touchscreens bleiben sie größer.",
   "settings.interface.compact": "Kompakt",

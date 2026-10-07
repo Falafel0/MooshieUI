@@ -1,5 +1,12 @@
 /** Simplified Chinese translations. */
 const zh: Record<string, string> = {
+  "commands.open": "搜索命令",
+  "commands.title": "快速导航",
+  "commands.search": "搜索分区和命令…",
+  "commands.no_results": "没有匹配的命令",
+  "commands.navigation": "工作区导航",
+  "commands.hint": "选择 · Enter 打开 · Esc 关闭",
+
   "settings.interface.title": "界面舒适度",
   "settings.interface.density_hint": "调整生成面板和菜单的控件大小。触摸屏始终使用较大的按钮。",
   "settings.interface.compact": "紧凑",
