@@ -6,6 +6,7 @@
   import { locale } from "../../stores/locale.svelte.js";
   import { scrollCapture } from "../../utils/scrollCapture.js";
   import { wheelScrollLock } from "../../utils/wheelScrollLock.js";
+  import { GENERATION_SECTIONS, normalizeGenerationSections, type GenerationSectionId } from "../../utils/generationLayout.js";
   import PromptInputs from "./PromptInputs.svelte";
   import RegionalPromptModal from "./RegionalPromptModal.svelte";
   import ModelSelector from "./ModelSelector.svelte";
@@ -115,24 +116,7 @@
   const DIMENSIONS_LAYOUT_KEY = `mooshieui.generation.dimensions.layout.v1${storageSuffix}`;
   const SECTION_LAYOUT_KEY = `mooshieui.generation.sections.layout.v1${storageSuffix}`;
 
-  type SectionId =
-    | "dimensions"
-    | "prompts"
-    | "imageInputs"
-    | "imageEdit"
-    | "videoSettings"
-    | "inpaintLayers"
-    | "generationSettings"
-    | "model"
-    | "sampler"
-    | "novelai"
-    | "naiFaceDetail"
-    | "controlnet"
-    | "styleTransfer"
-    | "styleRef"
-    | "facefix"
-    | "upscaleHistory";
-
+  type SectionId = GenerationSectionId;
   type SectionSide = "left" | "right";
 
   const ALL_MODES = [
@@ -205,54 +189,8 @@
   let leftColumnRef = $state<HTMLElement | null>(null);
   let rightColumnRef = $state<HTMLElement | null>(null);
 
-  const SECTION_ORDER: SectionId[] = [
-    "dimensions",
-    "prompts",
-    "imageInputs",
-    "imageEdit",
-    "videoSettings",
-    "inpaintLayers",
-    "generationSettings",
-    "model",
-    "sampler",
-    "novelai",
-    "naiFaceDetail",
-    "controlnet",
-    "styleTransfer",
-    "styleRef",
-    "facefix",
-    "upscaleHistory",
-  ];
-
+  const SECTION_ORDER: readonly SectionId[] = GENERATION_SECTIONS;
   let sectionOrder = $state<SectionId[]>([...SECTION_ORDER]);
-
-  function normalizeSectionOrder(order: unknown): SectionId[] {
-    if (!Array.isArray(order)) return [...SECTION_ORDER];
-    const allowed = new Set<SectionId>(SECTION_ORDER);
-    const seen = new Set<SectionId>();
-    const out: SectionId[] = [];
-    for (const item of order) {
-      if (typeof item !== "string") continue;
-      // Migrate legacy "modelSampler" → "model" + "sampler"
-      if (item === "modelSampler") {
-        for (const replacement of ["model", "sampler"] as SectionId[]) {
-          if (!seen.has(replacement)) {
-            seen.add(replacement);
-            out.push(replacement);
-          }
-        }
-        continue;
-      }
-      const id = item as SectionId;
-      if (!allowed.has(id) || seen.has(id)) continue;
-      seen.add(id);
-      out.push(id);
-    }
-    for (const id of SECTION_ORDER) {
-      if (!seen.has(id)) out.push(id);
-    }
-    return out;
-  }
 
   function loadSectionPlacement() {
     try {
@@ -283,7 +221,7 @@
         };
 
         if (parsed && typeof parsed === "object" && "order" in parsed) {
-          sectionOrder = normalizeSectionOrder(parsed.order);
+          sectionOrder = normalizeGenerationSections(parsed.order, true);
         }
         return;
       }
@@ -375,7 +313,9 @@
   };
 
   function sectionLabelKey(section: SectionId): string {
-    return section === "dimensions" && generation.mode === "inpainting" ? "canvas.document_size" : SECTION_LABEL_KEYS[section];
+    if (section === "dimensions") return generation.mode === "inpainting" ? "canvas.document_size" : generation.mode === "txt2img" ? "generation.workspace.composition" : "generation.workspace.output";
+    if (section === "prompts" && generation.mode === "image_edit") return "generation.workspace.instruction";
+    return SECTION_LABEL_KEYS[section];
   }
 
   function sectionLabel(section: SectionId): string {
@@ -1370,7 +1310,7 @@
 
       const next = [...remaining];
       next.splice(Math.max(0, insertAt), 0, draggingSection);
-      sectionOrder = normalizeSectionOrder(next);
+      sectionOrder = normalizeGenerationSections(next);
     }
     draggingSection = null;
     pendingDrop = null;
@@ -1754,7 +1694,7 @@
   {/snippet}
 
   {#snippet dimensionsSection()}
-    {@const dimensionsTitle = generation.mode === 'inpainting' ? locale.t('canvas.document_size') : locale.t('generation.dimensions.title')}
+    {@const dimensionsTitle = sectionLabel('dimensions')}
     <div bind:this={sectionRefs['dimensions']} data-drop-section="dimensions" class="relative rounded-lg bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'dimensions' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'dimensions' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-neutral-800'} transition-colors"
       ondragenter={(e) => onMetadataDragEnter(e, "dimensions")}
       ondragover={(e) => onMetadataDragOver(e, "dimensions")}
@@ -1789,7 +1729,7 @@
   {/snippet}
 
   {#snippet promptsSection()}
-    <div bind:this={sectionRefs['prompts']} data-drop-section="prompts" class="relative rounded-lg bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'prompts' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'prompts' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-neutral-800'} transition-colors"
+    <div bind:this={sectionRefs['prompts']} data-drop-section="prompts" class="relative rounded-lg bg-ui-surface/70 transition-[height,opacity] duration-150 {draggingSection === 'prompts' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'prompts' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-ui-accent/20'} transition-colors"
       ondragenter={(e) => onMetadataDragEnter(e, "prompts")}
       ondragover={(e) => onMetadataDragOver(e, "prompts")}
       ondragleave={(e) => onMetadataDragLeave(e, "prompts")}
@@ -1801,9 +1741,9 @@
           class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (promptsSectionOpen = !promptsSectionOpen)}
           aria-expanded={promptsSectionOpen}
-          title={promptsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.prompts.title') }) : locale.t('common.expand', { section: locale.t('generation.prompts.title') })}
+          title={promptsSectionOpen ? locale.t('common.collapse', { section: sectionLabel('prompts') }) : locale.t('common.expand', { section: sectionLabel('prompts') })}
         >
-          <span class="font-medium">{locale.t('generation.prompts.title')}</span>
+          <span class="font-medium">{sectionLabel('prompts')}</span>
           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {promptsSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
       </div>
@@ -1818,7 +1758,7 @@
       {#if metadataDropTarget === "prompts"}
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-lg bg-indigo-500/10 border-2 border-dashed border-indigo-400/60">
           <span class="text-xs font-medium text-indigo-300 bg-neutral-900/80 px-3 py-1.5 rounded-full">
-            {locale.t('common.drop_to_import', { section: locale.t('generation.prompts.title') })}
+            {locale.t('common.drop_to_import', { section: sectionLabel('prompts') })}
           </span>
         </div>
       {/if}
@@ -1840,28 +1780,16 @@
           {/if}
 
           <div class="{generation.mode !== 'inpainting' && canvas.currentStagingImage ? 'opacity-50 pointer-events-none' : ''}">
-            <p class="text-xs text-neutral-400 mb-1">{locale.t('generation.image.input')}</p>
+            {#if !imagePreviewUrl}<p class="text-xs text-neutral-400 mb-1">{locale.t('generation.image.input')}</p>{/if}
             {#if imagePreviewUrl}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                class="relative group"
-                data-drop-zone="img-input"
-                ondragenter={(e) => { e.preventDefault(); }}
-                ondragover={(e) => { e.preventDefault(); }}
-                ondrop={handleImageDrop}
-              >
-                <img
-                  src={imagePreviewUrl}
-                  alt={locale.t('generation.image.input')}
-                  class="w-full rounded-lg border border-neutral-700 object-contain max-h-40"
-                />
-                <button
-                  class="absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded bg-neutral-900/80 hover:bg-red-800 text-neutral-300 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                  onclick={clearImage}
-                  title={locale.t('common.remove')}
-                >
-                  &times;
-                </button>
+              <div class="flex items-center gap-3 rounded-lg border border-ui-border bg-ui-surface p-2" data-drop-zone="img-input" ondragenter={(event) => event.preventDefault()} ondragover={(event) => event.preventDefault()} ondrop={handleImageDrop}>
+                <img src={imagePreviewUrl} alt={locale.t('generation.image.input')} class="size-16 shrink-0 rounded-md bg-neutral-950 object-contain" />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-xs text-neutral-200" title={generation.inputImage ?? undefined}>{generation.inputImage}</p>
+                  <button type="button" onclick={browseImage} class="ui-control text-xs text-ui-accent hover:underline">{locale.t('generation.workspace.replace_source')}</button>
+                </div>
+                <button type="button" onclick={clearImage} aria-label={locale.t('common.remove')} class="ui-icon-button flex shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-red-400">×</button>
               </div>
             {:else}
               <!-- svelte-ignore a11y_no_static_element_interactions -->

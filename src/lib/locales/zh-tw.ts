@@ -1926,6 +1926,12 @@ const zhTw: Record<string, string> = {
   "generation.style.digital_art": "數位藝術",
   "generation.style.line_art": "線條畫",
 
+  "generation.workspace.advanced_sampling": "進階採樣",
+  "generation.workspace.composition": "構圖",
+  "generation.workspace.output": "輸出",
+  "generation.workspace.instruction": "指令",
+  "generation.workspace.composition_details": "構圖設定",
+  "generation.workspace.replace_source": "替換",
   "generation.dimensions.title": "尺寸",
   "generation.dimensions.aspect_ratio": "寬高比",
   "generation.dimensions.aspect_ratio_tip": "影像的形狀。1:1 是正方形，16:9 是寬螢幕，9:16 是直向。先選擇比例，然後用解析度調整總像素數。",

@@ -1938,6 +1938,12 @@ const fr: Record<string, string> = {
   "generation.style.line_art": "Dessin au trait",
 
   // Dimensions
+  "generation.workspace.advanced_sampling": "Échantillonnage avancé",
+  "generation.workspace.composition": "Composition",
+  "generation.workspace.output": "Sortie",
+  "generation.workspace.instruction": "Instruction",
+  "generation.workspace.composition_details": "Détails de composition",
+  "generation.workspace.replace_source": "Remplacer",
   "generation.dimensions.title": "Dimensions",
   "generation.dimensions.aspect_ratio": "Format d'image",
   "generation.dimensions.aspect_ratio_tip": "La forme de votre image. 1:1 est carré, 16:9 est panoramique, 9:16 est portrait. Choisissez d'abord le ratio, puis ajustez la résolution pour contrôler le nombre total de pixels.",

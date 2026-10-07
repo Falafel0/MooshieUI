@@ -1926,6 +1926,12 @@ const ru: Record<string, string> = {
   "generation.style.digital_art": "Цифровое искусство",
   "generation.style.line_art": "Контурный рисунок",
 
+  "generation.workspace.advanced_sampling": "Дополнительные настройки сэмплинга",
+  "generation.workspace.composition": "Композиция",
+  "generation.workspace.output": "Результат",
+  "generation.workspace.instruction": "Инструкция",
+  "generation.workspace.composition_details": "Настройки композиции",
+  "generation.workspace.replace_source": "Заменить",
   "generation.dimensions.title": "Размеры",
   "generation.dimensions.aspect_ratio": "Соотношение сторон",
   "generation.dimensions.aspect_ratio_tip": "Форма вашего изображения. 1:1 — квадрат, 16:9 — широкий экран, 9:16 — портрет. Сначала выберите соотношение, затем настройте разрешение для управления общим количеством пикселей.",

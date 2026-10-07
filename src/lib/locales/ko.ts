@@ -1926,6 +1926,12 @@ const ko: Record<string, string> = {
   "generation.style.digital_art": "디지털 아트",
   "generation.style.line_art": "라인 아트",
 
+  "generation.workspace.advanced_sampling": "고급 샘플링",
+  "generation.workspace.composition": "구도",
+  "generation.workspace.output": "출력",
+  "generation.workspace.instruction": "지시",
+  "generation.workspace.composition_details": "구도 설정",
+  "generation.workspace.replace_source": "교체",
   "generation.dimensions.title": "크기",
   "generation.dimensions.aspect_ratio": "화면 비율",
   "generation.dimensions.aspect_ratio_tip": "이미지의 형태입니다. 1:1은 정사각형, 16:9는 와이드스크린, 9:16은 세로형입니다. 비율을 먼저 선택한 다음 해상도로 총 픽셀 수를 조정하세요.",

@@ -31,14 +31,10 @@
   />
 {/each}
 
-<button
-  type="button"
-  onclick={addBox}
-  class="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700 py-1.5 text-xs text-neutral-400 transition-colors hover:border-indigo-500/60 hover:text-indigo-200"
->
-  <span class="text-sm leading-none">+</span>
-  {locale.t("generation.prompts.extra_box_add")}
-</button>
-
-<button type="button" class="touch-target mt-2 w-full rounded border border-neutral-700 px-3 py-2 text-xs text-neutral-400" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
+<div class="mt-2 flex gap-2">
+  <button type="button" onclick={addBox} class="ui-control flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed border-ui-border px-2 text-xs text-neutral-400 hover:border-ui-accent/50 hover:text-ui-accent">
+    <span aria-hidden="true">+</span>{locale.t("generation.prompts.extra_box_add")}
+  </button>
+  <button type="button" class="ui-control min-w-0 flex-1 rounded-lg border border-ui-border px-2 text-xs text-neutral-400 hover:bg-ui-surface" onclick={() => importing = true}>{locale.t('prompt_studio.import_blocks')}</button>
+</div>
 {#if importing}<PromptBlockImport onClose={() => importing = false} onImport={blocks => { generation.importPromptBoxes(side, blocks); importing = false; }} />{/if}

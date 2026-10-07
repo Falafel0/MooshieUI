@@ -2030,6 +2030,12 @@ const pl: Record<string, string> = {
   "generation.style.line_art": "Rysunek liniowy",
 
   // Dimensions
+  "generation.workspace.advanced_sampling": "Zaawansowane próbkowanie",
+  "generation.workspace.composition": "Kompozycja",
+  "generation.workspace.output": "Wynik",
+  "generation.workspace.instruction": "Instrukcja",
+  "generation.workspace.composition_details": "Ustawienia kompozycji",
+  "generation.workspace.replace_source": "Zastąp",
   "generation.dimensions.title": "Wymiary",
   "generation.dimensions.aspect_ratio": "Proporcje",
   "generation.dimensions.aspect_ratio_tip": "Kształt obrazu. 1:1 to kwadrat, 16:9 to panoramiczny, 9:16 to pionowy. Najpierw wybierz proporcje, a następnie dostosuj rozdzielczość, aby kontrolować łączną liczbę pikseli.",

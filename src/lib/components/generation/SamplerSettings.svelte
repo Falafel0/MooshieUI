@@ -3,6 +3,7 @@
   import { progress } from "../../stores/progress.svelte.js";
   import { models } from "../../stores/models.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import OutputSettings from "./OutputSettings.svelte";
   import InfoTip from "../ui/InfoTip.svelte";
   import EditableValue from "../ui/EditableValue.svelte";
   import { scrollCapture } from "../../utils/scrollCapture.js";
@@ -292,14 +293,6 @@
     generation.cfg < recommendedCfgRange().min || generation.cfg > recommendedCfgRange().max
   );
 
-  const metadataUpgradedToBoth = $derived(
-    generation.outputBitDepth === "16bit" && generation.metadataMode === "stealth"
-  );
-
-  const effectiveMetadataMode = $derived(
-    metadataUpgradedToBoth ? "both" : generation.metadataMode
-  );
-
   /** CFG++ samplers use an alternative guidance method that works best at low CFG (~1-2). */
   function isCfgPpSampler(name: string): boolean {
     return name.includes("cfg_pp");
@@ -349,6 +342,12 @@
   function applyNanosaurRecommendation() {
     applyRecommendation(NANOSAUR_SAMPLING);
   }
+  const advancedSamplingActive = $derived(
+    generation.isFlux || generation.smartGuidance || generation.pauseResumeActive || generation.effectivePauseAtStep > 0
+    || (!generation.isNovelAi && generation.isVpredModel && generation.vpredRescaleCfg)
+    || (!generation.isNovelAi && generation.isSdxlLike && (generation.nagEnabled || generation.apgEnabled))
+    || (generation.isAnima && generation.animaTeacacheEnabled)
+  );
 </script>
 
 <div class="space-y-3">
@@ -798,73 +797,11 @@
     </div>
   </div>
 
-  <!-- Bit Depth + Metadata -->
-  <div class="grid grid-cols-2 gap-2">
-    <div>
-      <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.sampler.bit_depth')}<InfoTip text={locale.t('generation.sampler.bit_depth_tip')} /></label>
-      <div class="flex gap-1">
-        {#each ["8bit", "16bit"] as depth}
-          {@const depthLocked = depth === "16bit" && generation.outputFormat === "webp"}
-          <button
-            disabled={depthLocked}
-            title={depthLocked ? locale.t('generation.sampler.bit_16_webp_disabled') : undefined}
-            class="flex-1 py-1 text-[11px] rounded-lg border transition-colors {generation.outputBitDepth === depth
-              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-              : 'bg-neutral-800/50 border-neutral-700 text-neutral-400 hover:border-neutral-600'} {depthLocked ? 'opacity-40 cursor-not-allowed hover:border-neutral-700' : ''}"
-            onclick={() => generation.outputBitDepth = depth as "8bit" | "16bit"}
-          >
-            {depth === "8bit" ? locale.t('generation.sampler.bit_8') : locale.t('generation.sampler.bit_16')}
-          </button>
-        {/each}
-      </div>
-    </div>
-    <div>
-      <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.sampler.output_format')}<InfoTip text={locale.t('generation.sampler.output_format_tip')} /></label>
-      <div class="flex gap-1">
-        {#each ["png", "jxl", "webp"] as fmt}
-          <button
-            class="flex-1 py-1 text-[11px] rounded-lg border transition-colors {generation.outputFormat === fmt
-              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-              : 'bg-neutral-800/50 border-neutral-700 text-neutral-400 hover:border-neutral-600'}"
-            onclick={() => {
-              generation.outputFormat = fmt as "png" | "jxl" | "webp";
-              // Lossless WebP (VP8L) has no 16-bit variant, so keep the pair valid.
-              if (fmt === "webp") generation.outputBitDepth = "8bit";
-            }}
-          >
-            {fmt === "png"
-              ? locale.t('generation.sampler.format_png')
-              : fmt === "jxl"
-                ? locale.t('generation.sampler.format_jxl')
-                : locale.t('generation.sampler.format_webp')}
-          </button>
-        {/each}
-      </div>
-    </div>
-  </div>
-  <div class="grid grid-cols-1 gap-2">
-    <div>
-      <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.sampler.metadata')}<InfoTip text={locale.t('generation.sampler.metadata_tip')} /></label>
-      <div class="flex gap-1">
-        {#each [["text_chunk", locale.t('generation.sampler.metadata_text')], ["stealth", locale.t('generation.sampler.metadata_stealth')], ["both", locale.t('generation.sampler.metadata_both')]] as [value, label]}
-          <button
-            class="flex-1 py-1 text-[11px] rounded-lg border transition-colors {effectiveMetadataMode === value
-              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-              : 'bg-neutral-800/50 border-neutral-700 text-neutral-400 hover:border-neutral-600'}"
-            onclick={() => generation.metadataMode = value as "text_chunk" | "stealth" | "both"}
-          >
-            {label}
-          </button>
-        {/each}
-      </div>
-    </div>
-  </div>
-  {#if metadataUpgradedToBoth}
-    <p class="text-[10px] text-indigo-300 -mt-1">
-      {locale.t('generation.sampler.metadata_upgraded')}
-    </p>
-  {/if}
+  <OutputSettings />
 
+  <details open={advancedSamplingActive} class="group rounded-lg border border-ui-border/60" data-advanced-sampling>
+    <summary class="ui-control flex cursor-pointer list-none items-center justify-between gap-2 px-3 text-xs text-neutral-400 [&::-webkit-details-marker]:hidden"><span>{locale.t('generation.workspace.advanced_sampling')}</span><svg class="size-3.5 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div class="space-y-3 border-t border-ui-border/60 p-3">
   <!-- Smart Guidance toggle (hidden for Flux models which use FluxGuidance instead) -->
   {#if generation.isFlux}
     <div use:scrollCapture>
@@ -1082,4 +1019,6 @@
     </div>
   {/if}
 
+    </div>
+  </details>
 </div>

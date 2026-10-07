@@ -1926,6 +1926,12 @@ const it: Record<string, string> = {
   "generation.style.digital_art": "Arte digitale",
   "generation.style.line_art": "Line Art",
 
+  "generation.workspace.advanced_sampling": "Campionamento avanzato",
+  "generation.workspace.composition": "Composizione",
+  "generation.workspace.output": "Output",
+  "generation.workspace.instruction": "Istruzione",
+  "generation.workspace.composition_details": "Dettagli composizione",
+  "generation.workspace.replace_source": "Sostituisci",
   "generation.dimensions.title": "Dimensioni",
   "generation.dimensions.aspect_ratio": "Rapporto d'aspetto",
   "generation.dimensions.aspect_ratio_tip": "La forma della tua immagine. 1:1 è quadrato, 16:9 è panoramico, 9:16 è ritratto. Scegli prima il rapporto, poi regola la risoluzione per controllare il numero totale di pixel.",

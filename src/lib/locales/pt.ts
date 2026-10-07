@@ -1926,6 +1926,12 @@ const pt: Record<string, string> = {
   "generation.style.digital_art": "Arte Digital",
   "generation.style.line_art": "Line Art",
 
+  "generation.workspace.advanced_sampling": "Amostragem avançada",
+  "generation.workspace.composition": "Composição",
+  "generation.workspace.output": "Saída",
+  "generation.workspace.instruction": "Instrução",
+  "generation.workspace.composition_details": "Detalhes da composição",
+  "generation.workspace.replace_source": "Substituir",
   "generation.dimensions.title": "Dimensões",
   "generation.dimensions.aspect_ratio": "Proporção",
   "generation.dimensions.aspect_ratio_tip": "A forma da sua imagem. 1:1 é quadrado, 16:9 é widescreen, 9:16 é retrato. Escolha a proporção primeiro, depois ajuste a resolução para controlar a contagem total de pixels.",

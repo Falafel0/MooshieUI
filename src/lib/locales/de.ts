@@ -1947,6 +1947,12 @@ const de: Record<string, string> = {
   "generation.style.digital_art": "Digitale Kunst",
   "generation.style.line_art": "Linienzeichnung",
 
+  "generation.workspace.advanced_sampling": "Erweitertes Sampling",
+  "generation.workspace.composition": "Komposition",
+  "generation.workspace.output": "Ausgabe",
+  "generation.workspace.instruction": "Anweisung",
+  "generation.workspace.composition_details": "Kompositionseinstellungen",
+  "generation.workspace.replace_source": "Ersetzen",
   "generation.dimensions.title": "Abmessungen",
   "generation.dimensions.aspect_ratio": "Seitenverhältnis",
   "generation.dimensions.aspect_ratio_tip": "Die Form des Bildes. 1:1 ist quadratisch, 16:9 ist Breitbild, 9:16 ist Hochformat. Wählen Sie zuerst das Verhältnis, dann passen Sie mit der Auflösung die Gesamtpixelzahl an.",

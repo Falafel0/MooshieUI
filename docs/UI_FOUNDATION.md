@@ -66,6 +66,18 @@ This stage preserves the existing Compare parameter-grid tool. Central viewport 
 
 Verify pin/reorder/open behavior, migrated preferences, keyboard navigation, horizontal/grid views, reference search, result actions, Styles subviews, Jobs, notes, and per-mode state across collapse/reload. `tests/bottom-panel.test.mjs` covers groups, capability gates, labels, default/invalid pins, transient panels and mode keys.
 
+## Intent and composition hierarchy
+
+The default generation order follows source → intent → composition. Create places Prompt first; Transform places its source above Prompt; Image Edit keeps its reference controls above the Instruction block. The untouched legacy default order migrates, while explicit custom arrangements, section sides and collapse preferences are preserved. Section ordering and validation live in `generationLayout.ts` rather than the page component.
+
+Prompt defaults to a Positive/Negative switcher with a 180px text area; existing split-view preferences and taller saved heights remain supported. Add block and Import block actions share one row. The intent section has a subtle accent border. Image Edit changes its section label to Instruction without creating a second prompt field.
+
+Composition defaults to five common ratio shortcuts plus a pixel-size summary and resolution lock. Opening the summary reveals all ratio shortcuts, custom aspect fields, swap, resolution presets, model guidance and reset. That disclosure preference persists. Existing local/NovelAI dimension calculations and Opus area limits are unchanged. Inpaint displays a compact document-size summary with detailed controls on demand. Transform/Edit label their dimensions Output; automatic source-size overrides remain subsequent work.
+
+A loaded Transform source is a compact 64px thumbnail with its filename and explicit Replace/Remove actions. Drop replacement, paste, staging and upload behavior stay available. Output format, bit depth and metadata are a dedicated disclosure inside sampling settings; its summary shows the current format/depth. Output controls save changes explicitly, retain WebP/16-bit restrictions and show effective metadata upgrades. Advanced sampling controls have their own disclosure; Flux guidance and active advanced settings expand it automatically so enabled processing stays visible.
+
+Verify fresh/legacy/custom order, Positive/Negative editing, retained split preference, ratio and resolution controls, collapsed detail persistence, source import/replacement/removal, output compatibility and smaller desktop layouts. `tests/generation-layout.test.mjs` covers default hierarchy, migration, explicit arrangements and corrupt preferences.
+
 ## Upstream integration
 
 This branch merges upstream `main` at `14a7ca6` (v2.3.16), including Krea 2 GGUF compatibility, stale ComfyUI restart after app updates, and optional Krea 2 encoder selection. Fork package identity, updater destination and Windows packaging remain intact. Encoder selection combines upstream's installed Krea 2 preference with the fork's family-only loader detection and inventory guards; regression checks exercise both paths.

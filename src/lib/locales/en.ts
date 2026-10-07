@@ -2048,6 +2048,12 @@ const en: Record<string, string> = {
   "generation.style.line_art": "Line Art",
 
   // Dimensions
+  "generation.workspace.advanced_sampling": "Advanced sampling",
+  "generation.workspace.composition": "Composition",
+  "generation.workspace.output": "Output",
+  "generation.workspace.instruction": "Instruction",
+  "generation.workspace.composition_details": "Composition details",
+  "generation.workspace.replace_source": "Replace",
   "generation.dimensions.title": "Dimensions",
   "generation.dimensions.aspect_ratio": "Aspect Ratio",
   "generation.dimensions.aspect_ratio_tip": "The shape of your image. 1:1 is square, 16:9 is widescreen, 9:16 is portrait. Pick the ratio first, then adjust resolution to control the total pixel count.",

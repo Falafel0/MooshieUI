@@ -1926,6 +1926,12 @@ const zh: Record<string, string> = {
   "generation.style.digital_art": "数字艺术",
   "generation.style.line_art": "线条画",
 
+  "generation.workspace.advanced_sampling": "高级采样",
+  "generation.workspace.composition": "构图",
+  "generation.workspace.output": "输出",
+  "generation.workspace.instruction": "指令",
+  "generation.workspace.composition_details": "构图设置",
+  "generation.workspace.replace_source": "替换",
   "generation.dimensions.title": "尺寸",
   "generation.dimensions.aspect_ratio": "宽高比",
   "generation.dimensions.aspect_ratio_tip": "图像的形状。1:1 是正方形，16:9 是宽屏，9:16 是纵向。先选择比例，然后用分辨率调整总像素数。",

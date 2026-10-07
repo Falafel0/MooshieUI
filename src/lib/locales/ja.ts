@@ -1938,6 +1938,12 @@ const ja: Record<string, string> = {
   "generation.style.line_art": "線画",
 
   // 寸法
+  "generation.workspace.advanced_sampling": "サンプリングの詳細設定",
+  "generation.workspace.composition": "構図",
+  "generation.workspace.output": "出力",
+  "generation.workspace.instruction": "指示",
+  "generation.workspace.composition_details": "構図の設定",
+  "generation.workspace.replace_source": "置き換え",
   "generation.dimensions.title": "寸法",
   "generation.dimensions.aspect_ratio": "アスペクト比",
   "generation.dimensions.aspect_ratio_tip": "画像の形状です。1:1は正方形、16:9はワイドスクリーン、9:16は縦型です。比率を先に選び、解像度で総ピクセル数を調整してください。",

@@ -1970,6 +1970,12 @@ const es: Record<string, string> = {
   "generation.style.line_art": "Arte lineal",
 
   // Dimensiones
+  "generation.workspace.advanced_sampling": "Muestreo avanzado",
+  "generation.workspace.composition": "Composición",
+  "generation.workspace.output": "Salida",
+  "generation.workspace.instruction": "Instrucción",
+  "generation.workspace.composition_details": "Detalles de composición",
+  "generation.workspace.replace_source": "Reemplazar",
   "generation.dimensions.title": "Dimensiones",
   "generation.dimensions.aspect_ratio": "Relación de aspecto",
   "generation.dimensions.aspect_ratio_tip": "La forma de tu imagen. 1:1 es cuadrado, 16:9 es panorámico, 9:16 es vertical. Elige la relación primero, luego ajusta la resolución para controlar el total de píxeles.",
