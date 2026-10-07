@@ -1,5 +1,12 @@
 /** Polish translations. */
 const pl: Record<string, string> = {
+  "generation.navigation.toolbar": "Obszar generowania",
+  "generation.navigation.mode": "Tryb generowania",
+  "generation.navigation.find": "Znajdź ustawienie",
+  "generation.navigation.collapse": "Zwiń sekcje",
+  "generation.navigation.expand": "Rozwiń sekcje",
+  "generation.navigation.setting": "Ustawienie generowania",
+
   "commands.open": "Szukaj poleceń",
   "commands.title": "Szybka nawigacja",
   "commands.search": "Szukaj sekcji i poleceń…",

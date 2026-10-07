@@ -9,14 +9,14 @@
   let active = $state(0);
   let input: HTMLInputElement | undefined = $state();
   let list: HTMLDivElement | undefined = $state();
-  const results = $derived(filterCommands(commands.entries, query, (key) => locale.t(key)));
+  const results = $derived(filterCommands(commands.availableEntries, query, (key) => locale.t(key)));
 
   $effect(() => {
     if (commands.isOpen) { query = ""; active = 0; }
   });
   $effect(() => {
     query;
-    commands.entries;
+    commands.availableEntries;
     active = 0;
   });
   $effect(() => {
@@ -96,7 +96,7 @@
   >
     <div class="flex max-h-[80dvh] flex-col">
       <div class="flex shrink-0 items-center justify-between px-4 pt-3">
-        <h2 id="command-palette-title" class="text-sm font-semibold">{locale.t("commands.title")}</h2>
+        <h2 id="command-palette-title" class="text-sm font-semibold">{locale.t(commands.scope === "generation" ? "generation.navigation.find" : "commands.title")}</h2>
         <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" onclick={() => commands.close()} aria-label={locale.t("common.close")}><X size={16} /></button>
       </div>
       <div class="mx-3 mb-3 flex shrink-0 items-center gap-3 rounded-xl border border-ui-border bg-neutral-950 px-3 focus-within:border-ui-accent focus-within:ring-1 focus-within:ring-ui-accent">
@@ -128,7 +128,10 @@
             class="ui-control flex w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm {index === active ? 'bg-ui-selected text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}"
             onclick={() => run(command)}
           >
-            <span>{locale.t(command.labelKey)}</span>
+            <span class="min-w-0">
+              <span class="block">{locale.t(command.labelKey)}</span>
+              {#if command.descriptionKey}<span class="block text-xs text-neutral-500">{locale.t(command.descriptionKey)}</span>{/if}
+            </span>
             {#if index === active}<CornerDownLeft size={15} class="shrink-0 text-ui-accent" />{/if}
           </button>
         {:else}

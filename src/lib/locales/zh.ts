@@ -1,5 +1,12 @@
 /** Simplified Chinese translations. */
 const zh: Record<string, string> = {
+  "generation.navigation.toolbar": "生成工作区",
+  "generation.navigation.mode": "生成模式",
+  "generation.navigation.find": "查找设置",
+  "generation.navigation.collapse": "折叠分区",
+  "generation.navigation.expand": "展开分区",
+  "generation.navigation.setting": "生成设置",
+
   "commands.open": "搜索命令",
   "commands.title": "快速导航",
   "commands.search": "搜索分区和命令…",

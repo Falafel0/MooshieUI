@@ -35,3 +35,15 @@ The first command set opens workspaces and Appearance settings. Projects is a de
 Desktop and mobile share workspace state. Prompt Studio is available in the mobile tab bar, including its existing draft and send controls. Tab bars scroll the active item into view. Gallery actions and generation completion notifications return to Generate through this same state, preserving the mode those actions selected.
 
 For verification, open Prompt Studio from a mobile tab and from the palette, move to Gallery and back, and check the active tab. Use the Appearance command, select another settings category manually, then use Appearance again. A normal return to Settings should retain the last manually selected category. Check the palette with an empty result, an alternate locale, a narrow viewport, and an account without Model Hub permission.
+
+## Desktop generation controls
+
+The desktop generation workspace has one toolbar above its panels and canvas. It contains the generation modes, **Find a setting**, **Collapse sections**, **Expand sections**, and **Swap left/right panels**. Mode selection remains available when a side panel is collapsed.
+
+**Find a setting** searches only the sections available in the current generation mode. Choosing a result opens its accordion, restores its side panel if hidden, scrolls to the section, and focuses its header. It follows a section after panels are swapped. The normal command palette also includes these destinations while Generate is mounted; leaving Generate removes them.
+
+Collapse/Expand affects the available top-level sections, preserving the separate state of sections hidden by the current mode. The Prompts section now persists its collapsed state alongside the other sections. Existing saved layouts and section ordering remain supported. This toolbar and its section commands are added to the desktop layout.
+
+Check a setting after collapsing its accordion and its side panel, then repeat after swapping panels. Switch between Txt2Img, Img2Img, and Inpainting and verify that search only offers applicable sections. Collapse sections, reload, and check that their state persists. Check both full-size and smaller desktop windows.
+
+`npm run check:types` now returns Svelte's actual exit status, so a type error fails the check.

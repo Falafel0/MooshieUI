@@ -2,6 +2,7 @@ export interface UiCommand {
   id: string;
   labelKey: string;
   keywords?: string;
+  descriptionKey?: string;
   run: () => void;
 }
 
@@ -12,7 +13,7 @@ function normalize(text: string): string {
 export function filterCommands(commands: UiCommand[], query: string, translate: (key: string) => string): UiCommand[] {
   const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
   return commands.filter((command) => {
-    const text = normalize(`${translate(command.labelKey)} ${command.keywords ?? ""}`);
+    const text = normalize(`${translate(command.labelKey)} ${command.descriptionKey ? translate(command.descriptionKey) : ""} ${command.keywords ?? ""}`);
     return terms.every((term) => text.includes(term));
   });
 }

@@ -1,5 +1,12 @@
 /** Japanese translations. */
 const ja: Record<string, string> = {
+  "generation.navigation.toolbar": "生成ワークスペース",
+  "generation.navigation.mode": "生成モード",
+  "generation.navigation.find": "設定を検索",
+  "generation.navigation.collapse": "セクションを折りたたむ",
+  "generation.navigation.expand": "セクションを展開",
+  "generation.navigation.setting": "生成設定",
+
   "commands.open": "コマンドを検索",
   "commands.title": "クイックナビゲーション",
   "commands.search": "セクションとコマンドを検索…",

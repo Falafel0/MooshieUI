@@ -1,5 +1,12 @@
 /** French translations. */
 const fr: Record<string, string> = {
+  "generation.navigation.toolbar": "Espace de génération",
+  "generation.navigation.mode": "Mode de génération",
+  "generation.navigation.find": "Rechercher un réglage",
+  "generation.navigation.collapse": "Replier les sections",
+  "generation.navigation.expand": "Déplier les sections",
+  "generation.navigation.setting": "Réglage de génération",
+
   "commands.open": "Rechercher des commandes",
   "commands.title": "Navigation rapide",
   "commands.search": "Rechercher des sections et commandes…",

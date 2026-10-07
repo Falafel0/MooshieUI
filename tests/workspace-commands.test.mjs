@@ -40,3 +40,10 @@ test('project shortcuts are offered only in the desktop mode that supports proje
   assert.deepEqual(availableSettingsShortcuts(true).map(({ id }) => id), ['appearance']);
   assert.deepEqual(availableSettingsShortcuts(false).map(({ id }) => id), ['appearance', 'projects']);
 });
+
+test('setting search includes the localized context description', () => {
+  const labels = { sampler: 'Sampler', context: 'Настройка генерации' };
+  const command = { id: 'sampler', labelKey: 'sampler', descriptionKey: 'context', run() {} };
+  assert.deepEqual(filterCommands([command], 'настройка sampler', (key) => labels[key]), [command]);
+  assert.deepEqual(filterCommands([command], 'галерея', (key) => labels[key]), []);
+});

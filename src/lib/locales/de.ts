@@ -1,5 +1,12 @@
 /** German translations. */
 const de: Record<string, string> = {
+  "generation.navigation.toolbar": "Generierungsbereich",
+  "generation.navigation.mode": "Generierungsmodus",
+  "generation.navigation.find": "Einstellung suchen",
+  "generation.navigation.collapse": "Abschnitte einklappen",
+  "generation.navigation.expand": "Abschnitte ausklappen",
+  "generation.navigation.setting": "Generierungseinstellung",
+
   "commands.open": "Befehle suchen",
   "commands.title": "Schnellnavigation",
   "commands.search": "Bereiche und Befehle suchen…",

@@ -23,6 +23,8 @@
   import H3PromptGuidePanel from "../video/H3PromptGuidePanel.svelte";
   import { h3Guide } from "../../stores/h3Guide.svelte.js";
   import InfoTip from "../ui/InfoTip.svelte";
+  import { commands } from "../../stores/commands.svelte.js";
+  import { Search, ChevronsDownUp, ChevronsUpDown, ArrowLeftRight } from "@lucide/svelte";
   import EditableValue from "../ui/EditableValue.svelte";
   import ProgressBar from "../progress/ProgressBar.svelte";
   import PreviewImage from "../progress/PreviewImage.svelte";
@@ -162,7 +164,6 @@
   let dragOver = $state(false);
   let maskDragOver = $state(false);
   let imagePasteTarget = $state<"input" | "mask" | null>(null);
-  let promptsSectionOpen = $state(true);
   let regionalPromptModalOpen = $state(false);
 
   /** Which section (or "preview") currently has an image dragged over it */
@@ -352,22 +353,31 @@
     return !!pendingDrop && pendingDrop.side === side && pendingDrop.index === index;
   }
 
+  const SECTION_LABEL_KEYS: Record<SectionId, string> = {
+    dimensions: "generation.dimensions.title",
+    prompts: "generation.prompts.title",
+    imageInputs: "generation.image.title",
+    imageEdit: "generation.image_edit.title",
+    videoSettings: "generation.video.title",
+    inpaintLayers: "canvas.workspace_title",
+    generationSettings: "generation.settings.title",
+    model: "generation.model.title",
+    sampler: "generation.sampler.title",
+    novelai: "generation.novelai.title",
+    naiFaceDetail: "generation.nai_face_detail.title",
+    controlnet: "generation.controlnet.title",
+    styleTransfer: "generation.style_transfer.title",
+    styleRef: "generation.style_ref.title",
+    facefix: "generation.facefix.title",
+    upscaleHistory: "generation.upscale.title",
+  };
+
+  function sectionLabelKey(section: SectionId): string {
+    return section === "dimensions" && generation.mode === "inpainting" ? "canvas.document_size" : SECTION_LABEL_KEYS[section];
+  }
+
   function sectionLabel(section: SectionId): string {
-    if (section === "dimensions") return locale.t('generation.dimensions.title');
-    if (section === "prompts") return locale.t('generation.prompts.title');
-    if (section === "imageInputs") return locale.t('generation.image.title');
-    if (section === "imageEdit") return locale.t('generation.image_edit.title');
-    if (section === "videoSettings") return locale.t('generation.video.title');
-    if (section === "inpaintLayers") return locale.t('canvas.workspace_title');
-    if (section === "generationSettings") return locale.t('generation.settings.title');
-    if (section === "model") return locale.t('generation.model.title');
-    if (section === "sampler") return locale.t('generation.sampler.title');
-    if (section === "novelai") return locale.t('generation.novelai.title');
-    if (section === "naiFaceDetail") return locale.t('generation.nai_face_detail.title');
-    if (section === "facefix") return locale.t('generation.facefix.title');
-    if (section === "styleTransfer") return locale.t('generation.style_transfer.title');
-    if (section === "styleRef") return locale.t('generation.style_ref.title');
-    return locale.t('generation.upscale.title');
+    return locale.t(sectionLabelKey(section));
   }
 
   function sectionVisible(section: SectionId): boolean {
@@ -434,6 +444,7 @@
 
   const savedCollapse = typeof window !== "undefined" ? loadCollapseState() : {};
 
+  let promptsSectionOpen = $state(savedCollapse.prompts !== false);
   let dimensionsSectionOpen = $state(savedCollapse.dimensions !== false);
   let imageSectionOpen = $state(savedCollapse.imageInputs !== false);
   let imageEditSectionOpen = $state(savedCollapse.imageEdit !== false);
@@ -450,9 +461,59 @@
   let facefixSectionOpen = $state(savedCollapse.facefix !== false);
   let postSectionOpen = $state(savedCollapse.upscaleHistory !== false);
 
+  function setSectionOpen(section: SectionId, open: boolean) {
+    switch (section) {
+      case "dimensions": dimensionsSectionOpen = open; break;
+      case "prompts": promptsSectionOpen = open; break;
+      case "imageInputs": imageSectionOpen = open; break;
+      case "imageEdit": imageEditSectionOpen = open; break;
+      case "videoSettings": videoSettingsSectionOpen = open; break;
+      case "inpaintLayers": layersSectionOpen = open; break;
+      case "generationSettings": controlsSectionOpen = open; break;
+      case "model": modelSectionOpen = open; break;
+      case "sampler": samplerSectionOpen = open; break;
+      case "novelai": novelaiSectionOpen = open; break;
+      case "naiFaceDetail": naiFaceDetailSectionOpen = open; break;
+      case "controlnet": controlnetSectionOpen = open; break;
+      case "styleTransfer": styleTransferSectionOpen = open; break;
+      case "styleRef": styleRefSectionOpen = open; break;
+      case "facefix": facefixSectionOpen = open; break;
+      case "upscaleHistory": postSectionOpen = open; break;
+    }
+  }
+
+  function setVisibleSectionsOpen(open: boolean) {
+    for (const section of sectionOrder.filter(sectionVisible)) setSectionOpen(section, open);
+  }
+
+  async function revealSection(section: SectionId) {
+    if (!sectionVisible(section)) return;
+    const side = sectionSides[section];
+    if (side === "left" && leftCollapsed) toggleLeftPanel();
+    if (side === "right" && rightCollapsed) toggleRightPanel();
+    setSectionOpen(section, true);
+    await tick();
+    const target = sectionRefs[section];
+    target?.scrollIntoView({ block: "start", inline: "nearest" });
+    target?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.focus({ preventScroll: true });
+  }
+
+  $effect(() => {
+    if (mobileFriendly) return;
+    commands.register(sectionOrder.filter((id) => sectionVisible(id) && id !== draggingSection).map((id) => ({
+      id: `generation.section.${id}`,
+      labelKey: sectionLabelKey(id),
+      descriptionKey: "generation.navigation.setting",
+      keywords: `generation settings ${id}`,
+      run: () => { void revealSection(id); },
+    })), "generation");
+    return () => commands.unregister("generation");
+  });
+
   let collapseSaveTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => {
     const state: Record<string, boolean> = {
+      prompts: promptsSectionOpen,
       dimensions: dimensionsSectionOpen,
       imageInputs: imageSectionOpen,
       imageEdit: imageEditSectionOpen,
@@ -2378,6 +2439,20 @@
     onmouseup={onPointerUp}
     onmouseleave={onPointerUp}
   >
+    {#if !mobileFriendly}
+      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-ui-border bg-ui-surface px-3 py-2" role="region" aria-label={locale.t("generation.navigation.toolbar")}>
+        <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label={locale.t("generation.navigation.mode")}>
+          {#if generation.mode === "video"}<span class="ui-control px-3 text-sm font-medium">{locale.t("generation.mode.video")}</span>{/if}
+          {#each modes as mode}
+            <button type="button" class="ui-control shrink-0 rounded-lg border px-3 text-xs font-medium transition-colors {generation.mode === mode.id ? 'border-ui-accent bg-ui-selected text-neutral-100' : 'border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100'}" aria-pressed={generation.mode === mode.id} onclick={() => { generation.mode = mode.id; if (mode.id !== "inpainting") canvas.isCanvasMode = false; }}>{mode.label()}</button>
+          {/each}
+        </nav>
+        <button type="button" class="ui-control flex items-center gap-2 rounded-lg border border-ui-border px-3 text-xs text-neutral-300 hover:bg-neutral-800" onclick={() => commands.show("generation")}><Search size={15} />{locale.t("generation.navigation.find")}</button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.navigation.collapse")} aria-label={locale.t("generation.navigation.collapse")} onclick={() => setVisibleSectionsOpen(false)}><ChevronsDownUp size={17} /></button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.navigation.expand")} aria-label={locale.t("generation.navigation.expand")} onclick={() => setVisibleSectionsOpen(true)}><ChevronsUpDown size={17} /></button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.swap_panels")} aria-label={locale.t("generation.swap_panels")} onclick={swapPanels}><ArrowLeftRight size={17} /></button>
+      </div>
+    {/if}
     <!-- Main row: side panels + preview. The bottom panel spans the full width below this row. -->
     <div class="flex flex-1 min-h-0">
     {#if mobileFriendly}
@@ -2437,40 +2512,6 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden pl-3 pr-5 pt-20 pb-6 flex flex-col gap-2' : 'contents'}">
-        {#if controlsSide === "left" && !mobileFriendly}
-          <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-2 pt-2 pb-2">
-            <div class="flex gap-1.5 items-center">
-              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
-                {#if generation.mode === "video"}
-                  <h1 class="flex-1 py-1.5 text-center text-xs font-medium text-neutral-200">{locale.t("generation.mode.video")}</h1>
-                {/if}
-                {#each modes as mode}
-                  <button
-                    onclick={() => {
-                      generation.mode = mode.id;
-                      if (mode.id !== "inpainting") canvas.isCanvasMode = false;
-                    }}
-                    class="ui-control shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
-                      ? 'bg-neutral-700 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'}"
-                  >
-                    {mode.label()}
-                  </button>
-                {/each}
-              </div>
-              <button
-                onclick={swapPanels}
-                class="ui-icon-button flex items-center justify-center p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
-                title={locale.t('generation.swap_panels')}
-                aria-label={locale.t('generation.swap_panels')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
-              </button>
-            </div>
-
-          </div>
-        {/if}
-
         {@render sectionDropZone("left", 0)}
         {#each leftRenderSections as section, i}
           {@render renderSection(section)}
@@ -2599,40 +2640,6 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto pl-5 pr-3 pt-20 pb-6 space-y-2' : 'contents'}">
-        {#if controlsSide === "right" && !mobileFriendly}
-          <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-3 pt-3 pb-2">
-            <div class="flex gap-1.5 items-center">
-              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
-                {#if generation.mode === "video"}
-                  <h1 class="flex-1 py-1.5 text-center text-xs font-medium text-neutral-200">{locale.t("generation.mode.video")}</h1>
-                {/if}
-                {#each modes as mode}
-                  <button
-                    onclick={() => {
-                      generation.mode = mode.id;
-                      if (mode.id !== "inpainting") canvas.isCanvasMode = false;
-                    }}
-                    class="ui-control shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
-                      ? 'bg-neutral-700 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'}"
-                  >
-                    {mode.label()}
-                  </button>
-                {/each}
-              </div>
-              <button
-                onclick={swapPanels}
-                class="ui-icon-button flex items-center justify-center p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
-                title={locale.t('generation.swap_panels')}
-                aria-label={locale.t('generation.swap_panels')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
-              </button>
-            </div>
-
-          </div>
-        {/if}
-
         {@render sectionDropZone("right", 0)}
         {#each rightRenderSections as section, i}
           {@render renderSection(section)}

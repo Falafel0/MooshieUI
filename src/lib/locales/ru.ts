@@ -1,5 +1,12 @@
 /** Russian translations. */
 const ru: Record<string, string> = {
+  "generation.navigation.toolbar": "Рабочий экран генерации",
+  "generation.navigation.mode": "Режим генерации",
+  "generation.navigation.find": "Найти настройку",
+  "generation.navigation.collapse": "Свернуть секции",
+  "generation.navigation.expand": "Развернуть секции",
+  "generation.navigation.setting": "Настройка генерации",
+
   "commands.open": "Поиск команд",
   "commands.title": "Быстрый переход",
   "commands.search": "Поиск разделов и команд…",

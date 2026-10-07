@@ -1,5 +1,12 @@
 /** English translations — source of truth for all UI strings. */
 const en: Record<string, string> = {
+  "generation.navigation.toolbar": "Generation workspace",
+  "generation.navigation.mode": "Generation mode",
+  "generation.navigation.find": "Find a setting",
+  "generation.navigation.collapse": "Collapse sections",
+  "generation.navigation.expand": "Expand sections",
+  "generation.navigation.setting": "Generation setting",
+
   "commands.open": "Search commands",
   "commands.title": "Quick navigation",
   "commands.search": "Search sections and commands…",

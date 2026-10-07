@@ -1,5 +1,12 @@
 /** Korean translations. */
 const ko: Record<string, string> = {
+  "generation.navigation.toolbar": "생성 작업 공간",
+  "generation.navigation.mode": "생성 모드",
+  "generation.navigation.find": "설정 찾기",
+  "generation.navigation.collapse": "섹션 접기",
+  "generation.navigation.expand": "섹션 펼치기",
+  "generation.navigation.setting": "생성 설정",
+
   "commands.open": "명령 검색",
   "commands.title": "빠른 이동",
   "commands.search": "섹션 및 명령 검색…",
