@@ -1,5 +1,14 @@
 /** Simplified Chinese translations. */
 const zh: Record<string, string> = {
+  "settings.interface.title": "界面舒适度",
+  "settings.interface.density_hint": "调整生成面板和菜单的控件大小。触摸屏始终使用较大的按钮。",
+  "settings.interface.compact": "紧凑",
+  "settings.interface.comfortable": "舒适",
+  "settings.interface.touch": "触控",
+  "settings.interface.reduced_motion": "减少动画",
+  "settings.interface.motion_hint": "同时遵循系统的减少动态效果设置。",
+  "common.context_menu": "上下文菜单",
+
   "prompt_studio.polish.library_context": "Library purpose",
   "prompt_studio.polish.manage_hint": "Edit shared sets and tag metadata. Your draft stays separate.",
   "prompt_studio.polish.compose_hint": "Find tags and add them to the shared draft.",

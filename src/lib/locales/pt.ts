@@ -1,5 +1,14 @@
 /** Portuguese (Brazilian) translations. */
 const pt: Record<string, string> = {
+  "settings.interface.title": "Conforto da interface",
+  "settings.interface.density_hint": "Ajuste os controles dos painéis de geração e menus. Telas sensíveis ao toque sempre usam botões maiores.",
+  "settings.interface.compact": "Compacta",
+  "settings.interface.comfortable": "Confortável",
+  "settings.interface.touch": "Toque",
+  "settings.interface.reduced_motion": "Reduzir animações",
+  "settings.interface.motion_hint": "A preferência do sistema para reduzir animações também é respeitada.",
+  "common.context_menu": "Menu de contexto",
+
   "prompt_studio.polish.library_context": "Library purpose",
   "prompt_studio.polish.manage_hint": "Edit shared sets and tag metadata. Your draft stays separate.",
   "prompt_studio.polish.compose_hint": "Find tags and add them to the shared draft.",

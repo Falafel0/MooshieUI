@@ -1,5 +1,14 @@
 /** Japanese translations. */
 const ja: Record<string, string> = {
+  "settings.interface.title": "インターフェースの使いやすさ",
+  "settings.interface.density_hint": "生成パネルとメニューの操作項目のサイズを調整します。タッチ画面では常に大きなボタンを使用します。",
+  "settings.interface.compact": "コンパクト",
+  "settings.interface.comfortable": "標準",
+  "settings.interface.touch": "タッチ",
+  "settings.interface.reduced_motion": "アニメーションを減らす",
+  "settings.interface.motion_hint": "システムのアニメーション抑制設定も反映されます。",
+  "common.context_menu": "コンテキストメニュー",
+
   "prompt_studio.polish.library_context": "Library purpose",
   "prompt_studio.polish.manage_hint": "Edit shared sets and tag metadata. Your draft stays separate.",
   "prompt_studio.polish.compose_hint": "Find tags and add them to the shared draft.",

@@ -41,6 +41,8 @@ Local implementation plans and specs may also exist under `docs/superpowers/`. T
 
 ## Elsewhere
 
+The first interface improvement stage is documented in [Interface comfort](UI_FOUNDATION.md), including density, reduced motion, and keyboard navigation in context menus.
+
 | Topic | Path |
 |-------|------|
 | User-facing readme | [README.md](../README.md) |

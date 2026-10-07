@@ -175,6 +175,11 @@
       : `sim-${accessibility.visionSimulatorMode}`
   );
 
+  $effect(() => {
+    document.documentElement.dataset.density = accessibility.density;
+    document.documentElement.dataset.motion = accessibility.motion;
+  });
+
   let lastProgressEventAt = 0;
 
   /** Images received via WebSocket during generation, keyed by prompt_id. */

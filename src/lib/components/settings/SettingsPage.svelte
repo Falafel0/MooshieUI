@@ -20,6 +20,7 @@
   import QualityTagsEditor from "./QualityTagsEditor.svelte";
   import LlmProviderPanel from "./LlmProviderPanel.svelte";
   import ProjectsSection from "./ProjectsSection.svelte";
+  import InterfacePreferences from "./InterfacePreferences.svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, authHeaders, clearAuthToken } from "../../utils/ipc.js";
   import { requestOsNotificationPermission } from "../../utils/osNotify.js";
   import { useMobileLayout, isMobileUA, setForceDesktopOverride } from "../../utils/device.js";
@@ -1157,7 +1158,7 @@
   const sections = [
     { key: "appMode", labelKey: "settings.sections.app_mode", keywords: "browser app mode desktop native window web switch ui trust localhost proxy sign in" },
     { key: "connection", labelKey: "settings.sections.connection", keywords: "server mode url port remote autolaunch" },
-    { key: "appearance", labelKey: "settings.sections.appearance", keywords: "theme dark light font scale palette custom create logo background branding import export color" },
+    { key: "appearance", labelKey: "settings.sections.appearance", keywords: "theme dark light font scale palette custom create logo background branding import export color density compact comfortable touch motion animation" },
     { key: "performance", labelKey: "settings.sections.performance", keywords: "vram mode high low normal keep alive close attention backend sage flash" },
     { key: "quality", labelKey: "settings.sections.quality", keywords: "quality tags auto masterpiece best quality anima illustrious noobai pony nanosaur positive negative prompt" },
     { key: "gpu", labelKey: "settings.sections.gpu", keywords: "gpu vram worker backend multi status utilization temperature power nvidia" },
@@ -2821,6 +2822,10 @@
             {#if themeImportDone}<p class="text-xs text-green-400">{locale.t("settings.appearance.themes_imported")}</p>{/if}
             {#if themeExportError}<p class="text-xs text-red-400">{themeExportError}</p>{/if}
             {#if themeExportDone}<p class="text-xs text-green-400">{locale.t("settings.appearance.themes_exported")}</p>{/if}
+          </div>
+
+          <div>
+            <InterfacePreferences />
           </div>
 
           <div>

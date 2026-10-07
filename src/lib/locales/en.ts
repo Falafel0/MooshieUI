@@ -1,5 +1,14 @@
 /** English translations — source of truth for all UI strings. */
 const en: Record<string, string> = {
+  "settings.interface.title": "Interface comfort",
+  "settings.interface.density_hint": "Adjust generation panels and menu controls. Touch screens always use larger targets.",
+  "settings.interface.compact": "Compact",
+  "settings.interface.comfortable": "Comfortable",
+  "settings.interface.touch": "Touch",
+  "settings.interface.reduced_motion": "Reduce motion",
+  "settings.interface.motion_hint": "Your system’s reduced motion preference is also respected.",
+  "common.context_menu": "Context menu",
+
   "prompt_studio.polish.library_context": "Library purpose",
   "prompt_studio.polish.manage_hint": "Edit shared sets and tag metadata. Your draft stays separate.",
   "prompt_studio.polish.compose_hint": "Find tags and add them to the shared draft.",

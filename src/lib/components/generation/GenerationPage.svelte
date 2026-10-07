@@ -1655,8 +1655,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("dimensions")}
         <button
-          class="flex-1 flex items-center justify-between py-2 pr-3 text-xs text-neutral-300 hover:text-neutral-100 focus:outline-none"
+          class="ui-control flex-1 flex items-center justify-between pr-3 text-xs text-neutral-300 hover:text-neutral-100 focus:outline-none"
           onclick={() => (dimensionsSectionOpen = !dimensionsSectionOpen)}
+          aria-expanded={dimensionsSectionOpen}
           title={dimensionsSectionOpen ? locale.t('common.collapse', { section: dimensionsTitle }) : locale.t('common.expand', { section: dimensionsTitle })}
         >
           <span class="font-medium">{dimensionsTitle}</span>
@@ -1688,8 +1689,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("prompts")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (promptsSectionOpen = !promptsSectionOpen)}
+          aria-expanded={promptsSectionOpen}
           title={promptsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.prompts.title') }) : locale.t('common.expand', { section: locale.t('generation.prompts.title') })}
         >
           <span class="font-medium">{locale.t('generation.prompts.title')}</span>
@@ -1934,8 +1936,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("imageInputs")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (imageSectionOpen = !imageSectionOpen)}
+          aria-expanded={imageSectionOpen}
           title={imageSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image.title') }) : locale.t('common.expand', { section: locale.t('generation.image.title') })}
         >
           <span class="font-medium">{locale.t('generation.image.title')}</span>
@@ -1956,8 +1959,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("inpaintLayers")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (layersSectionOpen = !layersSectionOpen)}
+          aria-expanded={layersSectionOpen}
           title={layersSectionOpen ? locale.t('common.collapse', { section: locale.t('canvas.workspace_title') }) : locale.t('common.expand', { section: locale.t('canvas.workspace_title') })}
         >
           <span class="font-medium">{locale.t('canvas.workspace_title')}</span>
@@ -2016,8 +2020,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("generationSettings")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (controlsSectionOpen = !controlsSectionOpen)}
+          aria-expanded={controlsSectionOpen}
           title={controlsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.settings.title') }) : locale.t('common.expand', { section: locale.t('generation.settings.title') })}
         >
           <span class="font-medium">{locale.t('generation.settings.title')}</span>
@@ -2050,8 +2055,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("model")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (modelSectionOpen = !modelSectionOpen)}
+          aria-expanded={modelSectionOpen}
           title={modelSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.model.title') }) : locale.t('common.expand', { section: locale.t('generation.model.title') })}
         >
           <span class="font-medium">{locale.t('generation.model.title')}</span>
@@ -2083,8 +2089,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("sampler")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (samplerSectionOpen = !samplerSectionOpen)}
+          aria-expanded={samplerSectionOpen}
           title={samplerSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.sampler.title') }) : locale.t('common.expand', { section: locale.t('generation.sampler.title') })}
         >
           <span class="font-medium">{locale.t('generation.sampler.title')}</span>
@@ -2111,8 +2118,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("novelai")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (novelaiSectionOpen = !novelaiSectionOpen)}
+          aria-expanded={novelaiSectionOpen}
           title={novelaiSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.novelai.title') }) : locale.t('common.expand', { section: locale.t('generation.novelai.title') })}
         >
           <span class="font-medium">{locale.t('generation.novelai.title')}</span>
@@ -2132,8 +2140,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("naiFaceDetail")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (naiFaceDetailSectionOpen = !naiFaceDetailSectionOpen)}
+          aria-expanded={naiFaceDetailSectionOpen}
           title={naiFaceDetailSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.nai_face_detail.title') }) : locale.t('common.expand', { section: locale.t('generation.nai_face_detail.title') })}
         >
           <span class="font-medium">{locale.t('generation.nai_face_detail.title')}</span>
@@ -2153,8 +2162,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("controlnet")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (controlnetSectionOpen = !controlnetSectionOpen)}
+          aria-expanded={controlnetSectionOpen}
           title={controlnetSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.controlnet.title') }) : locale.t('common.expand', { section: locale.t('generation.controlnet.title') })}
         >
           <span class="font-medium">{locale.t('generation.controlnet.title')}</span>
@@ -2174,8 +2184,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("styleTransfer")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (styleTransferSectionOpen = !styleTransferSectionOpen)}
+          aria-expanded={styleTransferSectionOpen}
           title={styleTransferSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.style_transfer.title') }) : locale.t('common.expand', { section: locale.t('generation.style_transfer.title') })}
         >
           <span class="font-medium">{locale.t('generation.style_transfer.title')}</span>
@@ -2195,8 +2206,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("styleRef")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (styleRefSectionOpen = !styleRefSectionOpen)}
+          aria-expanded={styleRefSectionOpen}
           title={styleRefSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.style_ref.title') }) : locale.t('common.expand', { section: locale.t('generation.style_ref.title') })}
         >
           <span class="font-medium">{locale.t('generation.style_ref.title')}</span>
@@ -2216,8 +2228,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("imageEdit")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (imageEditSectionOpen = !imageEditSectionOpen)}
+          aria-expanded={imageEditSectionOpen}
           title={imageEditSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image_edit.title') }) : locale.t('common.expand', { section: locale.t('generation.image_edit.title') })}
         >
           <span class="font-medium">{locale.t('generation.image_edit.title')}</span>
@@ -2237,8 +2250,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("videoSettings")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (videoSettingsSectionOpen = !videoSettingsSectionOpen)}
+          aria-expanded={videoSettingsSectionOpen}
           title={videoSettingsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.video.title') }) : locale.t('common.expand', { section: locale.t('generation.video.title') })}
         >
           <span class="font-medium">{locale.t('generation.video.title')}</span>
@@ -2262,8 +2276,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("facefix")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (facefixSectionOpen = !facefixSectionOpen)}
+          aria-expanded={facefixSectionOpen}
           title={facefixSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.facefix.title') }) : locale.t('common.expand', { section: locale.t('generation.facefix.title') })}
         >
           <span class="font-medium">{locale.t('generation.facefix.title')}</span>
@@ -2295,8 +2310,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("upscaleHistory")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (postSectionOpen = !postSectionOpen)}
+          aria-expanded={postSectionOpen}
           title={postSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.upscale.title') }) : locale.t('common.expand', { section: locale.t('generation.upscale.title') })}
         >
           <span class="font-medium">{locale.t('generation.upscale.title')}</span>
@@ -2376,7 +2392,7 @@
                 generation.mode = mode.id;
                 if (mode.id !== "inpainting") canvas.isCanvasMode = false;
               }}
-              class="shrink-0 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
+              class="ui-control shrink-0 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
                 ? 'bg-neutral-700 text-white'
                 : 'text-neutral-400 hover:text-neutral-200'}"
             >
@@ -2434,7 +2450,7 @@
                       generation.mode = mode.id;
                       if (mode.id !== "inpainting") canvas.isCanvasMode = false;
                     }}
-                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
+                    class="ui-control shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
                       ? 'bg-neutral-700 text-white'
                       : 'text-neutral-400 hover:text-neutral-200'}"
                   >
@@ -2444,8 +2460,9 @@
               </div>
               <button
                 onclick={swapPanels}
-                class="p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+                class="ui-icon-button flex items-center justify-center p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
                 title={locale.t('generation.swap_panels')}
+                aria-label={locale.t('generation.swap_panels')}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
               </button>
@@ -2595,7 +2612,7 @@
                       generation.mode = mode.id;
                       if (mode.id !== "inpainting") canvas.isCanvasMode = false;
                     }}
-                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
+                    class="ui-control shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
                       ? 'bg-neutral-700 text-white'
                       : 'text-neutral-400 hover:text-neutral-200'}"
                   >
@@ -2605,8 +2622,9 @@
               </div>
               <button
                 onclick={swapPanels}
-                class="p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+                class="ui-icon-button flex items-center justify-center p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
                 title={locale.t('generation.swap_panels')}
+                aria-label={locale.t('generation.swap_panels')}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
               </button>

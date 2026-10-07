@@ -1,5 +1,14 @@
 /** Russian translations. */
 const ru: Record<string, string> = {
+  "settings.interface.title": "Удобство интерфейса",
+  "settings.interface.density_hint": "Размер элементов в панелях генерации и меню. На сенсорных экранах кнопки всегда крупнее.",
+  "settings.interface.compact": "Компактно",
+  "settings.interface.comfortable": "Удобно",
+  "settings.interface.touch": "Сенсорный",
+  "settings.interface.reduced_motion": "Уменьшить анимацию",
+  "settings.interface.motion_hint": "Системная настройка уменьшения анимации также учитывается.",
+  "common.context_menu": "Контекстное меню",
+
   "prompt_studio.polish.library_context": "Назначение библиотеки",
   "prompt_studio.polish.manage_hint": "Редактируйте общие наборы и сведения о тегах. Черновик хранится отдельно.",
   "prompt_studio.polish.compose_hint": "Находите теги и добавляйте их в общий черновик.",

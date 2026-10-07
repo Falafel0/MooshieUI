@@ -1,5 +1,14 @@
 /** Korean translations. */
 const ko: Record<string, string> = {
+  "settings.interface.title": "인터페이스 편의성",
+  "settings.interface.density_hint": "생성 패널과 메뉴의 컨트롤 크기를 조정합니다. 터치 화면에서는 항상 더 큰 버튼을 사용합니다.",
+  "settings.interface.compact": "간결하게",
+  "settings.interface.comfortable": "편안하게",
+  "settings.interface.touch": "터치",
+  "settings.interface.reduced_motion": "애니메이션 줄이기",
+  "settings.interface.motion_hint": "시스템의 동작 줄이기 설정도 적용됩니다.",
+  "common.context_menu": "컨텍스트 메뉴",
+
   "prompt_studio.polish.library_context": "Library purpose",
   "prompt_studio.polish.manage_hint": "Edit shared sets and tag metadata. Your draft stays separate.",
   "prompt_studio.polish.compose_hint": "Find tags and add them to the shared draft.",

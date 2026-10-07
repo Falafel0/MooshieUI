@@ -45,6 +45,15 @@
   --theme-surface-800: color-mix(in srgb, var(--theme-background) 72%, var(--theme-sub) 28%);
   --theme-border-700: color-mix(in srgb, var(--theme-background) 65%, var(--theme-sub) 35%);
 
+  --ui-control-height: 40px;
+  --ui-control-padding-y: 0.5rem;
+  --ui-accent: var(--theme-accent-500);
+  --ui-accent-foreground: var(--theme-accent-foreground);
+  --ui-selected: color-mix(in srgb, var(--theme-accent-500) 15%, var(--theme-surface-900));
+  --ui-focus: var(--theme-accent-400);
+  --ui-surface: var(--theme-surface-900);
+  --ui-border: var(--theme-border-700);
+
   /* Remap existing indigo/purple utility usage to the active palette. */
   --color-indigo-50: var(--theme-accent-50);
   --color-indigo-100: var(--theme-accent-100);
@@ -69,6 +78,71 @@
   --color-purple-800: var(--theme-accent-800);
   --color-purple-900: var(--theme-accent-900);
   --color-purple-950: var(--theme-accent-950);
+}
+
+@theme inline {
+  --color-ui-accent: var(--ui-accent);
+  --color-ui-accent-foreground: var(--ui-accent-foreground);
+  --color-ui-selected: var(--ui-selected);
+  --color-ui-surface: var(--ui-surface);
+  --color-ui-border: var(--ui-border);
+}
+
+html[data-density="compact"] {
+  --ui-control-height: 32px;
+  --ui-control-padding-y: 0.25rem;
+}
+html[data-density="touch"] {
+  --ui-control-height: 48px;
+  --ui-control-padding-y: 0.625rem;
+}
+
+/* Coarse pointers retain a full hit area even with the compact preference. */
+@media (any-pointer: coarse) {
+  :root, html[data-density] {
+    --ui-control-height: 48px;
+    --ui-control-padding-y: 0.625rem;
+  }
+}
+
+@utility ui-control {
+  min-height: var(--ui-control-height);
+  padding-block: var(--ui-control-padding-y);
+  touch-action: manipulation;
+}
+
+@utility ui-icon-button {
+  min-height: var(--ui-control-height);
+  min-width: var(--ui-control-height);
+  touch-action: manipulation;
+}
+
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 2px;
+}
+
+[role="menuitem"]:focus-visible {
+  outline-offset: -3px;
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 html[data-palette="nord"] {
