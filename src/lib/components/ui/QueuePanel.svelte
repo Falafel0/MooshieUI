@@ -3,6 +3,8 @@
   import { locale } from "../../stores/locale.svelte.js";
   import type { QueuePanelRow } from "../../stores/queue.svelte.js";
 
+  let { inline = false }: { inline?: boolean } = $props();
+
   const rows = $derived(queue.rows);
   const pending = $derived(queue.pendingRows);
   const running = $derived(queue.runningRow);
@@ -28,7 +30,8 @@
   }
 </script>
 
-{#if queue.panelOpen}
+{#if inline || queue.panelOpen}
+  {#if !inline}
   <!-- Backdrop -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
@@ -37,10 +40,11 @@
     onkeydown={(e) => { if (e.key === "Escape") queue.closePanel(); }}
   ></div>
 
+  {/if}
   <!-- Panel -->
   <div
-    class="absolute bottom-full right-0 mb-2 w-96 max-h-[28rem] flex flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl z-50"
-    role="dialog"
+    class={inline ? "flex h-full min-h-0 flex-col bg-ui-surface/30" : "absolute bottom-full right-0 mb-2 w-96 max-h-[28rem] flex flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl z-50"}
+    role={inline ? "region" : "dialog"}
     aria-label={locale.t("queue.panel.title")}
   >
     <!-- Header -->

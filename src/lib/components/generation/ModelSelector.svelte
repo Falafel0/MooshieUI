@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { models } from "../../stores/models.svelte.js";
   import { autocomplete } from "../../stores/autocomplete.svelte.js";
@@ -1591,6 +1592,9 @@
 </script>
 
 <div bind:this={modelSelectorRootEl} class="space-y-3">
+  {#if !generation.isNovelAi && models.checkpoints.length > 0}
+    <button type="button" class="ui-control w-full rounded-lg border border-ui-border px-3 text-xs text-neutral-300 hover:bg-ui-selected hover:text-ui-accent" onclick={() => bottomPanel.requestPanel("checkpoints")}>{locale.t("bottom_panel.browse_models")}</button>
+  {/if}
   <!-- Checkpoint -->
   <div class="relative">
     <div class="mb-1 flex items-center justify-between gap-2">
@@ -2052,8 +2056,7 @@
       <div class="flex items-center gap-2">
         <button
           onclick={() => {
-            generation.addLora();
-            generation.saveSettings();
+            bottomPanel.requestPanel("loras");
           }}
           class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
         >

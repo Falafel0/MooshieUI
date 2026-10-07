@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
+  import { bottomPanelContext, shelfSelectionKey } from "../../utils/bottomPanel.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { compare } from "../../stores/compare.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -984,7 +986,7 @@
         const s = JSON.parse(raw) as {
           left?: number; right?: number; bottom?: number;
           leftCollapsed?: boolean; rightCollapsed?: boolean; bottomCollapsed?: boolean;
-          bottomByMode?: Record<string, boolean>;
+          bottomByMode?: Record<string, boolean>; bottomHeightByMode?: Record<string, number>;
         };
         return {
           left: typeof s.left === "number" ? Math.min(LEFT_MAX, Math.max(LEFT_MIN, s.left)) : LEFT_DEFAULT,
@@ -993,42 +995,47 @@
           leftCollapsed: s.leftCollapsed === true,
           rightCollapsed: s.rightCollapsed === true,
           bottomCollapsed: s.bottomCollapsed === true,
-          bottomByMode: s.bottomByMode ?? {},
+          bottomByMode: Object.fromEntries(Object.entries(s.bottomByMode ?? {}).filter(([, value]) => typeof value === "boolean")),
+          bottomHeightByMode: Object.fromEntries(Object.entries(s.bottomHeightByMode ?? {}).filter(([, value]) => typeof value === "number" && Number.isFinite(value)).map(([key, value]) => [key, Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, value))])),
         };
       }
     } catch {}
-    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomByMode: {} as Record<string, boolean> };
+    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomByMode: {} as Record<string, boolean>, bottomHeightByMode: {} as Record<string, number> };
   }
 
   function savePanelLayout() {
     try {
       bottomByMode[layoutMode] = bottomCollapsed;
-      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed, bottomByMode }));
+      bottomHeightByMode[layoutMode] = bottomHeight;
+      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed, bottomByMode, bottomHeightByMode }));
     } catch {}
   }
 
   const LEFT_DEFAULT = 360;
   const RIGHT_DEFAULT = 310;
-  const BOTTOM_DEFAULT = 260;
+  const BOTTOM_DEFAULT = 220;
   const LEFT_MIN = 260;
   const LEFT_MAX = 520;
   const RIGHT_MIN = 240;
   const RIGHT_MAX = 450;
-  const BOTTOM_MIN = 220;
+  const BOTTOM_MIN = 180;
   const BOTTOM_MAX = 500;
 
   const _savedLayout = loadPanelLayout();
   const bottomByMode = _savedLayout.bottomByMode;
+  const bottomHeightByMode = _savedLayout.bottomHeightByMode;
   let layoutMode = untrack(() => generation.mode);
   let leftWidth = $state(_savedLayout.left);
   let rightWidth = $state(_savedLayout.right);
-  let bottomHeight = $state(_savedLayout.bottom);
+  let bottomHeight = $state(bottomHeightByMode[layoutMode] ?? _savedLayout.bottom);
 
   // Panel collapse state (restored from persisted layout)
   let leftCollapsed = $state(_savedLayout.leftCollapsed);
   let rightCollapsed = $state(_savedLayout.rightCollapsed);
   let bottomCollapsed = $state(bottomByMode[layoutMode] ?? (layoutMode === 'inpainting' || _savedLayout.bottomCollapsed));
   let workspaceWidth = $state(1500);
+  let workspaceHeight = $state(1000);
+  const shelfMaxHeight = $derived(Math.max(BOTTOM_MIN, Math.min(BOTTOM_MAX, Math.floor(workspaceHeight * 0.45))));
   const panelScale = $derived(Math.min(1, Math.max(0, workspaceWidth - 360) /
     Math.max(1, (leftCollapsed ? 0 : leftWidth) + (rightCollapsed ? 0 : rightWidth))));
   const visibleLeftWidth = $derived(Math.max(LEFT_MIN, Math.round(leftWidth * panelScale)));
@@ -1038,7 +1045,7 @@
   // sizes so expanding a panel that was restored as collapsed brings back its real size.
   let leftWidthBeforeCollapse = _savedLayout.left;
   let rightWidthBeforeCollapse = _savedLayout.right;
-  let bottomHeightBeforeCollapse = _savedLayout.bottom;
+  let bottomHeightBeforeCollapse = bottomHeightByMode[layoutMode] ?? _savedLayout.bottom;
 
   function toggleLeftPanel() {
     if (mobileFriendly) {
@@ -1087,6 +1094,29 @@
     }
     savePanelLayout();
   }
+
+  function openShelf() {
+    if (mobileFriendly) setMobilePanel("bottom", true);
+    else { bottomCollapsed = false; savePanelLayout(); }
+  }
+
+  function setShelfHeight(height: number) {
+    bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, height));
+    bottomHeightBeforeCollapse = bottomHeight;
+    bottomCollapsed = false;
+    savePanelLayout();
+  }
+
+  $effect(() => {
+    const requested = bottomPanel.requestedPanel;
+    if (!requested) return;
+    untrack(() => {
+      const context = bottomPanelContext(generation.mode === "video", generation.isNovelAi);
+      bottomPanel.selectTab(shelfSelectionKey(context, generation.mode), requested);
+      bottomPanel.requestedPanel = null;
+      openShelf();
+    });
+  });
 
   let dragging = $state<"left" | "right" | "bottom" | null>(null);
   let dragStartX = 0;
@@ -1243,7 +1273,7 @@
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragStartWidth = side === "left" ? leftWidth : rightWidth;
-    dragStartHeight = bottomHeight;
+    dragStartHeight = Math.min(bottomHeight, shelfMaxHeight);
     e.preventDefault();
   }
 
@@ -1302,7 +1332,7 @@
     if (!dragging) return;
     if (dragging === "bottom") {
       const delta = e.clientY - dragStartY;
-      bottomHeight = Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, dragStartHeight - delta));
+      bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, dragStartHeight - delta));
     } else {
       const delta = e.clientX - dragStartX;
       if (dragging === "left") {
@@ -1369,14 +1399,14 @@
   function resizeBottomWithKeyboard(event: KeyboardEvent) {
     if (bottomCollapsed) return;
     let height: number;
-    if (event.key === "ArrowUp") height = bottomHeight + 20;
-    else if (event.key === "ArrowDown") height = bottomHeight - 20;
+    if (event.key === "ArrowUp") height = Math.min(bottomHeight, shelfMaxHeight) + 20;
+    else if (event.key === "ArrowDown") height = Math.min(bottomHeight, shelfMaxHeight) - 20;
     else if (event.key === "Home") height = BOTTOM_MIN;
-    else if (event.key === "End") height = BOTTOM_MAX;
+    else if (event.key === "End") height = shelfMaxHeight;
     else return;
     event.preventDefault();
     event.stopPropagation();
-    bottomHeight = Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, height));
+    bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, height));
     savePanelLayout();
   }
 
@@ -1390,7 +1420,10 @@
     untrack(() => {
       if (layoutMode !== mode) {
         bottomByMode[layoutMode] = bottomCollapsed;
+        bottomHeightByMode[layoutMode] = bottomHeight;
         layoutMode = mode;
+        bottomHeight = bottomHeightByMode[mode] ?? BOTTOM_DEFAULT;
+        bottomHeightBeforeCollapse = bottomHeight;
         bottomCollapsed = bottomByMode[mode] ?? (isInpainting || mobileFriendly);
         imagePasteTarget = null;
       }
@@ -2449,6 +2482,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:clientWidth={workspaceWidth}
+    bind:clientHeight={workspaceHeight}
     class="flex flex-col h-full select-none {draggingSection ? 'cursor-grabbing' : ''}"
     onmousemove={onPointerMove}
     onmouseup={onPointerUp}
@@ -2682,8 +2716,8 @@
           aria-orientation="horizontal"
           aria-label={locale.t('generation.drag_to_resize')}
           aria-valuemin={BOTTOM_MIN}
-          aria-valuemax={BOTTOM_MAX}
-          aria-valuenow={bottomHeight}
+          aria-valuemax={shelfMaxHeight}
+          aria-valuenow={Math.min(bottomHeight, shelfMaxHeight)}
           aria-controls="desktop-bottom-panel"
           aria-disabled={bottomCollapsed}
           tabindex={bottomCollapsed ? -1 : 0}
@@ -2693,28 +2727,15 @@
           ondblclick={resetBottomHeight}
           title={locale.t('generation.drag_to_resize')}
         ></div>
-        <button
-          onclick={toggleBottomPanel}
-          aria-expanded={!bottomCollapsed}
-          aria-controls="desktop-bottom-panel"
-          aria-label={bottomCollapsed ? locale.t('generation.panel.expand_bottom') : locale.t('generation.panel.collapse_bottom')}
-          class="absolute left-1/2 -translate-x-1/2 bottom-0 z-20 h-6 w-12 flex items-center justify-center rounded-t border border-b-0 transition-colors {bottomCollapsed
-            ? 'bg-indigo-600 border-indigo-500/70 text-white hover:bg-indigo-500'
-            : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'}"
-          title={bottomCollapsed ? locale.t('generation.panel.expand_bottom') : locale.t('generation.panel.collapse_bottom')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform {bottomCollapsed ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
+
       </div>
-      {#if !bottomCollapsed}
         <div
           id="desktop-bottom-panel"
           class="overflow-hidden shrink-0 min-w-0 border-t border-neutral-800/50"
-          style="height: {bottomHeight}px"
+          style="height: {bottomCollapsed ? 34 : Math.min(bottomHeight, shelfMaxHeight)}px"
         >
-          <BottomPanel onupscale={upscaleImage} oninpaint={inpaintImage} onrefine={refineImage} oncontextmenu={handleSessionContextMenu} />
+          <BottomPanel collapsed={bottomCollapsed} onactivate={openShelf} oncollapse={toggleBottomPanel} onbrowse={() => setShelfHeight(BOTTOM_DEFAULT)} onexpand={() => setShelfHeight(shelfMaxHeight)} onupscale={upscaleImage} oninpaint={inpaintImage} onrefine={refineImage} oncontextmenu={handleSessionContextMenu} />
         </div>
-      {/if}
     {/if}
   </div>
 

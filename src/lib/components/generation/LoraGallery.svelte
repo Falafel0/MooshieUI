@@ -1,4 +1,9 @@
 <script lang="ts">
+  import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
+  import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
+  import BottomPanelIcon from "./BottomPanelIcon.svelte";
+  import BottomPanelEmpty from "./BottomPanelEmpty.svelte";
+  import BottomPanelToolbar from "./BottomPanelToolbar.svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import AnimaNodeRequirement from "./AnimaNodeRequirement.svelte";
   import { models } from "../../stores/models.svelte.js";
@@ -514,6 +519,8 @@
       }
     }
   });
+  let cardViewportHeight = $state(160);
+  let managementOpen = $state(false);
 </script>
 
 <!-- Search + LoRA grid -->
@@ -524,155 +531,13 @@
       {#if generation.animaTools.multi_lora_enabled}<AnimaNodeRequirement kind="tools" />{/if}
     </div>
   {/if}
-  <div class="mx-2 mt-1.5 rounded border border-neutral-800 bg-neutral-900/60 p-2 text-[11px] space-y-2">
-    <p class="text-neutral-400">{locale.t("lora_presets.title")}</p>
-    <div class="flex items-center gap-2">
-      <select
-        bind:value={selectedPresetId}
-        class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 focus:outline-none focus:border-indigo-500"
-      >
-        <option value="">{locale.t("lora_presets.select_placeholder")}</option>
-        {#each loraPresets.presets as preset (preset.id)}
-          <option value={preset.id}>{preset.name}</option>
-        {/each}
-      </select>
-      <select
-        bind:value={applyMode}
-        class="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 focus:outline-none focus:border-indigo-500"
-      >
-        <option value="replace">{locale.t("lora_presets.mode.replace")}</option>
-        <option value="merge">{locale.t("lora_presets.mode.merge")}</option>
-      </select>
-      <button
-        type="button"
-        class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-200 hover:border-indigo-500"
-        onclick={applySelectedPreset}
-      >
-        {locale.t("common.apply")}
-      </button>
-    </div>
-    <div class="flex items-center gap-2">
-      <input
-        type="text"
-        bind:value={newPresetName}
-        placeholder={locale.t("lora_presets.name_placeholder")}
-        class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
-      />
-      <button
-        type="button"
-        class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-200 hover:border-indigo-500"
-        onclick={createPresetFromCurrent}
-      >
-        {locale.t("lora_presets.save_current")}
-      </button>
-      <button
-        type="button"
-        class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:border-indigo-500"
-        onclick={updatePresetFromCurrent}
-      >
-        {locale.t("common.update")}
-      </button>
-      <button
-        type="button"
-        class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-red-300 hover:border-red-500/50"
-        onclick={deleteSelectedPreset}
-      >
-        {locale.t("common.delete")}
-      </button>
-    </div>
-    {#if presetStatus}
-      <p class="text-emerald-400">{presetStatus}</p>
-    {/if}
-    {#if presetError}
-      <p class="text-amber-300">{presetError}</p>
-    {/if}
-  </div>
+  <BottomPanelToolbar>
+    <button type="button" class="ui-control shrink-0 rounded-lg border border-ui-border px-3 text-xs text-neutral-300 hover:bg-ui-selected" aria-expanded={managementOpen} aria-controls="shelf-LoraGallery-management" onclick={() => { managementOpen = !managementOpen; }}>{locale.t(managementOpen ? "common.close" : "bottom_panel.manage_assets")}</button>
+    {#if !managementOpen}
 
-  <!-- CivitAI bulk scan controls -->
-  <div class="px-2 pt-1 pb-0.5 shrink-0">
-    {#if !civitaiScan.running && !civitaiScan.summary && !civitaiScan.progress}
-      <button
-        type="button"
-        onclick={() => void civitaiScan.scan(false)}
-        class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] text-neutral-300 hover:border-indigo-500 hover:text-neutral-100"
-      >
-        {locale.t("lora.civitai_scan.button")}
-      </button>
-    {:else if civitaiScan.running}
-      <div class="space-y-1">
-        <div class="flex items-center gap-1.5">
-          <div class="flex-1 h-1.5 rounded-full bg-neutral-700 overflow-hidden">
-            <div
-              class="h-full rounded-full bg-indigo-500 transition-all duration-300"
-              style="width: {Math.round(civitaiScan.fraction * 100)}%"
-            ></div>
-          </div>
-          <span class="text-[10px] text-neutral-400 shrink-0">
-            {civitaiScan.progress
-              ? locale.t("lora.civitai_scan.progress", {
-                  current: String(civitaiScan.progress.current),
-                  total: String(civitaiScan.progress.total),
-                })
-              : ""}
-          </span>
-          <button
-            type="button"
-            disabled={civitaiScan.cancelling}
-            onclick={() => void civitaiScan.cancel()}
-            class="shrink-0 rounded border border-red-700/60 px-1.5 py-0.5 text-[10px] text-red-300 hover:border-red-500 disabled:opacity-50"
-          >
-            {civitaiScan.cancelling
-              ? locale.t("lora.civitai_scan.cancelling")
-              : locale.t("lora.civitai_scan.cancel")}
-          </button>
-        </div>
-        {#if civitaiScan.progress}
-          <p class="text-[10px] text-neutral-400 truncate" title={civitaiScan.progress.name}>
-            {civitaiScan.progress.status === "hashing"
-              ? locale.t("lora.civitai_scan.hashing", { name: civitaiScan.progress.name })
-              : civitaiScan.progress.name}
-          </p>
-        {/if}
-      </div>
-    {:else if civitaiScan.summary || (civitaiScan.progress && civitaiScan.progress.done)}
-      <div class="flex items-center gap-2">
-        <p class="flex-1 text-[10px] text-neutral-300 truncate">
-          {civitaiScan.progress?.cancelled
-            ? locale.t("lora.civitai_scan.cancelled")
-            : locale.t("lora.civitai_scan.done")}
-          {#if civitaiScan.summary}
-            &ndash;
-            {locale.t("lora.civitai_scan.summary", {
-              found: String(civitaiScan.summary.found),
-              not_found: String(civitaiScan.summary.not_found),
-              skipped: String(civitaiScan.summary.skipped),
-            })}
-          {/if}
-        </p>
-        <button
-          type="button"
-          onclick={() => civitaiScan.dismiss()}
-          class="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:border-neutral-500"
-        >
-          {locale.t("lora.civitai_scan.dismiss")}
-        </button>
-        <button
-          type="button"
-          onclick={() => void civitaiScan.scan(true)}
-          class="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-300 hover:border-indigo-500"
-        >
-          {locale.t("lora.civitai_scan.button_force")}
-        </button>
-      </div>
-    {/if}
-  </div>
-
-  <!-- Search bar + size slider -->
-  <div class="px-2 pt-1.5 pb-1 shrink-0 space-y-1">
-    <div class="flex gap-1 items-center">
-      <select
+    <select
         bind:value={sortMode}
-        class="shrink-0 rounded border border-neutral-700 bg-neutral-800 px-1.5 py-1 text-[10px] text-neutral-200 focus:outline-none focus:border-indigo-500"
+        class="ui-control shrink-0 rounded-lg border border-ui-border bg-ui-surface px-2 text-xs text-neutral-200 focus:border-ui-accent"
         title={locale.t('model_gallery.sort_tip')}
       >
         <option value="name">{locale.t('model_gallery.sort_name')}</option>
@@ -680,30 +545,16 @@
         <option value="tree">{locale.t('model_gallery.sort_tree')}</option>
         <option value="family">{locale.t('model_gallery.sort_family')}</option>
       </select>
-      <input
-        type="text"
-        bind:value={civitaiImageRef}
-        placeholder={locale.t('checkpoint.civitai_image_ref_placeholder')}
-        class="min-w-0 flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
-      />
-      <button
-        type="button"
-        disabled={civitaiImportBusy || !civitaiImageRef.trim()}
-        onclick={() => void importCivitaiImageMeta()}
-        class="shrink-0 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] text-neutral-200 hover:border-indigo-500 disabled:opacity-40"
-        title={locale.t('checkpoint.civitai_image_ref_tip')}
-      >
-        {civitaiImportBusy ? "…" : locale.t('checkpoint.civitai_import_prompt')}
-      </button>
-    </div>
-    <div class="flex items-center gap-2">
+    <div class="relative min-w-40 flex-1">
+      <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-500"><BottomPanelIcon name="search" /></span>
     <input
       type="text"
       bind:value={searchQuery}
-      placeholder={locale.t('lora.search_placeholder')}
-      class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2.5 py-1 text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors"
+      aria-label={locale.t('lora.search_placeholder')} placeholder={locale.t('lora.search_placeholder')}
+      class="w-full ui-control min-w-0 bg-ui-surface border border-ui-border rounded-lg pl-9 pr-3 text-xs text-neutral-100 placeholder-neutral-500 focus:border-ui-accent transition-colors"
     />
-    <div use:scrollCapture>
+    </div>
+    <div use:scrollCapture class="flex shrink-0 items-center gap-2 text-neutral-500"><BottomPanelIcon name="grid" class="size-3.5" />
       <input
         type="range"
         min="60"
@@ -711,11 +562,182 @@
         value={cardSize}
         oninput={(e) => onCardSizeChange?.(Number(e.currentTarget.value))}
         class="w-16 h-4 accent-indigo-500 cursor-pointer"
-        title={locale.t('bottom_panel.card_size')}
+        aria-label={locale.t('bottom_panel.card_size')} title={locale.t('bottom_panel.card_size')}
       />
     </div>
+
+    <BottomPanelCardLayout />
+    {/if}
+  </BottomPanelToolbar>
+  {#if managementOpen}
+    <div id="shelf-LoraGallery-management" class="min-h-0 flex-1 overflow-auto">
+    <div class="space-y-2 p-3">
+      <div class="rounded-lg border border-ui-border/60 bg-ui-surface/50 p-3 text-xs space-y-2">
+        <p class="text-neutral-400">{locale.t("lora_presets.title")}</p>
+        <div class="flex items-center gap-2">
+          <select
+            bind:value={selectedPresetId}
+            class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 focus:border-ui-accent"
+          >
+            <option value="">{locale.t("lora_presets.select_placeholder")}</option>
+            {#each loraPresets.presets as preset (preset.id)}
+              <option value={preset.id}>{preset.name}</option>
+            {/each}
+          </select>
+          <select
+            bind:value={applyMode}
+            class="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 focus:border-ui-accent"
+          >
+            <option value="replace">{locale.t("lora_presets.mode.replace")}</option>
+            <option value="merge">{locale.t("lora_presets.mode.merge")}</option>
+          </select>
+          <button
+            type="button"
+            class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-200 hover:border-indigo-500"
+            onclick={applySelectedPreset}
+          >
+            {locale.t("common.apply")}
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <input
+            type="text"
+            bind:value={newPresetName}
+            placeholder={locale.t("lora_presets.name_placeholder")}
+            class="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[11px] text-neutral-100 placeholder-neutral-500 focus:border-ui-accent"
+          />
+          <button
+            type="button"
+            class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-200 hover:border-indigo-500"
+            onclick={createPresetFromCurrent}
+          >
+            {locale.t("lora_presets.save_current")}
+          </button>
+          <button
+            type="button"
+            class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:border-indigo-500"
+            onclick={updatePresetFromCurrent}
+          >
+            {locale.t("common.update")}
+          </button>
+          <button
+            type="button"
+            class="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[11px] text-red-300 hover:border-red-500/50"
+            onclick={deleteSelectedPreset}
+          >
+            {locale.t("common.delete")}
+          </button>
+        </div>
+        {#if presetStatus}
+          <p class="text-emerald-400">{presetStatus}</p>
+        {/if}
+        {#if presetError}
+          <p class="text-amber-300">{presetError}</p>
+        {/if}
+      </div>
+
+      <!-- CivitAI bulk scan controls -->
+      <div class="px-1 py-2">
+        {#if !civitaiScan.running && !civitaiScan.summary && !civitaiScan.progress}
+          <button
+            type="button"
+            onclick={() => void civitaiScan.scan(false)}
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] text-neutral-300 hover:border-indigo-500 hover:text-neutral-100"
+          >
+            {locale.t("lora.civitai_scan.button")}
+          </button>
+        {:else if civitaiScan.running}
+          <div class="space-y-1">
+            <div class="flex items-center gap-1.5">
+              <div class="flex-1 h-1.5 rounded-full bg-neutral-700 overflow-hidden">
+                <div
+                  class="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                  style="width: {Math.round(civitaiScan.fraction * 100)}%"
+                ></div>
+              </div>
+              <span class="text-[10px] text-neutral-400 shrink-0">
+                {civitaiScan.progress
+                  ? locale.t("lora.civitai_scan.progress", {
+                      current: String(civitaiScan.progress.current),
+                      total: String(civitaiScan.progress.total),
+                    })
+                  : ""}
+              </span>
+              <button
+                type="button"
+                disabled={civitaiScan.cancelling}
+                onclick={() => void civitaiScan.cancel()}
+                class="shrink-0 rounded border border-red-700/60 px-1.5 py-0.5 text-[10px] text-red-300 hover:border-red-500 disabled:opacity-50"
+              >
+                {civitaiScan.cancelling
+                  ? locale.t("lora.civitai_scan.cancelling")
+                  : locale.t("lora.civitai_scan.cancel")}
+              </button>
+            </div>
+            {#if civitaiScan.progress}
+              <p class="text-[10px] text-neutral-400 truncate" title={civitaiScan.progress.name}>
+                {civitaiScan.progress.status === "hashing"
+                  ? locale.t("lora.civitai_scan.hashing", { name: civitaiScan.progress.name })
+                  : civitaiScan.progress.name}
+              </p>
+            {/if}
+          </div>
+        {:else if civitaiScan.summary || (civitaiScan.progress && civitaiScan.progress.done)}
+          <div class="flex items-center gap-2">
+            <p class="flex-1 text-[10px] text-neutral-300 truncate">
+              {civitaiScan.progress?.cancelled
+                ? locale.t("lora.civitai_scan.cancelled")
+                : locale.t("lora.civitai_scan.done")}
+              {#if civitaiScan.summary}
+                &ndash;
+                {locale.t("lora.civitai_scan.summary", {
+                  found: String(civitaiScan.summary.found),
+                  not_found: String(civitaiScan.summary.not_found),
+                  skipped: String(civitaiScan.summary.skipped),
+                })}
+              {/if}
+            </p>
+            <button
+              type="button"
+              onclick={() => civitaiScan.dismiss()}
+              class="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:border-neutral-500"
+            >
+              {locale.t("lora.civitai_scan.dismiss")}
+            </button>
+            <button
+              type="button"
+              onclick={() => void civitaiScan.scan(true)}
+              class="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-300 hover:border-indigo-500"
+            >
+              {locale.t("lora.civitai_scan.button_force")}
+            </button>
+          </div>
+        {/if}
+      </div>
+
+        <div class="flex gap-1 items-center">
+
+          <input
+            type="text"
+            bind:value={civitaiImageRef}
+            aria-label={locale.t('checkpoint.civitai_image_ref_placeholder')} placeholder={locale.t('checkpoint.civitai_image_ref_placeholder')}
+            class="min-w-0 flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 placeholder-neutral-500 focus:border-ui-accent"
+          />
+          <button
+            type="button"
+            disabled={civitaiImportBusy || !civitaiImageRef.trim()}
+            onclick={() => void importCivitaiImageMeta()}
+            class="shrink-0 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] text-neutral-200 hover:border-indigo-500 disabled:opacity-40"
+            title={locale.t('checkpoint.civitai_image_ref_tip')}
+          >
+            {civitaiImportBusy ? "…" : locale.t('checkpoint.civitai_import_prompt')}
+          </button>
+        </div>
     </div>
-  </div>
+
+    </div>
+  {:else}
+
 
   {#if loraInfoAccessBlocked}
     <div class="mx-2 mb-1.5 rounded border border-amber-700/50 bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-200">
@@ -735,13 +757,9 @@
   {/if}
 
   {#if models.loras.length === 0}
-    <div class="flex items-center justify-center flex-1 text-neutral-500 text-xs">
-      <p>{locale.t('lora.no_loras')}</p>
-    </div>
+    <BottomPanelEmpty icon="loras" messageKey="lora.no_loras" />
   {:else if filteredLoras().length === 0}
-    <div class="flex items-center justify-center flex-1 text-neutral-500 text-xs">
-      <p>{locale.t('lora.no_results', { query: searchQuery })}</p>
-    </div>
+    <BottomPanelEmpty icon="loras" messageKey="lora.no_results" params={{ query: searchQuery }} onreset={() => { searchQuery = ""; }} />
   {:else}
     {#snippet loraCard(loraName: string)}
         {@const info = getInfo(loraName)}
@@ -760,6 +778,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
         <div
           use:lazyFetch={loraName}
+          style={bottomPanel.cardLayout === "strip" ? `height: ${Math.max(64, Math.min(cardSize * 4 / 3, cardViewportHeight - 12))}px` : undefined}
           class="aspect-[3/4] flex flex-col rounded-lg border bg-neutral-900/60 overflow-hidden transition-colors cursor-pointer group {enabled
             ? 'border-indigo-500/60 ring-1 ring-indigo-500/20'
             : isSelected ? 'border-neutral-600' : 'border-neutral-800 hover:border-neutral-700'}"
@@ -959,7 +978,7 @@
               {@render folderGroup(child, depth + 1)}
             {/each}
             {#if node.files.length > 0}
-              <div class="grid gap-2.5 py-1" style="grid-template-columns: repeat(auto-fill, minmax({cardSize}px, 1fr));">
+              <div class="grid gap-2.5 py-1" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${cardSize}px;` : `grid-template-columns: repeat(auto-fill, minmax(${cardSize}px, 1fr));`}>
                 {#each node.files as loraName (loraName)}
                   {@render loraCard(loraName)}
                 {/each}
@@ -970,14 +989,14 @@
       </div>
     {/snippet}
 
-    <div class="flex-1 min-h-0 overflow-y-auto px-2 py-1.5">
+    <div bind:clientHeight={cardViewportHeight} class="flex-1 min-h-0 overflow-y-auto px-2 py-1.5">
       {#if sortMode === "tree" && loraTree}
         <div class="space-y-0.5">
           {#each loraTree.folders as folder (folder.path)}
             {@render folderGroup(folder, 0)}
           {/each}
           {#if loraTree.files.length > 0}
-            <div class="grid gap-2.5 py-1" style="grid-template-columns: repeat(auto-fill, minmax({cardSize}px, 1fr));">
+            <div class="grid gap-2.5 py-1" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${cardSize}px;` : `grid-template-columns: repeat(auto-fill, minmax(${cardSize}px, 1fr));`}>
               {#each loraTree.files as loraName (loraName)}
                 {@render loraCard(loraName)}
               {/each}
@@ -985,12 +1004,14 @@
           {/if}
         </div>
       {:else}
-        <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax({cardSize}px, 1fr));">
+        <div class="grid gap-2.5" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${cardSize}px;` : `grid-template-columns: repeat(auto-fill, minmax(${cardSize}px, 1fr));`}>
           {#each filteredLoras() as loraName (loraName)}
             {@render loraCard(loraName)}
           {/each}
         </div>
       {/if}
     </div>
+  {/if}
+
   {/if}
 </div>

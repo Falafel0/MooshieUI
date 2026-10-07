@@ -1,4 +1,8 @@
 <script lang="ts">
+  import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
+  import BottomPanelIcon from "./BottomPanelIcon.svelte";
+  import BottomPanelEmpty from "./BottomPanelEmpty.svelte";
+  import BottomPanelToolbar from "./BottomPanelToolbar.svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import { gallery } from "../../stores/gallery.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -157,12 +161,10 @@
 
 </script>
       {#if artistFavourites.count === 0}
-        <div class="flex items-center justify-center h-full text-neutral-500 text-xs px-4 text-center">
-          <p>{locale.t('bottom_panel.no_favourite_artists')}</p>
-        </div>
+        <BottomPanelEmpty icon="artists" messageKey={'bottom_panel.no_favourite_artists'} />
       {:else}
         <div class="flex flex-col h-full">
-          <div class="px-3 py-2 border-b border-ui-border shrink-0 flex items-center gap-2">
+          <BottomPanelToolbar>
             <input
               type="text"
               name="artist-favourite-search"
@@ -180,8 +182,8 @@
                   {@const n = idx + 1}
                   <button
                     type="button"
-                    class="rounded px-1.5 py-0.5 text-[10px] transition-colors {artistStore.globalVariant === n ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-                    onclick={() => artistStore.setGlobalVariant(n)}
+                    class="rounded px-1.5 py-0.5 text-[10px] transition-colors {artistStore.globalVariant === n ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:text-neutral-200'}"
+                    aria-pressed={artistStore.globalVariant === n} onclick={() => artistStore.setGlobalVariant(n)}
                   >{locale.t('artist_gallery.variant_n', { n })}</button>
                 {/each}
               </div>
@@ -196,26 +198,28 @@
                 aria-label={locale.t('bottom_panel.card_size')} title={locale.t('bottom_panel.card_size')}
               />
             </div>
-          </div>
+            <BottomPanelCardLayout />
+            <span class="shrink-0 text-xs text-neutral-500 tabular-nums" aria-label={locale.t("bottom_panel.matches", { shown: String(filteredFavouriteArtists.length), total: String(favouriteArtistHits.length) })}>{locale.formatInteger(filteredFavouriteArtists.length)}<span class="px-1 text-neutral-600">/</span>{locale.formatInteger(favouriteArtistHits.length)}</span>
+          </BottomPanelToolbar>
           <!-- Category filter chips -->
           {#if artistFavourites.categories.length > 0}
             {@const counts = artistFavourites.countsByCategory}
             <div class="mx-2 mb-1 flex flex-wrap items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900/50 p-1 shrink-0">
               <button
                 type="button"
-                class="rounded px-2 py-0.5 text-[10px] transition-colors {bottomPanel.artistCategoryFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-                onclick={() => bottomPanel.artistCategoryFilter = 'all'}
+                class="rounded-md px-2 py-1 text-xs transition-colors {bottomPanel.artistCategoryFilter === 'all' ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:text-neutral-200'}"
+                aria-pressed={bottomPanel.artistCategoryFilter === 'all'} onclick={() => bottomPanel.artistCategoryFilter = 'all'}
               >{locale.t("artist_gallery.category_all_short", { count: String(artistFavourites.count) })}</button>
               <button
                 type="button"
-                class="rounded px-2 py-0.5 text-[10px] transition-colors {bottomPanel.artistCategoryFilter === '__uncat' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-                onclick={() => bottomPanel.artistCategoryFilter = '__uncat'}
+                class="rounded-md px-2 py-1 text-xs transition-colors {bottomPanel.artistCategoryFilter === '__uncat' ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:text-neutral-200'}"
+                aria-pressed={bottomPanel.artistCategoryFilter === '__uncat'} onclick={() => bottomPanel.artistCategoryFilter = '__uncat'}
               >{locale.t("artist_gallery.category_uncat_short", { count: String(counts[''] ?? 0) })}</button>
               {#each artistFavourites.categories as cat (cat.id)}
                 <button
                   type="button"
-                  class="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors {bottomPanel.artistCategoryFilter === cat.id ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-                  onclick={() => bottomPanel.artistCategoryFilter = cat.id}
+                  class="flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors {bottomPanel.artistCategoryFilter === cat.id ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:text-neutral-200'}"
+                  aria-pressed={bottomPanel.artistCategoryFilter === cat.id} onclick={() => bottomPanel.artistCategoryFilter = cat.id}
                   title={cat.name}
                 >
                   <span class="h-2 w-2 rounded-full border border-neutral-700" style="background-color: {cat.color}" aria-hidden="true"></span>
@@ -226,14 +230,12 @@
             </div>
           {/if}
           {#if filteredFavouriteArtists.length === 0}
-            <div class="flex items-center justify-center flex-1 text-neutral-500 text-xs">
-              <p>{locale.t('bottom_panel.no_artist_results')}</p>
-            </div>
+            <BottomPanelEmpty icon="artists" messageKey={'bottom_panel.no_artist_results'} onreset={() => { bottomPanel.artistSearch = ""; bottomPanel.artistCategoryFilter = "all"; }} />
           {:else}
             <div class="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] px-2 py-2">
               <div
                 class="grid gap-2"
-                style="grid-template-columns: repeat(auto-fill, minmax(min({bottomPanel.artistCardSize}px, 100%), 1fr)); align-content: start;"
+                style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${bottomPanel.artistCardSize}px; align-content: start;` : `grid-template-columns: repeat(auto-fill, minmax(min(${bottomPanel.artistCardSize}px, 100%), 1fr)); align-content: start;`}
               >
               {#each filteredFavouriteArtists as hit (hit.slug)}
                 {@const thumb = artistThumbUrl(hit)}
@@ -241,7 +243,7 @@
                 <div
                   role="button"
                   tabindex="0"
-                  class="group relative flex flex-col rounded-lg border bg-neutral-900 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 {isArtistInPrompt(hit.tag) ? 'border-amber-500/60 ring-1 ring-amber-500/20' : 'border-neutral-800 hover:border-indigo-500'}"
+                  class="group relative flex flex-col rounded-lg border bg-neutral-900 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-ui-accent {isArtistInPrompt(hit.tag) ? 'border-ui-accent/60 ring-1 ring-ui-accent/20' : 'border-ui-border/60 hover:border-neutral-500'}"
                   onclick={() => applyArtistTag(hit)}
                   onkeydown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyArtistTag(hit); } }}
                   title={locale.t('bottom_panel.apply_artist_tag', { tag: hit.tag })}
@@ -250,7 +252,7 @@
                     {#if thumb}
                       <img use:cachedSrc={thumb} alt={hit.tag} loading="lazy" decoding="async" class="h-full w-full object-cover" />
                     {:else}
-                      <div class="flex h-full w-full items-center justify-center text-[10px] text-neutral-500">{locale.t("gallery.no_preview")}</div>
+                      <div class="flex h-full w-full items-center justify-center text-[11px] text-neutral-400">{locale.t("gallery.no_preview")}</div>
                     {/if}
                     <button
                       type="button"
@@ -278,9 +280,9 @@
                     {/if}
                   </div>
                   <div class="px-2 py-1.5">
-                    <div class="truncate text-xs text-red-400">{displayArtistTag(hit.tag)}</div>
+                    <div class="truncate text-xs font-medium text-neutral-200">{displayArtistTag(hit.tag)}</div>
                     {#if hit.postCount > 0}
-                      <div class="text-[10px] text-neutral-500">{locale.formatInteger(hit.postCount)} {locale.t("artist_gallery.posts_suffix")}</div>
+                      <div class="text-[11px] text-neutral-400">{locale.formatInteger(hit.postCount)} {locale.t("artist_gallery.posts_suffix")}</div>
                     {/if}
                   </div>
                 </div>

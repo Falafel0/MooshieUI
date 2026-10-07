@@ -1,10 +1,15 @@
-import { isBottomTab, validatedCardSize, type BottomTabId, type BottomPanelContext } from "../utils/bottomPanel.js";
+import { isBottomTab, validatedCardSize, validatedShelfPins, visibleShelfTabs, DEFAULT_SHELF_PINS, shelfGroup, type BottomTabId } from "../utils/bottomPanel.js";
 
 const SETTINGS_KEY = "mooshieui.bottomPanel.preferences.v2";
 
 /** Local workspace UI preferences. Search survives tab changes and panel collapse. */
 class BottomPanelStore {
-  selections = $state<Partial<Record<BottomPanelContext, BottomTabId>>>({});
+  selections = $state<Record<string, BottomTabId>>({});
+  pinned = $state<BottomTabId[]>([...DEFAULT_SHELF_PINS]);
+  requestedPanel = $state<BottomTabId | null>(null);
+  cardLayout = $state<"grid" | "strip">("strip");
+  stylesView = $state<"saved" | "artists" | "create">("saved");
+  referencesSearch = $state("");
   loraCardSize = $state(120);
   imageCardSize = $state(72);
   artistCardSize = $state(110);
@@ -15,15 +20,40 @@ class BottomPanelStore {
 
   constructor() { this.loadSettings(); }
 
-  resolveTab(context: BottomPanelContext, visible: BottomTabId[]): BottomTabId {
-    const remembered = this.selections[context];
+  rememberedTab(key: string): BottomTabId | undefined { return this.selections[key] ?? this.selections[key.split(":")[0]]; }
+
+  visibleTabs(key: string, available: BottomTabId[]): BottomTabId[] { return visibleShelfTabs(available, this.pinned, this.rememberedTab(key)); }
+
+  resolveTab(key: string, visible: BottomTabId[]): BottomTabId {
+    const remembered = this.rememberedTab(key);
     return remembered && visible.includes(remembered) ? remembered : visible[0];
   }
 
-  selectTab(context: BottomPanelContext, tab: BottomTabId) {
+  selectTab(context: string, tab: BottomTabId) {
     this.selections = { ...this.selections, [context]: tab };
     this.saveSettings();
   }
+
+  requestPanel(tab: BottomTabId) { this.requestedPanel = tab; }
+
+  setPinned(tab: BottomTabId, pinned: boolean) {
+    if (!pinned && this.pinned.length <= 1) return;
+    this.pinned = pinned ? [...new Set([...this.pinned, tab])] : this.pinned.filter((id) => id !== tab);
+    this.saveSettings();
+  }
+
+  movePin(tab: BottomTabId, direction: number) {
+    const peers = this.pinned.filter((id) => shelfGroup(id) === shelfGroup(tab));
+    const neighbor = peers[peers.indexOf(tab) + direction];
+    if (!neighbor) return;
+    const next = [...this.pinned];
+    const index = next.indexOf(tab), target = next.indexOf(neighbor);
+    [next[index], next[target]] = [next[target], next[index]];
+    this.pinned = next;
+    this.saveSettings();
+  }
+
+  setCardLayout(layout: "grid" | "strip") { this.cardLayout = layout; this.saveSettings(); }
 
   setCardSize(kind: "lora" | "image" | "artist", value: number) {
     if (kind === "lora") this.loraCardSize = validatedCardSize(value, 120, 60, 200);
@@ -37,9 +67,11 @@ class BottomPanelStore {
       const raw = localStorage.getItem(SETTINGS_KEY);
       const saved = raw ? JSON.parse(raw) : {};
       if (saved && typeof saved === "object") {
-        for (const context of ["image", "novelai", "video"] as const) {
-          if (isBottomTab(saved.selections?.[context])) this.selections = { ...this.selections, [context]: saved.selections[context] };
+        if (saved.selections && typeof saved.selections === "object") {
+          this.selections = Object.fromEntries(Object.entries(saved.selections).filter(([key, tab]) => /^(image|novelai|video)(:(txt2img|img2img|inpainting|image_edit|video))?$/.test(key) && isBottomTab(tab))) as Record<string, BottomTabId>;
         }
+        this.pinned = validatedShelfPins(saved.pinned);
+        if (saved.cardLayout === "grid" || saved.cardLayout === "strip") this.cardLayout = saved.cardLayout;
         const legacyTab = localStorage.getItem("mooshieui.bottomPanel.activeTab.v1");
         if (!raw && isBottomTab(legacyTab)) this.selections = { image: legacyTab, novelai: legacyTab, video: legacyTab };
         let legacySizes: Record<string, unknown> = {};
@@ -54,7 +86,7 @@ class BottomPanelStore {
 
   saveSettings() {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ selections: this.selections, loraCardSize: this.loraCardSize, imageCardSize: this.imageCardSize, artistCardSize: this.artistCardSize }));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ selections: this.selections, pinned: this.pinned, cardLayout: this.cardLayout, loraCardSize: this.loraCardSize, imageCardSize: this.imageCardSize, artistCardSize: this.artistCardSize }));
     } catch (error) { console.error("Failed to save bottom panel preferences:", error); }
   }
 }
