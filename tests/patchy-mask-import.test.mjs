@@ -201,3 +201,26 @@ test('the coverage is exactly the painted rectangle, edge to edge', () => {
   assert.equal(count, 24 * 16, 'the painted rectangle and nothing else');
   assert.deepEqual([minX, minY, maxX, maxY], [8, 8, 31, 23], 'at the coordinates the user painted');
 });
+
+const handoffSource = fs.readFileSync(new URL('../src/lib/utils/patchyHandoff.ts', import.meta.url), 'utf8');
+const handoff = { exports: {} };
+vm.runInNewContext(ts.transpileModule(handoffSource, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText, handoff);
+test('editing an existing mask preserves its unchanged coverage instead of taking photo differences', () => {
+  const mask = decode('patchy-mask-black-white.png');
+  const untouched = new Uint8ClampedArray(mask.data);
+  assert.equal(handoff.exports.patchyUsesPaintDifference('mask'), false);
+  assert.equal(handoff.exports.patchyUsesPaintDifference('region'), false);
+  assert.equal(handoff.exports.patchyUsesPaintDifference('raster'), true);
+  assert.equal(handoff.exports.patchyUsesPaintDifference('base'), true);
+  assert.equal(handoff.exports.patchyUsesPaintDifference(undefined), true);
+  // A pixel difference would throw away the whole unchanged mask.
+  assert.equal(paintedCoverageToAlpha(mask.data, untouched), false);
+  const fullMask = new Uint8ClampedArray(mask.data);
+  opaqueMaskLuminanceToAlpha(fullMask);
+  assert(fullMask.some((value, index) => index % 4 === 3 && value > 0));
+});
+test('canvas Patchy hand-offs cannot be applied to a replacement document', () => {
+  assert.equal(handoff.exports.patchyDocumentMatches(4, 4), true);
+  assert.equal(handoff.exports.patchyDocumentMatches(4, 5), false);
+  assert.equal(handoff.exports.patchyDocumentMatches(undefined, 5), true);
+});

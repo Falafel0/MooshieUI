@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { patchyDocumentMatches } from "./lib/utils/patchyHandoff.js";
   import { onMount, onDestroy, untrack } from "svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, startHeartbeat, getAuthToken, setAuthToken, setAuthUser, authHeaders, wasRememberMe, userScopedKey } from "./lib/utils/ipc.js";
   import { useMobileLayout } from "./lib/utils/device.js";
@@ -37,6 +38,8 @@
   import { music } from "./lib/stores/music.svelte.js";
   import { musicCover } from "./lib/stores/musicCover.svelte.js";
   import { stopScorePreview } from "./lib/utils/musicPreview.js";
+  untrack(() => generation.setDocumentControlProvider(() => canvas.layers));
+
   $effect(() => { const id = musicCover.nativeJob?.prompt_id; if (id) untrack(() => music.rememberPrompt(id)); });
   $effect(() => { if (music.playing) untrack(stopScorePreview); });
   import { autocomplete } from "./lib/stores/autocomplete.svelte.js";
@@ -1048,7 +1051,12 @@
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
     sourceBytes?: number[],
+    exportedSourceVersion?: number,
   ) {
+    if (!patchyDocumentMatches(exportedSourceVersion, canvas.inpaintSourceVersion)) {
+      gallery.showToast(locale.t("patchy.document_changed"), "error");
+      return false;
+    }
     const sourceVersion = canvas.inpaintSourceVersion;
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
     let previewUrl: string | null = URL.createObjectURL(blob);

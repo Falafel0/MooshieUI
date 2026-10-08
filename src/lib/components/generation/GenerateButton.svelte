@@ -21,6 +21,7 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams, RegionalPromptSelection } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
+  import { prepareControlnetLayers } from "../../utils/prepareControlnetLayers.js";
   import { getRegionalChainRegions, prepareConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
@@ -243,13 +244,14 @@
         return;
       }
 
-      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && layer.type === "region");
+      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && layer.type === "region" && (layer.coverage ?? 1) > 0 && (layer.regionalStrength ?? 1) > 0);
       if (generation.mode === "inpainting" &&
           !generation.supportsRegionalConditioning &&
           !generation.supportsSequentialEditMasks &&
           hasSpatialPromptLayers) {
         throw new Error(locale.t("canvas.regions_supported"));
       }
+      if (generation.mode === "inpainting" && !generation.isNovelAi) await prepareControlnetLayers();
       // If canvas mode is active, export canvas content before generating
       if (canvas.isCanvasMode) {
         if (!canvasEditorRef) {
@@ -736,7 +738,7 @@
     {:else if orderedWildcardRunCount > 1}
       {locale.t('generation.generate_ordered', { count: orderedWildcardRunCount })}
     {:else}
-      {locale.t('generation.generate')}
+      {locale.t(generation.mode === 'inpainting' ? 'generation.inpaint.generate' : 'generation.generate')}
     {/if}
     {#if anlasEstimate !== null}
       <span class="ml-2 text-[11px] font-normal opacity-80" title={locale.t('generation.novelai.cost_tip')}>

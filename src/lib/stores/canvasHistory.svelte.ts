@@ -43,7 +43,7 @@ class CanvasHistoryStore {
     // Layer metadata only contains plain serializable values. Copy it so later
     // mutations cannot change the state held by the history entry. Pixel trees
     // are copied only for layers that are about to be removed/replaced.
-    const metadata = JSON.parse(JSON.stringify(state.layers)) as CanvasLayer[];
+    const metadata = JSON.parse(JSON.stringify(state.layers.map(({ controlnetPreviewUrl: _preview, ...layer }) => layer))) as CanvasLayer[];
     const layersToCopy = new Set(layerIds);
     return {
       document: { layers: metadata, activeLayerId: state.activeLayerId },
@@ -113,6 +113,7 @@ class CanvasHistoryStore {
         }
       }
       for (const meta of document.layers) {
+        if (meta.type === "controlnet") continue;
         const current = liveLayers.get(meta.id);
         const saved = entriesById.get(meta.id)?.layer;
         if (!current || saved) {

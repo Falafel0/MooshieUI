@@ -9,7 +9,7 @@ Status: **native hand-off and live read-back implemented, plus automatic install
 | Source | https://github.com/SethRobinson/Patchy |
 | Licence | MIT, Copyright (c) 2026 Seth A. Robinson |
 | Vendored at | `third-party/patchy` (shallow submodule) |
-| Pinned commit | `7d14d1f6ede2dc8fb52c11eefcc7cc8783473711` (v0.99) |
+| Pinned commit | `75406d5` (v1.07; release of 2026-10-07) |
 | Language | C++ / Qt 6 |
 | Targets | Windows, macOS, Linux desktop builds, plus an Emscripten WebAssembly build of the same editor |
 | Automation | JavaScript scripting API, `--run-script`, `--headless`, CLI screenshots, and a separate MCP server binary (`patchy-mcp.exe`) |
@@ -76,7 +76,9 @@ the request fail safely rather than editing a stale document. The reference
 image is imported through Patchy's `importFilesAsLayers` script API and the
 temporary copy is removed afterward. No plug-in is installed inside Patchy.
 
-Mask and region imports compare the edited pixels with the exact PNG sent to Patchy, so the original image's brightness cannot turn the whole canvas into a mask. A size mismatch is rejected for masks and regions. The canvas handler also checks for a document change while the import is being decoded.
+When the hand-off source is a photo or raster, mask and region imports compare the edited pixels with the exact PNG sent to Patchy, so a bright photograph cannot become a full-canvas mask. When the source is already a mask or region, the complete edited coverage is imported, preserving unchanged areas. Spatial exports use grayscale coverage instead of the coloured display overlay. A size mismatch is rejected for photo-derived masks and regions. Canvas exports record their document version; read-back is refused after opening another document, as well as when the document changes during decoding. Gallery return remains available.
+
+The v1.07 integration checks `exportAs`'s success result before reporting a headless export complete. The live MCP connection completes the initialized handshake and accepts protocol notifications before the matching response, while rejecting unrelated response IDs. Latest-release installation retains checksum verification and respects a manually selected executable. Scripting API 1 changes in v1.07 are additive; resizing behavior changed but the connector does not call `resizeImage`.
 
 ### Executable resolution
 
@@ -152,7 +154,7 @@ A note on PSD: MooshieUI sends one flattened PNG. Patchy may save a layered PSD/
   (manually, on Linux, or when automatic installation is turned off).
 - **One image returns.** The exported source has no MooshieUI layer structure. A PSD/PSB saved in Patchy can retain its layers on disk, but only its flattened pixels return to the chosen MooshieUI destination.
 - **Layered flattening needs a native check.** The script uses Patchy's documented `doc.exportAs` and `--headless --run-script` interfaces, while the failure path has a regression test. A real Windows Patchy layered round trip and all five UI actions still need hands-on validation before claiming full integration.
-- **The attached connector needs a native check.** Its protocol follows Patchy v0.99's documented `--attach`, `get_state`, `get_preview` and `expectedState` contracts. The Windows build and a real interactive round trip must verify reconnection, image tiles, Undo/Redo and the reference layer before calling the integration complete.
+- **The attached connector needs a native check.** Its protocol follows Patchy v1.07's documented `--attach`, `get_state`, `get_preview` and `expectedState` contracts. The Windows build and a real interactive round trip must verify reconnection, image tiles, Undo/Redo and the reference layer before calling the integration complete.
 - **Saved-file mode needs a save.** If the file is never saved, it reports that no saved result exists; live mode can capture unsaved pixels from the open editor.
 
 ## Files

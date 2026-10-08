@@ -214,7 +214,25 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
         ));
     }
 
-    if let Some(cn) = params.controlnet.as_ref() {
+    for cn in params
+        .controlnet
+        .iter()
+        .chain(params.controlnet_layers.iter())
+    {
+        if cn.enabled
+            && (!cn.strength.is_finite()
+                || cn.strength < 0.0
+                || !cn.start_percent.is_finite()
+                || !cn.end_percent.is_finite()
+                || cn.start_percent < 0.0
+                || cn.end_percent > 1.0
+                || cn.start_percent >= cn.end_percent)
+        {
+            return Err("ControlNet needs a finite, non-negative strength and a start/end range with 0 <= start < end <= 1.".into());
+        }
+        if cn.enabled && cn.preset.as_deref() == Some("inpainting") && params.mode != "inpainting" {
+            return Err("The inpainting ControlNet preset requires Inpainting mode.".into());
+        }
         if cn.enabled && cn.image.as_deref().map(str::trim).unwrap_or("").is_empty() {
             return Err(
                 "ControlNet is enabled but no reference image was provided — please upload one or disable ControlNet.".into(),
@@ -269,7 +287,12 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
                 "Style transfer is enabled but no style reference image was provided — please upload one.".into(),
             );
         }
-        if params.controlnet.as_ref().is_some_and(|cn| cn.enabled) {
+        if params
+            .controlnet
+            .iter()
+            .chain(params.controlnet_layers.iter())
+            .any(|cn| cn.enabled)
+        {
             return Err(
                 "Style transfer cannot be used with ControlNet enabled — disable one of them."
                     .into(),
@@ -1060,7 +1083,11 @@ fn build_image_stage(params: &GenerationParams, seed: i64) -> WorkflowResult {
     inject_sdxl_guidance_extras(&mut result, params);
 
     // Inject ControlNet if enabled
-    if let Some(ref cn) = params.controlnet {
+    for cn in params
+        .controlnet
+        .iter()
+        .chain(params.controlnet_layers.iter())
+    {
         if cn.enabled && cn.controlnet_model.is_some() && cn.image.is_some() {
             if params.model_architecture == "anima" {
                 let mask = params.mask_image.as_deref();
@@ -2262,6 +2289,139 @@ mod validation_and_seed_tests {
         cn.controlnet_model = None;
         p.controlnet = Some(cn);
         assert!(validate_generation_params(&p).is_ok());
+    }
+
+    #[test]
+    fn controlnet_rejects_invalid_ranges_and_wrong_preset_mode() {
+        let mut p = params("txt2img", "sdxl");
+        let valid = ControlNetParam {
+            enabled: true,
+            preset: None,
+            controlnet_model: Some("depth.safetensors".into()),
+            image: Some("source.png".into()),
+            preprocessor: Some("DepthAnythingV2Preprocessor".into()),
+            strength: 1.0,
+            start_percent: 0.0,
+            end_percent: 1.0,
+        };
+        for (strength, start, end) in [
+            (-1.0, 0.0, 1.0),
+            (f64::NAN, 0.0, 1.0),
+            (1.0, -0.1, 1.0),
+            (1.0, 0.5, 0.5),
+            (1.0, 0.8, 0.2),
+            (1.0, 0.0, 1.1),
+        ] {
+            p.controlnet = Some(ControlNetParam {
+                strength,
+                start_percent: start,
+                end_percent: end,
+                ..valid.clone()
+            });
+            assert!(
+                validate_generation_params(&p).is_err(),
+                "{strength}/{start}/{end}"
+            );
+        }
+        p.controlnet = Some(ControlNetParam {
+            strength: 0.0,
+            ..valid.clone()
+        });
+        assert!(validate_generation_params(&p).is_ok());
+        p.mask_image = Some("mask.png".into());
+        p.controlnet = Some(ControlNetParam {
+            preset: Some("inpainting".into()),
+            ..valid
+        });
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Inpainting mode"));
+        p.mode = "inpainting".into();
+        p.input_image = Some("source.png".into());
+        assert!(validate_generation_params(&p).is_ok());
+    }
+
+    #[test]
+    fn document_controls_chain_conditioning_and_align_each_inpaint_reference() {
+        for mode in ["txt2img", "img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            let control = |image: &str, strength| ControlNetParam {
+                enabled: true,
+                preset: None,
+                controlnet_model: Some("depth.safetensors".into()),
+                image: Some(image.into()),
+                preprocessor: Some("Canny".into()),
+                strength,
+                start_percent: 0.2,
+                end_percent: 0.8,
+            };
+            p.controlnet_layers = vec![control("first.png", 0.4), control("second.png", 0.7)];
+            let workflow = build(&p);
+            let applies = nodes(&workflow, "ControlNetApplyAdvanced");
+            assert_eq!(applies.len(), 2, "{mode}");
+            for (_, apply) in &applies {
+                let vae_id = apply["inputs"]["vae"][0].as_str().unwrap();
+                assert!(
+                    workflow.get(vae_id).is_some(),
+                    "control VAE must reference a loaded node"
+                );
+            }
+            let first = applies
+                .iter()
+                .find(|(_, node)| node["inputs"]["strength"] == json!(0.4))
+                .unwrap();
+            let second = applies
+                .iter()
+                .find(|(_, node)| node["inputs"]["strength"] == json!(0.7))
+                .unwrap();
+            assert_eq!(second.1["inputs"]["positive"], json!([first.0, 0]));
+            assert_eq!(second.1["inputs"]["negative"], json!([first.0, 1]));
+            let sampler = single(&workflow, "KSampler");
+            assert_eq!(sampler["inputs"]["positive"], json!([second.0, 0]));
+            assert_eq!(nodes(&workflow, "Canny").len(), 2);
+            assert_eq!(
+                nodes(&workflow, "MooshieInpaintControl").len(),
+                if mode == "inpainting" { 2 } else { 0 }
+            );
+            if mode == "inpainting" {
+                for (_, apply) in &applies {
+                    let image_id = apply["inputs"]["image"][0].as_str().unwrap();
+                    assert_eq!(workflow[image_id]["class_type"], "MooshieInpaintControl");
+                }
+            }
+            p.controlnet_layers[0].enabled = false;
+            assert_eq!(nodes(&build(&p), "ControlNetApplyAdvanced").len(), 1);
+            p.controlnet_layers[1].controlnet_model = None;
+            assert!(validate_generation_params(&p)
+                .unwrap_err()
+                .contains("no ControlNet model"));
+        }
+    }
+
+    #[test]
+    fn anima_document_controls_patch_the_sampler_in_sequence() {
+        let mut p = params("inpainting", "anima");
+        p.controlnet_layers = (0..2)
+            .map(|i| ControlNetParam {
+                enabled: true,
+                preset: None,
+                controlnet_model: Some(format!("patch-{i}.safetensors")),
+                image: Some(format!("hint-{i}.png")),
+                preprocessor: None,
+                strength: 1.0,
+                start_percent: 0.0,
+                end_percent: 1.0,
+            })
+            .collect();
+        let workflow = build(&p);
+        let patches = nodes(&workflow, "AnimaLLLiteApply");
+        assert_eq!(patches.len(), 2);
+        assert_eq!(nodes(&workflow, "MooshieInpaintControl").len(), 2);
+        let sampler = single(&workflow, "KSampler");
+        let final_id = sampler["inputs"]["model"][0].as_str().unwrap();
+        assert_eq!(workflow[final_id]["class_type"], "AnimaLLLiteApply");
+        let first_id = workflow[final_id]["inputs"]["model"][0].as_str().unwrap();
+        assert_eq!(workflow[first_id]["class_type"], "AnimaLLLiteApply");
     }
 
     #[test]

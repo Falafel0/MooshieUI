@@ -21,7 +21,7 @@
     writePatchyDocument,
   } from "../utils/api.js";
   import { openExternalUrl } from "../utils/openExternal.js";
-  import { fingerprint, pngDimensions, resultOriginText } from "../utils/patchyHandoff.js";
+  import { fingerprint, pngDimensions, resultOriginText, patchyUsesPaintDifference } from "../utils/patchyHandoff.js";
   import type { OutputImage } from "../types/index.js";
   import PatchyTransferPanel from "./patchy/PatchyTransferPanel.svelte";
 
@@ -40,6 +40,7 @@
       /** The document this dialog handed out. Mask and region targets read the
        * user's selection out of the difference between the two files. */
       sourceBytes?: number[],
+      sourceVersion?: number,
       /** `false` means the handler refused and has already told the user why, so
        * the panel must not report the import as applied. */
     ) => Promise<boolean | void> | boolean | void;
@@ -645,7 +646,8 @@
         onsaved?.(saved);
       } else {
         if (!onimport) throw new Error("Patchy import handler is unavailable");
-        const applied = await onimport(bytes, target, `patchy_${documentName()}`, exportBytes ?? undefined);
+        const sourceBytes = patchyUsesPaintDifference(image?.patchySourceKind) ? exportBytes ?? undefined : undefined;
+        const applied = await onimport(bytes, target, `patchy_${documentName()}`, sourceBytes, image?.patchySourceVersion);
         if (applied === false) {
           // The handler refused and explained why. Saying "applied" here would
           // contradict the message the user just got.
@@ -1080,7 +1082,7 @@
                        the editor changed, so say what that means before the user
                        spends time painting in the wrong convention. -->
                   <p class="mt-1.5 text-[10px] text-neutral-500">
-                    {locale.t("patchy.mask_paint_hint")}
+                    {locale.t(patchyUsesPaintDifference(image?.patchySourceKind) ? "patchy.mask_paint_hint" : "patchy.mask_layer_hint")}
                   </p>
                 {/if}
               </div>

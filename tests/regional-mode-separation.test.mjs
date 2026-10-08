@@ -401,3 +401,16 @@ test('the region modal no longer offers a strategy that cannot be reached', () =
     'a persisted strategy would let one mode change how another behaves',
   );
 });
+
+
+test('regions with zero strength or coverage do not block a run or upload unused masks', async () => {
+  fixture.generation.mode = 'inpainting';
+  fixture.generation.supportsRegionalConditioning = true;
+  const active = regionLayer('active');
+  fixture.canvas.sortedLayers = [
+    regionLayer('no-strength', { regionalStrength: 0, regionalPrompt: '' }),
+    regionLayer('no-coverage', { coverage: 0, regionalPrompt: '' }),
+    active,
+  ];
+  assert.deepEqual((await regions.prepareConditioningRegions()).map(region => region.id), ['active']);
+});

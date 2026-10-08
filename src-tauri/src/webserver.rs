@@ -3495,7 +3495,11 @@ async fn dispatch_command(
                 params.steps,
                 params.mode,
             );
-            if params.controlnet.as_ref().is_some_and(|cn| cn.enabled)
+            if params
+                .controlnet
+                .iter()
+                .chain(params.controlnet_layers.iter())
+                .any(|cn| cn.enabled)
                 || params.facefix_enabled
                 || !params.loras.is_empty()
             {

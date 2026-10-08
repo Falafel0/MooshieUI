@@ -1,126 +1,83 @@
 <script lang="ts">
   import { canvas } from "../../../stores/canvas.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
+  import InfoTip from "../../ui/InfoTip.svelte";
   import LayerItem from "./LayerItem.svelte";
   import LayerProperties from "./LayerProperties.svelte";
   import { generation } from "../../../stores/generation.svelte.js";
   import { editMaskPassOrder } from "../../../utils/inpaintingRegions.js";
-  import { resolveTint } from "../../../utils/layerTints.js";
+  import { tick } from "svelte";
   import { ArrowUp, ArrowDown, Copy, Trash2 } from "@lucide/svelte";
 
   let { oneditpatchy }: { oneditpatchy?: () => void } = $props();
 
 
-  type GroupKey = "mask" | "raster" | "region";
-
-  let collapsed = $state<Record<GroupKey, boolean>>({ mask: false, raster: false, region: false });
-
-  const maskLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "mask"));
-  const regionLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "region"));
-  const rasterLayers = $derived(canvas.sortedLayers.filter((l) => l.type === "raster"));
+  type GroupKey = "mask" | "raster" | "region" | "controlnet";
+  let layerList: HTMLDivElement | undefined = $state();
+  let addMenu: HTMLDetailsElement | undefined = $state();
   const processingOrder = $derived(editMaskPassOrder(canvas.sortedLayers));
-  const activeType = $derived(canvas.activeLayer?.type ?? null);
   const canMoveUp = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "up") !== null : false);
   const canMoveDown = $derived(canvas.activeLayerId ? canvas.getLayerMoveTarget(canvas.activeLayerId, "down") !== null : false);
-
-  $effect(() => {
-    // Selection can change outside this panel (e.g. deleting or adding a layer).
-    const active = canvas.activeLayer;
-    if (active) collapsed[active.type] = false;
-  });
-
-  const groups = $derived([
-    { key: "region" as GroupKey, titleKey: "generation.regional.title", addKey: "canvas.add_regions", layers: regionLayers },
-    { key: "mask" as GroupKey, titleKey: "canvas.mask_layers", addKey: "canvas.add_mask", layers: maskLayers },
-    { key: "raster" as GroupKey, titleKey: "canvas.raster_layers", addKey: "canvas.add_raster", layers: rasterLayers },
-  ]);
-
-  function toggleGroup(key: GroupKey) {
-    collapsed = { ...collapsed, [key]: !collapsed[key] };
-  }
+  const groups = [
+    { key: "mask" as GroupKey, addKey: "canvas.add_mask" },
+    { key: "region" as GroupKey, addKey: "canvas.add_regions" },
+    { key: "controlnet" as GroupKey, addKey: "generation.controlnet.add_layer" },
+    { key: "raster" as GroupKey, addKey: "canvas.add_raster" },
+  ];
 
   function addToGroup(key: GroupKey) {
-    if (key === 'region') canvas.addRegionLayer();
+    if (key === "region") canvas.addRegionLayer();
     else canvas.addLayer(key);
-    // Adding a layer should reveal it, so make sure the group is open.
-    collapsed = { ...collapsed, [key]: false };
+    if (addMenu) addMenu.open = false;
   }
+
+  $effect(() => {
+    const id = canvas.activeLayerId;
+    void tick().then(() => {
+      if (!id || id !== canvas.activeLayerId || !layerList) return;
+      const row = Array.from(layerList.querySelectorAll<HTMLElement>("[data-layer-id]")).find(node => node.dataset.layerId === id);
+      if (!row) return;
+      // Reveal external selections without scrolling the inspector or canvas.
+      const listBounds = layerList.getBoundingClientRect();
+      const rowBounds = row.getBoundingClientRect();
+      if (rowBounds.top < listBounds.top) layerList.scrollTop += rowBounds.top - listBounds.top - 2;
+      else if (rowBounds.bottom > listBounds.bottom) layerList.scrollTop += rowBounds.bottom - listBounds.bottom + 2;
+    });
+  });
 </script>
 
-<div class="space-y-1.5">
-  {#if processingOrder.length > 0}
-    <div class="flex h-6 items-center justify-between rounded bg-neutral-950/50 px-2 text-[9px] text-neutral-500" title={locale.t('canvas.processing_order_tip')}>
-      <span>{locale.t('canvas.processing_order')}</span>
-      <span class="tabular-nums text-neutral-400">#1 → #{processingOrder.length}</span>
-    </div>
-  {/if}
-  <!-- How strongly the mask and region overlays are drawn. Display only: what a
-       run reads is each layer's own density. -->
-  <label class="flex h-6 items-center gap-2 rounded bg-neutral-950/50 px-2 text-[9px] text-neutral-500" title={locale.t('canvas.overlay_strength_tip')}>
-    <span class="shrink-0">{locale.t('canvas.overlay_strength')}</span>
-    <input type="range" min="0.1" max="1" step="0.05" value={canvas.maskOverlayOpacity} oninput={(event) => (canvas.maskOverlayOpacity = Number(event.currentTarget.value))} class="min-w-0 flex-1 accent-indigo-500" />
-    <span class="w-7 shrink-0 text-right tabular-nums text-neutral-400">{Math.round(canvas.maskOverlayOpacity * 100)}%</span>
-  </label>
-  {#each groups as group (group.key)}
-    <div>
-      <!-- Group header -->
-      <div class="flex items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={!collapsed[group.key]}
-          onclick={() => toggleGroup(group.key)}
-          class="h-7 flex-1 flex items-center gap-1.5 px-1 text-left rounded focus-visible:outline-2 focus-visible:outline-indigo-400"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="w-3 h-3 shrink-0 text-neutral-500 transition-transform {collapsed[group.key] ? '' : 'rotate-90'}"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span class="text-[11px] font-medium" style="color: {activeType === group.key ? resolveTint({ type: group.key }) : ''}">
-            {locale.t(group.titleKey)}
-          </span>
-          <span class="px-1.5 rounded-full bg-neutral-800 text-[10px] text-neutral-400 tabular-nums">
-            {group.layers.length}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label={locale.t(group.addKey)}
-          disabled={group.key === 'region' && !generation.supportsRegionalPrompting}
-          onclick={() => addToGroup(group.key)}
-          class="h-7 w-7 flex items-center justify-center rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-indigo-400 disabled:opacity-30"
-          title={group.key === 'region' && !generation.supportsRegionalPrompting ? locale.t('canvas.regions_supported') : locale.t(group.addKey)}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-      </div>
+<svelte:window onclick={event => { if (addMenu?.open && event.target instanceof Node && !addMenu.contains(event.target)) addMenu.open = false; }} onkeydown={event => { if (event.key === "Escape" && addMenu?.open) addMenu.open = false; }} />
 
-      <!-- Group body -->
-      {#if !collapsed[group.key]}
-        {#if group.key === "mask"}
-          <!-- Masks are the edits; regions only influence what happens inside
-               them. Saying it here, next to the layers, is where it matters. -->
-          <p class="mb-1 px-1 text-[10px] leading-relaxed text-neutral-500">{locale.t('canvas.regions_chain_hint')}</p>
-        {/if}
-        <div class="space-y-0.5 mt-1">
-          {#if group.layers.length > 0}
-            {#each group.layers as layer (layer.id)}
-              <LayerItem {layer} processIndex={layer.visible ? processingOrder.findIndex((item) => item.id === layer.id) + 1 : 0} />
-            {/each}
-          {/if}
+<div class="space-y-1.5">
+  <div class="flex h-8 items-center justify-between gap-2">
+    <h3 class="flex items-center gap-2 text-xs font-medium text-neutral-300">{locale.t('canvas.layers')}<span class="text-neutral-500 tabular-nums">{canvas.layers.length}</span><InfoTip text={locale.t('canvas.regions_chain_hint')} /></h3>
+    <details bind:this={addMenu} class="relative">
+      <summary class="ui-control flex cursor-pointer list-none items-center gap-1 rounded-md border border-ui-border px-2 text-xs text-neutral-300 hover:bg-ui-selected">+ {locale.t('common.add')}</summary>
+      <div class="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg border border-ui-border bg-neutral-900 p-1 shadow-xl">
+        {#each groups as group (group.key)}
+          <button type="button" onclick={() => addToGroup(group.key)} disabled={(group.key === 'region' && !generation.supportsRegionalPrompting) || (group.key === 'controlnet' && generation.isNovelAi)} class="flex min-h-8 w-full items-center rounded px-2 text-left text-xs text-neutral-300 hover:bg-ui-selected disabled:opacity-30" title={group.key === 'region' && !generation.supportsRegionalPrompting ? locale.t('canvas.regions_supported') : locale.t(group.addKey)}>{locale.t(group.addKey)}</button>
+        {/each}
+      </div>
+    </details>
+  </div>
+  <div bind:this={layerList} class="max-h-52 space-y-0.5 overflow-y-auto overscroll-contain rounded-md border border-ui-border p-1" data-document-layer-list>
+    {#each [
+      {key:'pixels', title:'canvas.pixel_layers', layers:canvas.sortedLayers.filter(layer => layer.type === 'mask' || layer.type === 'raster')},
+      {key:'modifiers', title:'canvas.generation_modifiers', layers:canvas.sortedLayers.filter(layer => layer.type === 'region' || layer.type === 'controlnet')},
+    ] as group (group.key)}
+      {#if group.layers.length}
+        <div class="sticky top-0 z-10 flex h-6 items-center justify-between gap-2 bg-neutral-950 px-2 text-[10px] font-medium text-neutral-500" data-layer-role={group.key}>
+          <span>{locale.t(group.title)}</span><span class="tabular-nums">{group.layers.length}</span>
         </div>
+        {#each group.layers as layer (layer.id)}
+          <LayerItem {layer} processIndex={layer.visible ? processingOrder.findIndex((item) => item.id === layer.id) + 1 : 0} />
+        {/each}
       {/if}
-    </div>
-  {/each}
+    {/each}
+    {#if !canvas.layers.length}<p class="p-3 text-center text-xs text-neutral-500">{locale.t('canvas.no_layers')}</p>{/if}
+  </div>
   <div class="flex h-7 items-center justify-end gap-0.5 border-t border-neutral-800 pt-1">
-    {#if oneditpatchy}<button type="button" class="mr-auto h-6 rounded px-2 text-[10px] text-violet-200 hover:bg-violet-900/30 disabled:opacity-30" disabled={!canvas.activeLayerId} onclick={oneditpatchy}>{locale.t('canvas.open_patchy')}</button>{/if}
+    {#if oneditpatchy}<button type="button" class="mr-auto h-6 rounded px-2 text-[10px] text-violet-200 hover:bg-violet-900/30 disabled:opacity-30" disabled={!canvas.activeLayerId || canvas.activeLayer?.type === "controlnet"} onclick={oneditpatchy}>{locale.t('canvas.open_patchy')}</button>{/if}
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveUp || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'up')} aria-label={locale.t('canvas.move_up_title')} title={locale.t('canvas.move_up_title')}><ArrowUp size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canMoveDown || !canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.reorderLayer(canvas.activeLayerId, 'down')} aria-label={locale.t('canvas.move_down_title')} title={locale.t('canvas.move_down_title')}><ArrowDown size={14} class="mx-auto" /></button>
     <button type="button" class="h-6 w-7 rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-25" disabled={!canvas.activeLayerId} onclick={() => canvas.activeLayerId && canvas.duplicateLayer(canvas.activeLayerId)} aria-label={locale.t('canvas.duplicate')} title={locale.t('canvas.duplicate')}><Copy size={14} class="mx-auto" /></button>

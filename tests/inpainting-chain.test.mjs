@@ -83,3 +83,17 @@ test('later layer settings are frozen before the first submission',async()=>{
   assert.equal(calls[1].params.inpaint_target_width,1280);
   assert.equal(calls[1].params.inpaint_target_height,768);
 });
+
+test('ControlNet layers and prompt regions modify every mask pass without adding generation steps', async () => {
+  const {calls, callbacks, regions} = setup();
+  const controls = [{enabled:true, image:'depth.png', controlnet_model:'depth.safetensors', strength:.7}, {enabled:true, image:'pose.png', controlnet_model:'pose.safetensors', strength:.5}];
+  const original = fixture.generation.toParams;
+  fixture.generation.toParams = options => ({...original(options), controlnet:null, controlnet_layers:controls});
+  await runRegionalInpaintChain(regions, callbacks);
+  assert.equal(calls.length, 2, 'only the two edit masks create generation steps');
+  for (const {params} of calls) {
+    assert.deepEqual(params.controlnet_layers, controls, 'both controls condition each mask pass');
+    assert.equal(params.positive_regions.length, 1, 'the prompt region conditions each mask pass');
+    assert.equal(params.positive_regions[0].mask_image, 'region.png');
+  }
+});

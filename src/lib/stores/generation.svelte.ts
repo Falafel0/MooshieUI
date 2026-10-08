@@ -1,3 +1,4 @@
+import { controlnetLayerPayloads, controlnetPayload } from "../utils/controlnetState.js";
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
@@ -687,6 +688,13 @@ export const DEFAULT_NANOSAUR_NEGATIVE_QUALITY = appendMissingNegativeTags(
 );
 
 class GenerationStore {
+  // The app supplies document controls without making the generation hub
+  // depend on the canvas feature store (which already depends on generation).
+  private documentControlLayers: () => Parameters<typeof controlnetLayerPayloads>[0] = () => [];
+  setDocumentControlProvider(provider: () => Parameters<typeof controlnetLayerPayloads>[0]) {
+    this.documentControlLayers = provider;
+  }
+
   _mode = $state<GenerationMode>("txt2img");
   lastImageMode = $state<Exclude<GenerationMode, "video">>("txt2img");
   modeToggles = $state<ModeToggleStates>(createDefaultModeToggles());
@@ -905,6 +913,8 @@ class GenerationStore {
   controlnetModel = $state<string | null>(null);
   controlnetPreprocessor = $state<string | null>(null);
   controlnetImage = $state<string | null>(null);
+  /** Session-only preview; shared across section collapse and mode switches. */
+  controlnetPreviewUrl = $state<string | null>(null);
   controlnetStrength = $state(1.0);
   controlnetStartPercent = $state(0.0);
   controlnetEndPercent = $state(1.0);
@@ -4039,19 +4049,8 @@ class GenerationStore {
       clip_model: this.clipModel,
       clip_type: this.clipType,
       model_source_category: this.modelSourceCategory,
-      controlnet: this.controlnetEnabled
-        ? {
-            enabled: true,
-            preset: this.controlnetMode === "preset" ? this.controlnetPreset : null,
-            controlnet_model: this.controlnetModel,
-            preprocessor:
-              this.controlnetMode === "preset" ? this.controlnetPreprocessor : null,
-            image: this.controlnetImage,
-            strength: this.controlnetStrength,
-            start_percent: this.controlnetStartPercent,
-            end_percent: this.controlnetEndPercent,
-          }
-        : null,
+      controlnet: this.mode === "inpainting" ? null : controlnetPayload(this),
+      controlnet_layers: this.mode === "inpainting" && !this.isNovelAi ? controlnetLayerPayloads(this.documentControlLayers()) : [],
       facefix_enabled: this.facefixEnabled,
       facefix_detector: this.facefixDetector,
       facefix_denoise: this.facefixDenoise,

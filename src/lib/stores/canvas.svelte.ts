@@ -1,3 +1,4 @@
+import { newControlnetLayer, type ControlnetLayerSettings } from "../utils/controlnetState.js";
 import Konva from "konva";
 import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
@@ -18,7 +19,7 @@ import {
 } from "../utils/projectDocument.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "canvasResize";
-export type CanvasLayerType = "raster" | "mask" | "region";
+export type CanvasLayerType = "raster" | "mask" | "region" | "controlnet";
 
 export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
   return layer?.type === "mask" || layer?.type === "region";
@@ -28,6 +29,9 @@ export interface CanvasLayer {
   id: string;
   name: string;
   type: CanvasLayerType;
+  controlnet?: ControlnetLayerSettings;
+  /** Session-only owned URL, excluded from project serialization. */
+  controlnetPreviewUrl?: string | null;
   visible: boolean;
   opacity: number;
   /** How much of this layer counts for a run, 0..1. A mask's painted area
@@ -154,6 +158,8 @@ class CanvasStore {
   // Layers
   layers = $state<CanvasLayer[]>([]);
   activeLayerId = $state<string | null>(null);
+  /** A legacy global control is copied once; new/opened documents own their controls. */
+  legacyControlnetMigrated = false;
   /** Bumped whenever pixels change without the layer records changing: painted
    * strokes, a replaced image, an applied result. A project reads it to know it
    * has unsaved picture changes, not only metadata changes. */
@@ -278,7 +284,7 @@ class CanvasStore {
   }
 
   get sortedLayers(): CanvasLayer[] {
-    const rank = (layer: CanvasLayer) => layer.type === 'raster' ? 0 : layer.type === 'region' ? 2 : 1;
+    const rank = (layer: CanvasLayer) => layer.type === 'raster' ? 0 : layer.type === 'region' ? 2 : layer.type === 'controlnet' ? 3 : 1;
     return [...this.layers].sort((a, b) => rank(b) - rank(a) || b.order - a.order);
   }
 
@@ -918,7 +924,7 @@ class CanvasStore {
   documentShape(): ProjectDocument {
     const layers: ProjectLayer[] = [];
     for (const layer of [...this.layers].sort((a, b) => a.order - b.order)) {
-      const { id: _id, image, ...meta } = layer;
+      const { id: _id, image, controlnetPreviewUrl: _preview, ...meta } = layer;
       const record: ProjectLayer = { ...meta };
       if (isMaskLayer(layer)) record.spatialPng = null;
       else if (image) record.image = { ...image };
@@ -953,12 +959,8 @@ class CanvasStore {
       if (!layer || !record) continue;
       if (isMaskLayer(layer)) {
         record.spatialPng = null;
-        if (!layer.visible) {
-          // A hidden mask keeps its records but not its pixels: it is not on the
-          // stage, and saving pixels of something the run will skip would be a
-          // document that changes the picture when it is opened.
-          continue;
-        }
+        // Hidden layers keep their pixels too. Visibility controls participation,
+        // not whether an undo, project save or later reveal can restore the drawing.
         const konva = stageLayers.find((candidate: any) => candidate.id?.() === layer.id);
         if (!konva) {
           // A mask with no stage layer behind it is an inconsistency the user
@@ -993,6 +995,7 @@ class CanvasStore {
    * cleared: a loaded project starts from its own base, not the old one's.
    */
   loadDocument(doc: ProjectDocument) {
+    for (const layer of this.layers) if (layer.controlnetPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(layer.controlnetPreviewUrl);
     this.canvasWidth = doc.canvasWidth;
     this.canvasHeight = doc.canvasHeight;
     this.baseColor = doc.baseColor;
@@ -1018,7 +1021,7 @@ class CanvasStore {
     this.layers = doc.layers.map((layer) => {
       const { spatialPng, ...meta } = layer;
       const id = genLayerId();
-      if (layer.type !== "raster") {
+      if (layer.type === "mask" || layer.type === "region") {
         spatial.push({
           id,
           type: layer.type,
@@ -1123,7 +1126,7 @@ class CanvasStore {
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     const id = genLayerId();
     const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
-    const layerName = name ?? (type === "mask"
+    const layerName = name ?? (type === "controlnet" ? locale.t("generation.controlnet.title") : type === "mask"
       ? locale.t("canvas.mask_name", { n: String(this.layers.filter((layer) => layer.type === "mask").length + 1) })
       : type === "region"
         ? locale.t("canvas.region_name", { n: String(this.layers.filter((layer) => layer.type === "region").length + 1) })
@@ -1139,7 +1142,8 @@ class CanvasStore {
         opacity: 1,
         // A mask or a region starts at full coverage: the sliders that dim the
         // overlay are display-only, so this is the one value a run reads.
-        coverage: type === "raster" ? undefined : 1,
+        coverage: type === "mask" || type === "region" ? 1 : undefined,
+        controlnet: type === "controlnet" ? newControlnetLayer() : undefined,
         locked: false,
         showContext: true,
         order: maxOrder + 1,
@@ -1162,6 +1166,30 @@ class CanvasStore {
     return id;
   }
 
+  private controlnetEditLayerId: string | null = null;
+  private controlnetBatchLayerId: string | null = null;
+  beginControlnetEdit(id: string) {
+    const layer = this.layers.find(item => item.id === id && item.type === 'controlnet');
+    if (!layer || layer.locked || this.controlnetEditLayerId === id) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.controlnetEditLayerId = id;
+  }
+  endControlnetEdit() { this.controlnetEditLayerId = null; }
+
+  updateControlnetLayer(id: string, patch: Partial<ControlnetLayerSettings>) {
+    const layer = this.layers.find(item => item.id === id && item.type === 'controlnet');
+    if (!layer || layer.locked) return;
+    if (this.controlnetEditLayerId !== id && this.controlnetBatchLayerId !== id) {
+      canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+      this.controlnetBatchLayerId = id;
+      queueMicrotask(() => { if (this.controlnetBatchLayerId === id) this.controlnetBatchLayerId = null; });
+    }
+    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnet: { ...newControlnetLayer(), ...item.controlnet, ...patch } } : item);
+  }
+  setControlnetPreview(id: string, url: string | null) {
+    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnetPreviewUrl: url } : item);
+  }
+
   updateLayerRegion(id: string, patch: { regionalPrompt?: string; regionalNegativePrompt?: string; regionalStrength?: number }) {
     this.layers = this.layers.map((layer) => layer.id === id && layer.type === "region" ? { ...layer, ...patch } : layer);
   }
@@ -1177,6 +1205,7 @@ class CanvasStore {
     this.detachedLayers.get(id)?.destroy();
     this.detachedLayers.delete(id);
     const removed = this.layers.find((l) => l.id === id);
+    if (removed?.controlnetPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(removed.controlnetPreviewUrl);
     this.layers = this.layers.filter((l) => l.id !== id);
     this.clearLayerThumbnail(id);
     if (this.activeLayerId === id) {
@@ -1219,6 +1248,8 @@ class CanvasStore {
       {
         ...layer,
         id: newId,
+        controlnet: layer.controlnet ? { ...layer.controlnet } : undefined,
+        controlnetPreviewUrl: layer.controlnet?.sourceData ?? null,
         name: `${layer.name} copy`,
         order: layer.order + 1,
       },
@@ -1227,9 +1258,27 @@ class CanvasStore {
     return newId;
   }
 
+  /** Copy the painted shape without changing the original's role in generation. */
+  duplicateSpatialLayerAs(id: string, type: 'mask' | 'region'): string | null {
+    const source = this.layers.find(layer => layer.id === id);
+    if (!source || !isMaskLayer(source) || source.locked) return null;
+    const newId = this.duplicateLayer(id);
+    if (!newId) return null;
+    this.layers = this.layers.map(layer => layer.id === newId ? {
+      ...layer, type, locked: false, densityDenoise: false, denoise: undefined, maskGrow: undefined,
+      inpaintSettings: undefined, inpaintWidth: undefined, inpaintHeight: undefined,
+      regionalPrompt: type === 'region' ? source.regionalPrompt ?? generation.positivePrompt : undefined,
+      regionalNegativePrompt: type === 'region' ? source.regionalNegativePrompt ?? '' : undefined,
+      regionalStrength: type === 'region' ? source.regionalStrength ?? 1 : undefined,
+      name: locale.t(type === 'mask' ? 'canvas.mask_name' : 'canvas.region_name', { n: String(this.layers.filter(item => item.type === type).length + 1) }),
+    } : layer);
+    this.setActiveLayer(newId);
+    return newId;
+  }
+
   getLayerMoveTarget(id: string, direction: "up" | "down"): CanvasLayer | null {
     const layer = this.layers.find((l) => l.id === id);
-    if (!layer) return null;
+    if (!layer || layer.locked) return null;
     // Match the panel's top-to-bottom order and its mask/raster groups.
     const siblings = this.sortedLayers.filter((l) => l.type === layer.type);
     const index = siblings.findIndex((l) => l.id === id);
@@ -1248,10 +1297,36 @@ class CanvasStore {
     });
   }
 
+  /** Reorder within a layer role in one undo operation; roles never change. */
+  moveLayerTo(id: string, targetId: string, after: boolean): boolean {
+    const layer = this.layers.find(item => item.id === id);
+    const target = this.layers.find(item => item.id === targetId);
+    if (!layer || layer.locked || !target || layer.type !== target.type || id === targetId) return false;
+    const siblings = this.sortedLayers.filter(item => item.type === layer.type);
+    const remaining = siblings.filter(item => item.id !== id);
+    const index = remaining.findIndex(item => item.id === targetId) + (after ? 1 : 0);
+    const reordered = [...remaining.slice(0, index), layer, ...remaining.slice(index)];
+    if (reordered.every((item, index) => item.id === siblings[index].id)) return false;
+    const orders = new Map(reordered.map((item, index) => [item.id, siblings[index].order]));
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map(item => orders.has(item.id) ? {...item, order:orders.get(item.id)!} : item);
+    this.setActiveLayer(id);
+    return true;
+  }
+
   renameLayer(id: string, name: string) {
     if (this.layers.find((layer) => layer.id === id)?.name === name) return;
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, name } : l));
+  }
+
+  /** Modifier participation is independent of its on-canvas guide visibility. */
+  toggleModifier(id: string) {
+    const layer = this.layers.find(item => item.id === id);
+    if (!layer || (layer.type !== 'region' && layer.type !== 'controlnet')) return;
+    const enabled = !(layer.visible && (layer.type !== 'controlnet' || layer.controlnet?.enabled));
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map(item => item.id === id ? {...item, visible:enabled, controlnet:item.controlnet ? {...item.controlnet, enabled} : undefined} : item);
   }
 
   toggleLayerVisibility(id: string) {
@@ -1297,7 +1372,7 @@ class CanvasStore {
    * layer is the picture itself, so it has no overlay tint to choose. */
   setLayerTint(id: string, tint: string) {
     const layer = this.layers.find((item) => item.id === id);
-    if (!layer || layer.type === "raster" || layer.tint === tint) return;
+    if (!layer || !isMaskLayer(layer) || layer.tint === tint) return;
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, tint } : l));
   }
@@ -1309,7 +1384,7 @@ class CanvasStore {
   }
 
   toggleLayerContext(id: string) {
-    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer)
+    this.layers = this.layers.map((layer) => layer.id === id && (isMaskLayer(layer) || layer.type === "controlnet")
       ? { ...layer, showContext: layer.showContext === false }
       : layer);
   }
@@ -1337,6 +1412,8 @@ class CanvasStore {
     if (!this._stageRef) return;
     const meta = this.layers.find((layer) => layer.id === id);
     if (!meta || meta.locked) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId, [id]);
+    this.bumpPaintRevision();
     this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image: undefined, initialRegion: undefined } : layer);
     const layers = this._stageRef.getLayers();
     for (const kLayer of layers) {

@@ -1,3 +1,4 @@
+import type { ControlnetLayerSettings } from "./controlnetState.js";
 /**
  * The document a project holds, and the rules that decide whether it changed.
  *
@@ -33,7 +34,8 @@ export interface ProjectRasterImage {
  * image (usually inlined pixels) for a raster. */
 export interface ProjectLayer {
   name: string;
-  type: "raster" | "mask" | "region";
+  type: "raster" | "mask" | "region" | "controlnet";
+  controlnet?: ControlnetLayerSettings;
   visible: boolean;
   opacity: number;
   coverage?: number;
@@ -117,8 +119,15 @@ export function isProjectDocument(value: unknown): value is ProjectDocument {
   return doc.layers.every((layer) => {
     if (!layer || typeof layer !== "object") return false;
     const candidate = layer as Partial<ProjectLayer>;
-    if (candidate.type !== "raster" && candidate.type !== "mask" && candidate.type !== "region") {
+    if (candidate.type !== "raster" && candidate.type !== "mask" && candidate.type !== "region" && candidate.type !== "controlnet") {
       return false;
+    }
+    if (candidate.type === "controlnet") {
+      const c = candidate.controlnet;
+      if (!c || typeof c.enabled !== 'boolean' || (c.mode !== 'preset' && c.mode !== 'custom')
+          || !Number.isFinite(c.strength) || c.strength < 0 || !Number.isFinite(c.startPercent)
+          || !Number.isFinite(c.endPercent) || c.startPercent < 0 || c.endPercent > 1 || c.startPercent >= c.endPercent
+          || (c.sourceData != null && !/^data:image\//.test(c.sourceData))) return false;
     }
     if (typeof candidate.name !== "string" || typeof candidate.order !== "number") return false;
     if (candidate.type === "raster" && candidate.image) {
@@ -187,6 +196,7 @@ function layerSignature(layer: ProjectLayer): string {
     layer.positivePrompt ?? "",
     layer.negativePrompt ?? "",
     settings,
+    JSON.stringify(layer.controlnet?.sourceData ? { ...layer.controlnet, image: null } : layer.controlnet ?? null),
     region,
     imageSignature(layer.image),
     typeof layer.spatialPng === "string" ? layer.spatialPng.length : 0,

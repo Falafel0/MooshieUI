@@ -45,7 +45,7 @@ export async function prepareConditioningRegions(): Promise<InpaintConditioningR
   // A region conditions on being visible. Dimming its overlay is a display
   // choice and must not quietly drop a prompt out of a run.
   const candidates = canvas.sortedLayers.filter(
-    (layer) => layer.visible && layer.type === "region",
+    (layer) => layer.visible && layer.type === "region" && (layer.coverage ?? 1) > 0 && (layer.regionalStrength ?? 1) > 0,
   );
   const prepared = candidates.map((layer) => {
     const text = layer.regionalPrompt?.trim() ?? "";

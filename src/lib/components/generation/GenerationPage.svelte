@@ -11,6 +11,7 @@
   import RegionalPromptModal from "./RegionalPromptModal.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import SamplerSettings from "./SamplerSettings.svelte";
+  import InpaintTarget from "./InpaintTarget.svelte";
   import DimensionControls from "./DimensionControls.svelte";
   import GenerateButton from "./GenerateButton.svelte";
   import UpscaleSettings from "./UpscaleSettings.svelte";
@@ -35,7 +36,7 @@
   import InpaintSettings from "../canvas/InpaintSettings.svelte";
   import LayerPanel from "../canvas/layers/LayerPanel.svelte";
   import { canvas } from "../../stores/canvas.svelte.js";
-  import { captureLayer } from "../../utils/canvasLayerExport.js";
+  import { captureLayer, maskToGrayscale } from "../../utils/canvasLayerExport.js";
   import { uploadImage, uploadImageBytes, getOutputImage, readClipboardImageSafe } from "../../utils/api.js";
   import { uploadOutputImageForGenerationInput } from "../../utils/galleryActions.js";
   import {
@@ -75,6 +76,8 @@
   async function editCanvasSourceInPatchy(target: "base" | "layer") {
     if (!oneditpatchy) return;
     const sourceVersion = canvas.inpaintSourceVersion;
+    const sourceKind = target === "base" ? "base" : canvas.activeLayer?.type;
+    if (!sourceKind || sourceKind === "controlnet") return;
     try {
       const pixels = document.createElement("canvas");
       pixels.width = canvas.canvasWidth;
@@ -83,7 +86,15 @@
         const id = canvas.activeLayerId;
         const node = canvas.getStageRef()?.getLayers?.().find((layer: { id: () => string }) => layer.id() === id);
         if (!node) return;
-        pixels.getContext("2d")!.drawImage(captureLayer(node, pixels.width, pixels.height), 0, 0);
+        const captured = captureLayer(node, pixels.width, pixels.height);
+        const context = pixels.getContext("2d")!;
+        if (sourceKind === "mask" || sourceKind === "region") {
+          // Export coverage, not the coloured canvas overlay. Even a completely
+          // filled mask must round-trip independently of its display tint.
+          const mask = maskToGrayscale(captured);
+          if (mask) context.drawImage(mask, 0, 0);
+          else { context.fillStyle = "black"; context.fillRect(0, 0, pixels.width, pixels.height); }
+        } else context.drawImage(captured, 0, 0);
       } else {
         const context = pixels.getContext("2d")!;
         context.fillStyle = canvas.baseColor;
@@ -105,7 +116,7 @@
       const sessionBlob = await new Promise<Blob>((resolve, reject) =>
         pixels.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Failed to encode canvas image")), "image/png"));
       if (sourceVersion !== canvas.inpaintSourceVersion) return;
-      oneditpatchy({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-patchy", generation_mode: "inpainting", sessionBlob });
+      oneditpatchy({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-patchy", generation_mode: "inpainting", sessionBlob, patchySourceKind: sourceKind, patchySourceVersion: sourceVersion });
     } catch (error) {
       console.error("Failed to open canvas source in Patchy:", error);
       gallery.showToast(locale.t("patchy.load_failed"), "error");
@@ -113,6 +124,25 @@
   }
 
   const storageSuffix = mobileFriendly ? ".mobile" : ".desktop";
+  $effect(() => {
+    if (generation.mode !== 'inpainting' || canvas.legacyControlnetMigrated) return;
+    canvas.legacyControlnetMigrated = true;
+    if (!generation.controlnetEnabled || canvas.layers.some(layer => layer.type === 'controlnet')) return;
+    const id = canvas.addLayer('controlnet');
+    canvas.updateControlnetLayer(id, {
+      enabled: generation.controlnetEnabled, mode: generation.controlnetMode,
+      preset: generation.controlnetPreset, model: generation.controlnetModel,
+      preprocessor: generation.controlnetPreprocessor, image: generation.controlnetImage,
+      strength: generation.controlnetStrength, startPercent: generation.controlnetStartPercent,
+      endPercent: generation.controlnetEndPercent,
+    });
+    const preview = generation.controlnetPreviewUrl;
+    if (preview) void fetch(preview).then(response => response.blob()).then(blob => {
+      const reader = new FileReader();
+      reader.onload = () => { if (canvas.layers.some(layer => layer.id === id)) canvas.updateControlnetLayer(id, { sourceData: String(reader.result) }); };
+      reader.readAsDataURL(blob);
+    }).catch(error => console.warn('Legacy ControlNet preview migration failed', error));
+  });
   const DIMENSIONS_LAYOUT_KEY = `mooshieui.generation.dimensions.layout.v1${storageSuffix}`;
   const SECTION_LAYOUT_KEY = `mooshieui.generation.sections.layout.v1${storageSuffix}`;
 
@@ -323,6 +353,7 @@
   }
 
   function sectionVisible(section: SectionId): boolean {
+    if (section === "dimensions" && generation.mode === "inpainting") return false;
     // Video carries its own geometry, model trio and sampler settings inside the
     // video panel, so every image-pipeline section is inapplicable there.
     if (generation.mode === "video")
@@ -688,6 +719,14 @@
    *  paste event's clipboardData (webkit2gtk populates this on Linux, where the native
    *  clipboard `read_image` is unreliable), falling back to the system clipboard read. */
   async function pasteRaster(file?: File | null) {
+    if (canvas.activeLayer?.type === 'controlnet') {
+      const id = canvas.activeLayerId;
+      try {
+        const image = file ?? new File([new Uint8Array(await readClipboardImageSafe())], 'pasted-control.png', {type:'image/png'});
+        if (canvas.activeLayerId === id) await canvasEditorRef?.setControlnetReference(image);
+      } catch (error) { gallery.showToast(locale.t('generation.controlnet.image_failed', {error:String(error)}), 'error'); }
+      return;
+    }
     let url: string | null = null;
     try {
       rasterImportBusy = true;
@@ -1848,6 +1887,8 @@
             <input
               type="range"
               bind:value={generation.denoise}
+              aria-label={locale.t("generation.image.denoise")}
+              onchange={() => generation.saveSettings()}
               min="0"
               max="1"
               step="0.01"
@@ -1863,6 +1904,7 @@
                 <input
                   type="checkbox"
                   bind:checked={generation.differentialDiffusion}
+                  onchange={() => generation.saveSettings()}
                   class="accent-indigo-500 w-4 h-4 shrink-0"
                 />
               </label>
@@ -1959,6 +2001,8 @@
               <input
                 type="range"
                 bind:value={generation.growMaskBy}
+                aria-label={locale.t("generation.inpaint.grow_mask")}
+                onchange={() => generation.saveSettings()}
                 min="0"
                 max="64"
                 step="1"
@@ -2007,8 +2051,8 @@
       </div>
       {#if layersSectionOpen}
         <div class="px-2 pb-2 pt-0.5 space-y-1.5">
-          <div class="sticky top-0 z-10 grid grid-cols-3 gap-0.5 rounded-md bg-neutral-950/95 p-0.5">
-            {#each ['base', 'layers', 'control'] as tab}
+          <div class="sticky top-0 z-10 grid grid-cols-2 gap-0.5 rounded-md bg-neutral-950/95 p-0.5">
+            {#each ['base', 'layers'] as tab}
               <button type="button" onclick={() => canvas.selectedWorkspaceSection = tab as 'base' | 'layers' | 'control'} aria-pressed={canvas.selectedWorkspaceSection === tab} class="h-7 rounded text-[11px] transition-colors {canvas.selectedWorkspaceSection === tab ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'}">{locale.t('canvas.tab_' + tab)}</button>
             {/each}
           </div>
@@ -2027,23 +2071,19 @@
             <div class="mt-2">{@render maskInputControls()}</div>
           </details>
           <details class="rounded-md border border-neutral-800 p-2">
-            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('canvas.document_settings')}</summary>
+            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('canvas.document_size')}</summary>
             <div class="mt-2 space-y-2">
-              {@render imageSettingsControls()}
-              {@render maskGrowthControls()}
-              {#if !generation.isNovelAi}<InpaintSettings settings={generation.inpaintSettings} onchange={(settings) => { generation.inpaintSettings = settings; generation.saveSettings(); }} />{/if}
+              <DimensionControls suggestedAspect={imageAspect} />
             </div>
           </details>
 
-          {:else if canvas.selectedWorkspaceSection === 'control'}
-            {#if !generation.isNovelAi}<ControlNetSettings />{/if}
           {:else}
           <div class="flex gap-1">
-            <label class="h-7 flex flex-1 cursor-pointer items-center justify-center rounded border border-neutral-700 px-2 text-center text-[10px] text-neutral-300 hover:border-indigo-500 focus-within:border-indigo-500">
-              {locale.t(rasterImportBusy ? 'generation.image.uploading' : 'canvas.import_raster')}
+            <label title={locale.t("canvas.import_raster")} class="ui-control flex flex-1 cursor-pointer items-center justify-center rounded border border-ui-border px-2 text-center text-xs text-neutral-300 hover:border-ui-accent focus-within:border-ui-accent">
+              {locale.t(rasterImportBusy ? 'generation.image.uploading' : 'common.import')}
               <input type="file" accept="image/*" disabled={rasterImportBusy} class="sr-only" onchange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void pasteRaster(file); event.currentTarget.value = ''; }} />
             </label>
-            <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
+            <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} title={locale.t("generation.image.ctrl_v_paste")} class="ui-control rounded border border-ui-border px-3 text-xs text-neutral-300 hover:border-ui-accent">{locale.t('common.paste')}</button>
           </div>
           <LayerPanel oneditpatchy={oneditpatchy ? () => editCanvasSourceInPatchy('layer') : undefined} />
           {/if}
@@ -2489,12 +2529,28 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden pl-3 pr-5 pt-20 pb-6 flex flex-col gap-2' : 'contents'}">
+        {#if generation.mode === "inpainting"}<InpaintTarget />{/if}
         {@render sectionDropZone("left", 0)}
         {#each leftRenderSections as section, i}
           {@render renderSection(section)}
           {@render sectionDropZone("left", i + 1)}
         {/each}
 
+        {#if generation.mode === 'inpainting'}
+          <section aria-label={locale.t('canvas.document_settings')} class="rounded-lg border border-ui-border bg-ui-surface p-3">
+            <h3 class="mb-2 text-xs font-medium text-neutral-300">{locale.t('canvas.document_settings')}</h3>
+            <div class="space-y-2">{@render imageSettingsControls()}</div>
+            {#if !generation.isNovelAi}
+              <details class="mt-2 border-t border-ui-border pt-2">
+                <summary class="cursor-pointer text-xs text-neutral-400">{locale.t('canvas.mask_settings')}</summary>
+                <div class="mt-3 space-y-3">
+                  {@render maskGrowthControls()}
+                  <InpaintSettings settings={generation.inpaintSettings} onchange={(settings) => { generation.inpaintSettings = settings; generation.saveSettings(); }} />
+                </div>
+              </details>
+            {/if}
+          </section>
+        {/if}
         {#if controlsSide === "left"}
           <div class="sticky bottom-0 z-20 mt-auto border-t border-neutral-800 bg-neutral-950 rounded-t-lg px-3 pt-3 pb-5">
             <h3 class="text-xs text-neutral-400 mb-1.5 font-medium">{locale.t('generation.generate')}</h3>

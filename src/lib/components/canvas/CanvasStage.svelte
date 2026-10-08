@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import Konva from "konva";
-  import { captureLayer } from "../../utils/canvasLayerExport.js";
+  import { captureLayer, maskToGrayscale } from "../../utils/canvasLayerExport.js";
   import { processMaskCoverage } from "../../utils/maskProcessing.js";
   import { resolveTint, resolveTintKey } from "../../utils/layerTints.js";
   import { isTypingTarget } from "../../utils/keyboardTarget.js";
@@ -318,7 +318,7 @@
       persistedMaskLayer.moveUp();
     }
 
-    const sorted = canvas.sortedLayers.toReversed();
+    const sorted = canvas.sortedLayers.filter(layer => layer.type !== "controlnet").toReversed();
     for (const layer of sorted) {
       const kLayer = konvaLayers.get(layer.id);
       if (kLayer) kLayer.moveToTop();
@@ -625,13 +625,13 @@
     overlayGroup = new Konva.Group({ listening: false });
     contextLayer.add(overlayGroup);
 
-    if (canvas.selectedWorkspaceSection === 'control' && canvas.controlContextPreviewUrl) {
-      if (!canvas.showLayerContext) { contextLayer.batchDraw(); return; }
+    if (canvas.activeLayer?.type === 'controlnet' && canvas.activeLayer.visible && canvas.controlContextPreviewUrl) {
+      if (canvas.activeLayer.showContext === false) { contextLayer.batchDraw(); return; }
       try {
         const image = await loadImageEl(canvas.controlContextPreviewUrl);
         if (!contextLayer || revision !== contextRevision) return;
-        contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: Math.min(.58, .16 + generation.controlnetStrength * .18), listening: false }));
-        contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: '#22d3ee', strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
+        contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: .4, listening: false }));
+        contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: resolveTint(canvas.activeLayer), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
       } catch { /* The source preview can disappear while a blob URL is replaced. */ }
       reorderStageLayers(); contextLayer.batchDraw(); return;
     }
@@ -905,7 +905,7 @@
   function syncKonvaLayers() {
     if (!stage) return;
 
-    const sorted = canvas.sortedLayers.toReversed();
+    const sorted = canvas.sortedLayers.filter(layer => layer.type !== "controlnet").toReversed();
 
     for (const layer of sorted) {
       const effectiveVisible = layer.visible;
@@ -1151,7 +1151,7 @@
   function getDrawingTargetLayer(): { layer: (typeof canvas.layers)[number]; kLayer: Konva.Layer } | null {
     if (canvas.selectedWorkspaceSection !== 'layers') return null;
     const layer = canvas.activeLayer;
-    if (!layer || layer.locked || !layer.visible) return null;
+    if (!layer || layer.type === "controlnet" || layer.locked || !layer.visible) return null;
 
     const kLayer = getActiveKonvaLayer();
     if (!kLayer) return null;
@@ -1180,6 +1180,10 @@
 
     // The viewport is applied as a layer transform; reset it so the thumbnail
     // captures canvas-space pixels at a fixed scale, then restore it.
+    const origVisible = kLayer.visible();
+    const origOpacity = kLayer.opacity();
+    kLayer.visible(true);
+    kLayer.opacity(1);
     const origScaleX = kLayer.scaleX();
     const origScaleY = kLayer.scaleY();
     const origX = kLayer.x();
@@ -1191,16 +1195,20 @@
 
     let url: string | null = null;
     try {
-      url = kLayer.toDataURL({
+      const preview = kLayer.toCanvas({
         pixelRatio: 64 / maxDim,
         width: w,
         height: h,
         x: 0,
         y: 0,
       });
+      const meta = canvas.layers.find(layer => layer.id === id);
+      url = (meta?.type === 'mask' ? maskToGrayscale(preview) ?? preview : preview).toDataURL('image/png');
     } catch (error) {
       console.error("Failed to generate layer thumbnail:", error);
     } finally {
+      kLayer.visible(origVisible);
+      kLayer.opacity(origOpacity);
       kLayer.scaleX(origScaleX);
       kLayer.scaleY(origScaleY);
       kLayer.x(origX);
@@ -1271,6 +1279,21 @@
     }));
   }
 
+  function selectLayerAtPointer() {
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) return;
+    for (const meta of canvas.sortedLayers) {
+      if (meta.type === 'controlnet' || !meta.visible || meta.opacity <= 0) continue;
+      const node = konvaLayers.get(meta.id);
+      if (!node) continue;
+      const ratio = node.getCanvas().getPixelRatio();
+      try {
+        const pixels = node.getCanvas().getContext().getImageData(Math.floor(pointer.x * ratio), Math.floor(pointer.y * ratio), 1, 1);
+        if (pixels.data[3] > 8) {canvas.setActiveLayer(meta.id); return;}
+      } catch { /* An external image may be unreadable until its asset finishes loading. */ }
+    }
+  }
+
   // Drawing handlers
   function handlePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     const evt = e.evt as MouseEvent;
@@ -1279,6 +1302,10 @@
     // the resize the user asked for; it must not also start a move.
     const target = e.target as Konva.Node | null;
     if (target && (target === selectionTransformer || target.getParent?.() === selectionTransformer || target.hasName?.('_anchor'))) return;
+
+    if (evt.button === 0 && (evt.ctrlKey || evt.metaKey)) {
+      e.evt.preventDefault(); selectLayerAtPointer(); return;
+    }
 
     // Middle mouse → pan
     if (evt.button === 1) {
@@ -2050,7 +2077,7 @@
         <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" onclick={() => runMenuAction(() => canvas.duplicateLayer(canvas.activeLayerId!))}>
           {locale.t('canvas.duplicate')}
         </button>
-        <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" onclick={() => runMenuAction(() => canvas.clearLayer(canvas.activeLayerId!))}>
+        <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" disabled={canvas.activeLayer.type === 'controlnet' || canvas.activeLayer.locked} onclick={() => runMenuAction(() => canvas.clearLayer(canvas.activeLayerId!))}>
           {locale.t('canvas.clear_layer')}
         </button>
         <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left text-red-300 hover:bg-red-500/10 disabled:opacity-40" disabled={!canvas.canDeleteActiveLayer} onclick={() => runMenuAction(() => canvas.removeLayer(canvas.activeLayerId!))}>

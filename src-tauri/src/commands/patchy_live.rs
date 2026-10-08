@@ -87,6 +87,20 @@ impl LiveSession {
                 }),
             )
             .await?;
+        timeout(REQUEST_TIMEOUT, async {
+            session
+                .input
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+                .await?;
+            session.input.flush().await
+        })
+        .await
+        .map_err(|_| failure("Patchy initialization notification timed out"))?
+        .map_err(|error| {
+            failure(format!(
+                "Patchy initialization notification failed: {error}"
+            ))
+        })?;
         Ok(session)
     }
 
@@ -100,29 +114,28 @@ impl LiveSession {
             self.input.write_all(&bytes).await?;
             self.input.write_all(b"\n").await?;
             self.input.flush().await?;
-            let mut line = String::new();
-            if (&mut self.output)
-                .take(16 * 1024 * 1024 + 1)
-                .read_line(&mut line)
-                .await?
-                == 0
-            {
-                return Err(failure("Patchy live connector disconnected"));
+            // Notifications may arrive before the matching response. They do not
+            // complete this request; a bounded loop also limits malformed peers.
+            for _ in 0..32 {
+                let mut line = String::new();
+                if (&mut self.output)
+                    .take(16 * 1024 * 1024 + 1)
+                    .read_line(&mut line)
+                    .await?
+                    == 0
+                {
+                    return Err(failure("Patchy live connector disconnected"));
+                }
+                if line.len() > 16 * 1024 * 1024 || !line.ends_with('\n') {
+                    return Err(failure("Patchy live response exceeds the protocol limit"));
+                }
+                let response: Value = serde_json::from_str(&line)
+                    .map_err(|error| failure(format!("Invalid Patchy response: {error}")))?;
+                if let Some(result) = response_result(response, id)? {
+                    return Ok(result);
+                }
             }
-            if line.len() > 16 * 1024 * 1024 || !line.ends_with('\n') {
-                return Err(failure("Patchy live response exceeds the protocol limit"));
-            }
-            let response: Value = serde_json::from_str(&line)
-                .map_err(|error| failure(format!("Invalid Patchy response: {error}")))?;
-            if response["id"].as_u64() != Some(id) {
-                return Err(failure(
-                    "Patchy live connector returned a mismatched request ID",
-                ));
-            }
-            if let Some(error) = response.get("error") {
-                return Err(failure(format!("Patchy live request failed: {error}")));
-            }
-            Ok(response.get("result").cloned().unwrap_or(Value::Null))
+            Err(failure("Patchy live connector sent too many notifications"))
         })
         .await
         .map_err(|_| failure("Patchy live connector timed out"))?
@@ -516,9 +529,46 @@ pub async fn patchy_live_action(
     }
 }
 
+/// Ignore JSON-RPC notifications, but never accept another request's response.
+fn response_result(response: Value, id: u64) -> Result<Option<Value>, AppError> {
+    if response.get("id").is_none()
+        && response["method"]
+            .as_str()
+            .is_some_and(|method| method.starts_with("notifications/"))
+    {
+        return Ok(None);
+    }
+    if response["id"].as_u64() != Some(id) {
+        return Err(failure(
+            "Patchy live connector returned a mismatched request ID",
+        ));
+    }
+    if let Some(error) = response.get("error") {
+        return Err(failure(format!("Patchy live request failed: {error}")));
+    }
+    Ok(Some(response.get("result").cloned().unwrap_or(Value::Null)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_responses_ignore_notifications_and_reject_unrelated_ids() {
+        assert!(response_result(
+            json!({"jsonrpc":"2.0","method":"notifications/progress","params":{}}),
+            7
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            response_result(json!({"jsonrpc":"2.0","id":7,"result":{"ok":true}}), 7).unwrap(),
+            Some(json!({"ok":true}))
+        );
+        assert!(response_result(json!({"id":8,"result":{}}), 7).is_err());
+        assert!(response_result(json!({"id":7,"error":{"message":"failed"}}), 7).is_err());
+        assert!(response_result(json!({"method":"unknown"}), 7).is_err());
+    }
 
     #[test]
     fn live_document_match_is_scoped_to_the_handoff() {

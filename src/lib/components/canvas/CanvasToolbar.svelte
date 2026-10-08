@@ -7,7 +7,7 @@
   import ColorPicker from "./controls/ColorPicker.svelte";
   import { PaintBucket, Trash2, Undo2, Redo2 } from "@lucide/svelte";
 
-  const editable = $derived(canvas.selectedWorkspaceSection === 'layers' && !!canvas.activeLayer?.visible && !canvas.activeLayer?.locked);
+  const editable = $derived(canvas.selectedWorkspaceSection === 'layers' && canvas.activeLayer?.type !== 'controlnet' && !!canvas.activeLayer?.visible && !canvas.activeLayer?.locked);
   const tools: { id: ToolType; labelKey: string; hotkey: string; icon: string }[] = [
     {
       id: "brush",
@@ -75,6 +75,10 @@
     // Don't trigger if typing in a field — including a rich-text editor.
     if (isTypingTarget(e.target)) return;
 
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j' && canvas.activeLayerId) {
+      e.preventDefault(); canvas.duplicateLayer(canvas.activeLayerId); return;
+    }
+
     // Undo/Redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
@@ -95,7 +99,6 @@
     if (e.key === "Delete") {
       const layer = canvas.activeLayer;
       if (editable && layer && canvas.activeLayerId) {
-        canvasHistory.snapshot(layer.id);
         canvas.clearLayer(layer.id);
       }
       return;
@@ -150,7 +153,7 @@
 
   {#if editable && canvas.activeLayer?.type === 'raster'}<ColorPicker />{/if}
   <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId); canvas.fillActiveLayer(); }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-30" aria-label={locale.t('canvas.fill_layer')} title={locale.t('canvas.fill_layer')}><PaintBucket size={16} /></button>
-  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) { canvasHistory.snapshot(canvas.activeLayerId); canvas.clearLayer(canvas.activeLayerId); } }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30" aria-label={locale.t('canvas.clear_layer')} title={locale.t('canvas.clear_layer')}><Trash2 size={16} /></button>
+  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) { canvas.clearLayer(canvas.activeLayerId); } }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30" aria-label={locale.t('canvas.clear_layer')} title={locale.t('canvas.clear_layer')}><Trash2 size={16} /></button>
 
   <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
 

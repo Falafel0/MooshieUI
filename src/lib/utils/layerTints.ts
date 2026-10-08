@@ -31,6 +31,7 @@ export const DEFAULT_LAYER_TINT: Record<string, LayerTintKey> = {
   mask: "rose",
   region: "violet",
   raster: "sky",
+  controlnet: "emerald",
 };
 
 type TintedLayer = { type: string; tint?: string };
