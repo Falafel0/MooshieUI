@@ -256,6 +256,67 @@ function decimalNumber(weight: number): string {
 }
 
 /** Mixer tags are literal text; do not turn a tag's parentheses into emphasis. */
+/** Top-level prompt atoms. Scheduling, attention, escapes and NAI weights
+ * use the same lexer as conversion; commas inside them never split a pill. */
+export function promptTokenRanges(input: string): { start: number; end: number; text: string }[] {
+  const controls = controlSpans(input);
+  const tokens: { start: number; end: number; text: string }[] = [];
+  let start = 0;
+  function append(end: number) {
+    const fragment = input.slice(start, end);
+    const left = fragment.length - fragment.trimStart().length;
+    const right = fragment.trimEnd().length;
+    if (right > left) tokens.push({ start: start + left, end: start + right, text: fragment.slice(left, right) });
+  }
+  for (let cursor = 0; cursor < input.length; cursor++) {
+    const char = input[cursor];
+    if (char === '\\') { cursor++; continue; }
+    const control = controls.get(cursor);
+    if (control) { cursor = control.end - 1; continue; }
+    if (OPENERS.includes(char)) { cursor = readGroup(input, cursor, controls).end - 1; continue; }
+    const numeric = tokenBoundary(input, cursor) ? numericOpener(input, cursor) : null;
+    if (numeric) { cursor = readNumeric(input, numeric, controls).end - 1; continue; }
+    if (char === ',' || char === '\n') { append(cursor); start = cursor + 1; }
+  }
+  append(input.length);
+  return tokens;
+}
+
+/** Decode representable numeric attention without stripping literal syntax.
+ * Larger/signed weights and unsupported constructs remain opaque and exact. */
+export function parsePromptAtom(value: string): { tag: string; weight: number } {
+  const text = value.trim();
+  const controls = controlSpans(text);
+  if (text.startsWith('(')) {
+    const group = readGroup(text, 0, controls);
+    const colon = group.colons.at(-1);
+    if (!group.code && !group.nested && !group.control && !group.pipe && !group.doubleColon && group.end === text.length && colon !== undefined) {
+      const weight = Number(text.slice(colon + 1, -1));
+      const tag = text.slice(1, colon).trim();
+      if (tag && Number.isFinite(weight) && weight >= .1 && weight <= 2) return { tag, weight };
+    }
+  }
+  const numeric = numericOpener(text, 0);
+  if (numeric?.valid && text.endsWith('::')) {
+    const span = readNumeric(text, numeric, controls);
+    const weight = Number(numeric.weight);
+    const tag = text.slice(numeric.body, -2).trim();
+    if (!span.code && span.end === text.length && tag && weight >= .1 && weight <= 2) return { tag, weight };
+  }
+  return { tag: text, weight: 1 };
+}
+
+/** Replace one atom while retaining unrelated formatting and nested syntax. */
+export function replacePromptToken(input: string, start: number, end: number, replacement: string): string {
+  if (start < 0 || end > input.length || end < start) return input;
+  const value = replacement.trim();
+  if (value) return input.slice(0, start) + value + input.slice(end);
+  let before = input.slice(0, start), after = input.slice(end);
+  if (/[,\n]\s*$/.test(before)) before = before.replace(/[,\n]\s*$/, '');
+  else after = after.replace(/^\s*[,\n]\s*/, '');
+  return (before + after).trim();
+}
+
 export function formatWeightedTag(content: string, weight: number, format: WeightFormat): string {
   const literal = escapeLiteral(content, format);
   if (!Number.isFinite(weight) || weight === 1) return literal;

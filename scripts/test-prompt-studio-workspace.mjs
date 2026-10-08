@@ -253,3 +253,47 @@ assert.equal(workspace.librarySection, 'sources'); assert.equal(workspace.draftP
 assert.equal(workspace.storageError, false, 'Corrupt retired preferences cannot prevent current preferences loading');
 userScope = '';
 console.log('Workspace section, management and draft-part preferences persist, migrate and remain isolated by account.');
+
+// The full prompt arena edits its source atom, never flattening other sources.
+{
+  const state = {
+    name: 'Arena', kind: 'character', model: 'SDXL (NoobAI)',
+    choices: [{ tag: 'blue_hair', name: 'Blue hair', category: 'hair', weight: 1.25 }, { tag: 'smile', name: 'Smile', category: 'expression', weight: .8 }],
+    details: { blue_hair: { mods: ['long_hair'], parts: {} } }, prefix: 'masterpiece', suffix: '<lora:style:0.6>', readable: false, nai: false,
+    groups: [{ id: 'scene', name: 'Scene', content: 'observatory, (warm light:0.8)', enabled: true }, { id: 'hidden', name: 'Hidden', content: 'secret', enabled: false }],
+  };
+  studio.applyState(state); studio.pinned = ['blue_hair']; studio.history = []; studio.future = [];
+  const original = studio.prompt;
+  const part = studio.promptParts.find(part => part.id === 'choice:blue_hair');
+  assert.equal(studio.editPromptToken(part.id, 0, part.content.length, '(blue_hair, long_hair:0.65)', part.content), true);
+  assert.equal(studio.selected[0].weight, .65);
+  assert.equal(studio.details.blue_hair.mods[0], 'long_hair', 'Weight-only edits preserve modifiers');
+  assert.equal(studio.groups[0].content, state.groups[0].content);
+  studio.undo(); assert.equal(studio.prompt, original); assert.equal(studio.pinned[0], 'blue_hair');
+  const smile = studio.promptParts.find(part => part.id === 'choice:smile');
+  studio.editPromptToken(smile.id, 0, smile.content.length, '', smile.content);
+  assert.ok(!studio.prompt.includes('smile')); assert.equal(studio.groups[0].content, state.groups[0].content);
+  studio.undo(); assert.equal(studio.prompt, original);
+  const count = studio.history.length;
+  assert.equal(studio.editPromptToken(part.id, 0, part.content.length, 'wrong', 'stale source'), false);
+  assert.equal(studio.history.length, count); assert.equal(studio.prompt, original);
+  studio.clearPrompt(); assert.equal(studio.prompt, ''); assert.equal(studio.groups[0].content, state.groups[0].content);
+  studio.undo(); assert.equal(studio.prompt, original);
+  studio.pin('smile'); assert.ok(studio.pinned.includes('smile')); studio.undo(); assert.ok(!studio.pinned.includes('smile'));
+  studio.applyState({ ...state, rawPrompt: 'manual, (blue_hair:1.25), [cat|dog]' });
+  studio.choose('red_hair', 'Red hair', 'hair'); assert.ok(studio.prompt.includes('red_hair'));
+  studio.choose('red_hair', 'Red hair', 'hair'); assert.ok(!studio.prompt.includes('red_hair'));
+  studio.replaceChoices([{ tag: 'green_hair', name: 'Green hair', category: 'hair', weight: .7 }], ['hair']);
+  assert.ok(studio.prompt.includes('manual')); assert.ok(studio.prompt.includes('[cat|dog]'));
+  assert.ok(!studio.prompt.includes('blue_hair')); assert.ok(studio.prompt.includes('(green_hair:0.70)'));
+  studio.clearPrompt(); studio.addPromptText('(precise:0.875)');
+  assert.equal(studio.prompt, '(precise:0.875)', 'Pill parsing must not round model weights to two decimal places');
+  studio.setOption('nai', true); assert.equal(studio.prompt, '0.875::precise::');
+  studio.editPrompt('manual, [day|night]');
+  studio.addArtists(['artist_a', 'artist_a'], .875);
+  assert.equal(studio.prompt, 'manual, [day|night], 0.875::artist_a::', 'Artist insertion affects the visible manual prompt and deduplicates a batch');
+  studio.weight('artist_a', .65); assert.equal(studio.prompt, 'manual, [day|night], 0.65::artist_a::');
+  studio.clearSub('source:style'); assert.equal(studio.prompt, 'manual, [day|night]');
+  studio.undo(); assert.equal(studio.prompt, 'manual, [day|night], 0.65::artist_a::');
+  console.log('Full prompt pills retain syntax, weights, modifiers, chunks, pins and undo; manual prompts accept resource changes.');
+}

@@ -30,6 +30,29 @@ export const DEFAULT_INPAINT_SETTINGS: InpaintSettings = {
   mask_influence: 0, difference_threshold: 0.5, difference_contrast: 2,
 };
 
+interface MaskProcessingLayer {
+  inpaintSettings?: InpaintSettings;
+  inpaintWidth?: number;
+  inpaintHeight?: number;
+  inpaintAspectLocked?: boolean;
+}
+
+/** Processing inheritance is independent of edit strength, growth and display.
+ * Selecting the current mode preserves all custom values. */
+export function withMaskProcessingSettings<T extends MaskProcessingLayer>(
+  layer: T,
+  source: { settings: InpaintSettings; width: number; height: number } | null,
+): T {
+  if (!!layer.inpaintSettings === !!source) return layer;
+  return {
+    ...layer,
+    inpaintSettings: source ? { ...source.settings } : undefined,
+    inpaintWidth: source ? (layer.inpaintWidth ?? source.width) : undefined,
+    inpaintHeight: source ? (layer.inpaintHeight ?? source.height) : undefined,
+    inpaintAspectLocked: source ? (layer.inpaintAspectLocked ?? true) : undefined,
+  };
+}
+
 export function normalizeInpaintSettings(value: Partial<InpaintSettings> | null | undefined): InpaintSettings {
   const next = { ...DEFAULT_INPAINT_SETTINGS };
   if (!value || typeof value !== 'object') return next;

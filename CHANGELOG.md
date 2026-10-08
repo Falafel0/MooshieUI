@@ -1,5 +1,43 @@
 # Changelog
 
+## What's New in v2.3.9-fork.7
+
+### Desktop generation workspace
+- Keep sources and active prompt/instruction beside the canvas, with compact composition, sampling and output controls. Preserve custom section placement, prompt split view and saved editor heights.
+- Replace the flat bottom bar with a shared Shelf for Resources, Results and Workflow. Pin frequent panels, browse horizontal cards, open Models and LoRAs from the Inspector, and retain independent open/height state for each image mode.
+- Improve scoped settings search, keyboard navigation, command discovery, panel resizing and desktop density.
+
+### Professional Prompt Studio
+- Use one editable full-prompt arena: tags, weighted groups, scheduling, LoRAs and enabled chunks stay together. Edit pills directly, add multiple tags, remove with a visible button, cancel with Escape and restore with undo/redo.
+- Keep exact complex syntax and weight precision. Show syntax diagnostics and an estimated CLIP token count. Add tags with the shared autocomplete source; retain separate chunk content and metadata.
+- Keep Build, Mix, Editor and Library on one draft, with matching desktop density and palette. Avoid duplicate editable prompt fields; keep the full output preview beside the Editor.
+- Apply resources and recipes to manually edited drafts as well as constructor drafts. Copy the entire prompt, review its destination and positive/negative field, then send as text or named blocks. Ctrl+Enter commits the current pill before review.
+
+### Inpainting, layers and ControlNet
+- Edit masks define generation passes. Prompt regions and ControlNet layers modify those passes without creating extra steps. Remove the duplicate left Inpaint Masks panel; select and inspect masks in the document layer panel.
+- Add layer groups, raster clipping, raster-alpha edit limits, linked ControlNet sources and explicit modifier targets. Broken links remain visible for repair and never silently expand their effect. Projects and undo preserve relationships and fractional painted erasure.
+- Distinguish ControlNet source images from processed control maps. Switch the Inspector and selected layer's canvas guide between them; linked raster references respect the processed preview. Guide opacity and visibility are independent of generation strength and participation.
+- Keep model selections explicit across ControlNet inventories and architecture changes, including Anima model patches. Preserve unavailable controls when changing providers and explain their availability in context.
+- Separate mask coverage, visual overlay opacity, raster opacity and density-based denoising. Respect raster-alpha limits after mask growth, blur and inversion. Zero base denoise preserves source pixels without lossy VAE reconstruction.
+- Consolidate brush/eraser, fill shapes, transform and view tools. Painted and mixed raster layers transform as a whole, brush thickness scales once, and source-placement edits support undo. Fill is one undo action; Clear pixels and Delete layer are distinct. Improve layer selection, drag ordering, locking, keyboard actions and canvas context guides.
+
+### Patchy integration
+- Open Patchy in a native modal dialog with larger Source / Result previews, live document hierarchy, native MCP read-back, guarded layer visibility/opacity editing, undo/redo and composite import. Tab stays within the modal workspace and Escape restores focus to the opening control.
+- Use Patchy 1.07's documented `--attach` API. Closing the dialog disconnects the MCP proxy without closing Patchy's document or undo history. Remove pinning and collapsing into a workspace block.
+
+### Screenshot review fixes
+- Preserve mask Denoise and Grow independently when choosing document or layer processing settings. Clicking the current processing mode preserves custom Blur, output dimensions and undo history.
+- Fit horizontal image cards to Shelf height, show result actions only after selection, and use more desktop height for the layer list.
+- The v2.3.9-fork.6 tag was retained, but its build was stopped before publication after screenshot review reproduced a settings reset. This release includes those fixes.
+
+### Upstream and validation
+- Merge upstream through v2.3.16, including Krea 2 GGUF support fixes, stale managed-ComfyUI restart and optional encoder selection, while retaining the fork's Windows installer and signed updater pipeline.
+- Check the running ComfyUI inpainting-node contract before submitting density-aware or raster-limited edits. Remote servers need current Mooshie nodes and a restart when the UI requests it.
+- Validate frontend build, all 12 locales, 238 Node tests, 1004 Rust server library tests (7 ignored) plus the server test, 1050 Windows native tests (10 ignored), 21 CPU tensor tests and 5 release-artifact tests. Windows native compilation/tests and browser interaction checks cover the workspace changes.
+- GPU inference and an interactive Windows Patchy roundtrip were not exercised in the cloud environment; Patchy UI tests use simulated native-host replies.
+
+---
+
 ## What's New in v2.3.9-fork.6
 
 ### Desktop generation workspace

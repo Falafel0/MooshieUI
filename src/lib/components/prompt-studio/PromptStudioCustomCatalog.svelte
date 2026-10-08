@@ -41,23 +41,23 @@
       {#if preview}<img src={preview} alt={name || tag} class="max-h-80 w-full object-contain" />{:else}<Image size={40} class="my-12 text-neutral-600" />{/if}
     </div>
     <section class="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
-      <header class="mb-3 flex items-center justify-between"><h3 class="text-xs font-semibold text-amber-300">{locale.t('prompt_studio.tag_info')}</h3><button type="button" aria-label={locale.t('common.close')} class="touch-target rounded p-2 text-neutral-400" onclick={() => studio.catalogEntryId = ''}><X size={15} /></button></header>
+      <header class="mb-3 flex items-center justify-between"><h3 class="text-xs font-semibold text-indigo-300">{locale.t('prompt_studio.tag_info')}</h3><button type="button" aria-label={locale.t('common.close')} class="ui-control rounded p-2 text-neutral-400" onclick={() => studio.catalogEntryId = ''}><X size={15} /></button></header>
       <form class="flex flex-col gap-3" onsubmit={event => { event.preventDefault(); save(); }}>
-        <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="touch-target rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs text-neutral-200" />
+        <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="ui-control rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-xs text-neutral-200" />
         <textarea aria-label={locale.t('prompt_studio.custom_tag')} placeholder={locale.t('prompt_studio.custom_tag')} bind:value={tag} rows={2} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea>
         <textarea aria-label={locale.t('prompt_studio.description')} placeholder={locale.t('prompt_studio.description')} bind:value={description} rows={2} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea>
-        <label class="text-xs text-neutral-400">{locale.t('prompt_studio.aliases')}<input bind:value={aliases} class="touch-target mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-neutral-200" /></label>
+        <label class="text-xs text-neutral-400">{locale.t('prompt_studio.aliases')}<input bind:value={aliases} class="ui-control mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-neutral-200" /></label>
         <label class="text-xs text-neutral-400">{locale.t('prompt_studio.contextual_tags')}<textarea bind:value={context} rows={2} class="mt-1 w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-200"></textarea></label>
         <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t('prompt_studio.contextual_tags_hint')}</p>
         <label class="text-xs text-neutral-400">{locale.t('prompt_studio.custom_upload')}<input type="file" accept="image/png,image/jpeg,image/webp" onchange={upload} disabled={busy} class="mt-2 w-full text-xs" /></label>
-        {#if preview}<button type="button" disabled={busy} class="touch-target text-left text-xs text-neutral-500" onclick={() => preview = ''}>{locale.t('prompt_studio.custom_remove_preview')}</button>{/if}
+        {#if preview}<button type="button" disabled={busy} class="ui-control text-left text-xs text-neutral-500" onclick={() => preview = ''}>{locale.t('prompt_studio.custom_remove_preview')}</button>{/if}
         <div class="flex flex-wrap gap-2">
-          <button type="submit" disabled={!customCatalog.ready || busy || !tag.trim()} class="touch-target rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
-          {#if entry}<button type="button" disabled={busy} class="touch-target flex items-center gap-1 rounded-lg border border-neutral-700 px-2 text-xs text-neutral-400" onclick={() => studio.catalogEntryId = customCatalog.duplicate(entry!.id) ?? ''}><Copy size={13} />{locale.t('common.duplicate')}</button><button type="button" disabled={busy} class="touch-target rounded-lg border border-red-900 px-2 text-red-300" aria-label={locale.t('prompt_studio.delete')} onclick={remove}><Trash2 size={14} /></button>{/if}
+          <button type="submit" disabled={!customCatalog.ready || busy || !tag.trim()} class="ui-control rounded-lg bg-indigo-400 px-3 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
+          {#if entry}<button type="button" disabled={busy} class="ui-control flex items-center gap-1 rounded-lg border border-neutral-700 px-2 text-xs text-neutral-400" onclick={() => studio.catalogEntryId = customCatalog.duplicate(entry!.id) ?? ''}><Copy size={13} />{locale.t('common.duplicate')}</button><button type="button" disabled={busy} class="ui-control rounded-lg border border-red-900 px-2 text-red-300" aria-label={locale.t('prompt_studio.delete')} onclick={remove}><Trash2 size={14} /></button>{/if}
         </div>
       </form>
       {#if busy}<p role="status" class="mt-3 text-xs text-neutral-400">{locale.t('prompt_studio.loading')}</p>{/if}
-      {#if error}<p role="alert" class="mt-3 text-xs text-amber-300">{error}</p>{/if}
+      {#if error}<p role="alert" class="mt-3 text-xs text-indigo-300">{error}</p>{/if}
     </section>
   {/if}
 

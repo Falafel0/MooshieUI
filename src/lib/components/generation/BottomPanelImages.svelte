@@ -40,6 +40,10 @@
   });
   const imageId = (image: OutputImage) => `${image.type}/${image.subfolder}/${image.filename}/${image.prompt_id}`;
   let selectedId = $state<string | null>(null);
+  let cardViewportHeight = $state(0);
+  const displayCardSize = $derived(bottomPanel.cardLayout === "strip" && cardViewportHeight > 0
+    ? Math.min(bottomPanel.imageCardSize, Math.max(24, cardViewportHeight - 16))
+    : bottomPanel.imageCardSize);
   const selectedImage = $derived(filteredSessionImages.find((image) => imageId(image) === selectedId) ?? null);
   async function deleteSelectedImage(image: OutputImage) {
     const index = filteredSessionImages.indexOf(image);
@@ -93,127 +97,11 @@
 
 </script>
 <div class="flex h-full min-h-0 flex-col">
-<div class="flex-1 min-h-0 overflow-auto">
-      <!-- Storage expiry warning (browser mode) -->
-      {#if gallery.hasExpiry}
-        <div class="mx-2 mt-1.5 mb-1 px-3 py-2 rounded-lg bg-amber-900/30 border border-amber-700/50 text-amber-300 text-[11px] flex items-center gap-2 shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span>
-            {locale.t('gallery.expiry_warning')}
-            {#if gallery.expiringWithin24h > 0}
-              <strong class="text-amber-200">{locale.t('gallery.expiry_soon', { count: String(gallery.expiringWithin24h) })}</strong>
-            {/if}
-            {#if gallery.storageInfo}
-              <span class="text-amber-400/70 ml-1">({gallery.storageLabel})</span>
-            {/if}
-          </span>
-        </div>
-      {/if}
-      <!-- Session History -->
-      {#if source === "references" && gallery.loading && sessionOutputs.length === 0}
-        <BottomPanelEmpty icon="references" messageKey="common.loading" />
-      {:else if sessionOutputs.length === 0}
-        <BottomPanelEmpty icon={source === "references" ? "references" : "images"} messageKey={source === "references" ? "bottom_panel.no_references" : isVideoMode ? 'bottom_panel.no_videos' : 'bottom_panel.no_images'} />
-      {:else}
-        <div class="flex flex-col h-full">
-          <BottomPanelToolbar>
-            <div class="relative min-w-40 flex-1">
-              <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-500"><BottomPanelIcon name="search" /></span>
-              <input
-              type="text"
-              value={searchText} oninput={(event) => setSearch(event.currentTarget.value)}
-              aria-label={locale.t(source === "references" ? "bottom_panel.reference_search" : isVideoMode ? "bottom_panel.video_search_placeholder" : "bottom_panel.image_search_placeholder")} placeholder={locale.t(source === "references" ? "bottom_panel.reference_search" : isVideoMode ? "bottom_panel.video_search_placeholder" : "bottom_panel.image_search_placeholder")}
-              class="w-full ui-control pl-9 pr-12 min-w-0 bg-ui-surface border border-ui-border rounded-md text-xs text-neutral-100 placeholder-neutral-500 focus:border-ui-accent transition-colors"
-            />
-              {#if searchText}
-                <button type="button" class="ui-icon-button absolute inset-y-0 right-1 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-100" aria-label={locale.t("bottom_panel.clear_search")} onclick={(event) => { clearSearch(); event.currentTarget.parentElement?.querySelector("input")?.focus(); }}><BottomPanelIcon name="close" class="size-3.5" /></button>
-              {/if}
-            </div>
-            <div use:scrollCapture class="flex shrink-0 items-center gap-2 text-neutral-500" title={locale.t("bottom_panel.card_size")}><BottomPanelIcon name="grid" class="size-3.5" />
-              <input
-                type="range"
-                min="48"
-                max="160"
-                value={bottomPanel.imageCardSize} oninput={(e) => bottomPanel.setCardSize("image", e.currentTarget.valueAsNumber)}
-                class="w-20 h-4 accent-ui-accent cursor-pointer"
-                aria-label={locale.t('bottom_panel.card_size')} title={locale.t('bottom_panel.card_size')}
-              />
-            </div>
-            <BottomPanelCardLayout />
-            {#if source === "session"}
-            <button
-              type="button"
-              class="shrink-0 ui-icon-button flex items-center justify-center rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 hover:bg-red-600/10 transition-colors"
-              title={locale.t('bottom_panel.delete_all')}
-              aria-label={locale.t('bottom_panel.delete_all')}
-              onclick={confirmDeleteAllSessionImages}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-            </button>
-            {/if}
-<span class="shrink-0 text-xs text-neutral-500 tabular-nums" aria-label={locale.t("bottom_panel.matches", { shown: String(filteredSessionImages.length), total: String(sessionOutputs.length) })}>{locale.formatInteger(filteredSessionImages.length)}<span class="px-1 text-neutral-600">/</span>{locale.formatInteger(sessionOutputs.length)}</span>
-          </BottomPanelToolbar>
-          {#if filteredSessionImages.length === 0}
-            <BottomPanelEmpty icon="images" messageKey={isVideoMode ? 'bottom_panel.no_video_results' : 'bottom_panel.no_image_results'} onreset={() => { clearSearch(); }} />
-          {:else}
-            <div class="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] px-2 py-2">
-              <div class="grid gap-2" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${bottomPanel.imageCardSize}px; align-content: start;` : `grid-template-columns: repeat(auto-fill, minmax(min(${bottomPanel.imageCardSize}px, 100%), 1fr)); align-content: start;`}>
-              {#each filteredSessionImages as image (imageId(image))}
-                <div
-                  class="relative w-full rounded-lg overflow-hidden border bg-ui-surface transition-colors {selectedImage !== null && imageId(selectedImage) === imageId(image) ? 'border-ui-accent ring-2 ring-ui-accent/25' : 'border-ui-border/60 hover:border-neutral-500'}"
-                  style="aspect-ratio: 1 / 1;"
-                >
-                  <button
-                    class="absolute inset-0 w-full h-full"
-                    title={isVideoImage(image) ? locale.t("gallery.play_video") : image.filename}
-                    oncontextmenu={(e) => { if (oncontextmenu) { e.preventDefault(); oncontextmenu(image, e.clientX, e.clientY); } }}
-                    aria-pressed={selectedImage !== null && imageId(selectedImage) === imageId(image)}
-                    onclick={() => { selectedId = imageId(image); }}
-                    ondblclick={() => gallery.openLightbox(image)}
-                    onkeydown={(e) => { if (e.key === "Enter" && selectedImage !== null && imageId(selectedImage) === imageId(image)) { e.preventDefault(); gallery.openLightbox(image); } }}
-                  >
-                    <img
-                      use:lazyThumbnail={{ image }}
-                      alt={image.filename}
-                      class="w-full h-full object-contain"
-                    />
-                  </button>
-                  <span class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-neutral-950/80 px-1.5 py-1 text-[10px] text-neutral-300">{image.filename}</span>
-                  {#if selectedImage !== null && imageId(selectedImage) === imageId(image)}<span class="pointer-events-none absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-ui-accent text-ui-accent-foreground text-[10px]">✓</span>{/if}
-                  {#if isVideoImage(image)}
-                    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div class="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-white translate-x-px" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </div>
-                    </div>
-                  {/if}
-                  {#if (selectedImage !== null && imageId(selectedImage) === imageId(image) || gallery.showGenerationTime) && image.generationTimeMs != null}
-                    <div
-                      class="absolute top-1.5 left-1.5 flex items-center gap-1 bg-black/65 text-white text-[10px] font-medium px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none"
-                      title={locale.t("generation.gen_time_label")}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
-                      </svg>
-                      {formatGenerationTime(image.generationTimeMs, locale.current)}
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-</div>
-
-<div class="flex min-h-[calc(var(--ui-control-height)+12px)] shrink-0 flex-wrap items-center gap-2 border-t border-ui-border/60 bg-ui-surface/80 px-3 py-1.5" role="group" aria-label={selectedImage?.filename ?? locale.t("bottom_panel.select_hint")}>
 {#if selectedImage}
   {@const image = selectedImage}
   {@const isVideo = isVideoImage(image)}
+<div class="flex min-h-[calc(var(--ui-control-height)+12px)] shrink-0 flex-wrap items-center gap-2 border-t border-ui-border/60 bg-ui-surface/80 px-3 py-1.5" role="group" aria-label={selectedImage.filename}>
+    <button type="button" class="ui-icon-button flex shrink-0 items-center justify-center rounded-md text-neutral-400 hover:bg-ui-hover hover:text-neutral-100" aria-label={locale.t('bottom_panel.back_to_images')} title={locale.t('bottom_panel.back_to_images')} onclick={() => selectedId = null}><BottomPanelIcon name="left" /></button>
     <span class="min-w-0 flex-1 truncate text-xs font-medium text-neutral-200" title={image.filename}>{image.filename}</span>
     <button class="ui-control px-3 rounded-md border border-ui-accent/30 bg-ui-selected text-xs font-medium text-ui-accent hover:border-ui-accent/60" onclick={() => gallery.openLightbox(image)}>{locale.t(isVideo ? "gallery.play_video" : "bottom_panel.open")}</button>
     <div class="flex items-center gap-1">
@@ -303,8 +191,128 @@
         <svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
       </button>
     </div>
-{:else}
-  <p class="text-xs text-neutral-500">{locale.t("bottom_panel.select_hint")}</p>
-{/if}
 </div>
+{:else}
+  <p class="sr-only">{locale.t("bottom_panel.select_hint")}</p>
+{/if}
+<div class="flex-1 min-h-0 overflow-auto">
+      <!-- Storage expiry warning (browser mode) -->
+      {#if gallery.hasExpiry}
+        <div class="mx-2 mt-1.5 mb-1 px-3 py-2 rounded-lg bg-amber-900/30 border border-amber-700/50 text-amber-300 text-[11px] flex items-center gap-2 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>
+            {locale.t('gallery.expiry_warning')}
+            {#if gallery.expiringWithin24h > 0}
+              <strong class="text-amber-200">{locale.t('gallery.expiry_soon', { count: String(gallery.expiringWithin24h) })}</strong>
+            {/if}
+            {#if gallery.storageInfo}
+              <span class="text-amber-400/70 ml-1">({gallery.storageLabel})</span>
+            {/if}
+          </span>
+        </div>
+      {/if}
+      <!-- Session History -->
+      {#if source === "references" && gallery.loading && sessionOutputs.length === 0}
+        <BottomPanelEmpty icon="references" messageKey="common.loading" />
+      {:else if sessionOutputs.length === 0}
+        <BottomPanelEmpty icon={source === "references" ? "references" : "images"} messageKey={source === "references" ? "bottom_panel.no_references" : isVideoMode ? 'bottom_panel.no_videos' : 'bottom_panel.no_images'} />
+      {:else}
+        <div class="flex h-full min-h-0 flex-col">
+          {#if !selectedImage}
+          <BottomPanelToolbar>
+            <div class="relative min-w-40 flex-1">
+              <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-500"><BottomPanelIcon name="search" /></span>
+              <input
+              type="text"
+              value={searchText} oninput={(event) => setSearch(event.currentTarget.value)}
+              aria-label={locale.t(source === "references" ? "bottom_panel.reference_search" : isVideoMode ? "bottom_panel.video_search_placeholder" : "bottom_panel.image_search_placeholder")} placeholder={locale.t(source === "references" ? "bottom_panel.reference_search" : isVideoMode ? "bottom_panel.video_search_placeholder" : "bottom_panel.image_search_placeholder")}
+              class="w-full ui-control pl-9 pr-12 min-w-0 bg-ui-surface border border-ui-border rounded-md text-xs text-neutral-100 placeholder-neutral-500 focus:border-ui-accent transition-colors"
+            />
+              {#if searchText}
+                <button type="button" class="ui-icon-button absolute inset-y-0 right-1 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-100" aria-label={locale.t("bottom_panel.clear_search")} onclick={(event) => { clearSearch(); event.currentTarget.parentElement?.querySelector("input")?.focus(); }}><BottomPanelIcon name="close" class="size-3.5" /></button>
+              {/if}
+            </div>
+            <div use:scrollCapture class="flex shrink-0 items-center gap-2 text-neutral-500" title={locale.t("bottom_panel.card_size")}><BottomPanelIcon name="grid" class="size-3.5" />
+              <input
+                type="range"
+                min="48"
+                max="160"
+                value={bottomPanel.imageCardSize} oninput={(e) => bottomPanel.setCardSize("image", e.currentTarget.valueAsNumber)}
+                class="w-20 h-4 accent-ui-accent cursor-pointer"
+                aria-label={locale.t('bottom_panel.card_size')} title={locale.t('bottom_panel.card_size')}
+              />
+            </div>
+            <BottomPanelCardLayout />
+            {#if source === "session"}
+            <button
+              type="button"
+              class="shrink-0 ui-icon-button flex items-center justify-center rounded border border-neutral-700 text-neutral-400 hover:border-red-500 hover:text-red-300 hover:bg-red-600/10 transition-colors"
+              title={locale.t('bottom_panel.delete_all')}
+              aria-label={locale.t('bottom_panel.delete_all')}
+              onclick={confirmDeleteAllSessionImages}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
+            {/if}
+<span class="shrink-0 text-xs text-neutral-500 tabular-nums" aria-label={locale.t("bottom_panel.matches", { shown: String(filteredSessionImages.length), total: String(sessionOutputs.length) })}>{locale.formatInteger(filteredSessionImages.length)}<span class="px-1 text-neutral-600">/</span>{locale.formatInteger(sessionOutputs.length)}</span>
+          </BottomPanelToolbar>
+          {/if}
+          {#if filteredSessionImages.length === 0}
+            <BottomPanelEmpty icon="images" messageKey={isVideoMode ? 'bottom_panel.no_video_results' : 'bottom_panel.no_image_results'} onreset={() => { clearSearch(); }} />
+          {:else}
+            <div bind:clientHeight={cardViewportHeight} class="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] px-2 py-2">
+              <div class="grid gap-2" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${displayCardSize}px; align-content: start;` : `grid-template-columns: repeat(auto-fill, minmax(min(${bottomPanel.imageCardSize}px, 100%), 1fr)); align-content: start;`}>
+              {#each filteredSessionImages as image (imageId(image))}
+                <div
+                  class="relative w-full rounded-lg overflow-hidden border bg-ui-surface transition-colors {selectedImage !== null && imageId(selectedImage) === imageId(image) ? 'border-ui-accent ring-2 ring-ui-accent/25' : 'border-ui-border/60 hover:border-neutral-500'}"
+                  style="aspect-ratio: 1 / 1;"
+                >
+                  <button
+                    class="absolute inset-0 w-full h-full"
+                    title={isVideoImage(image) ? locale.t("gallery.play_video") : image.filename}
+                    oncontextmenu={(e) => { if (oncontextmenu) { e.preventDefault(); oncontextmenu(image, e.clientX, e.clientY); } }}
+                    aria-pressed={selectedImage !== null && imageId(selectedImage) === imageId(image)}
+                    onclick={() => { selectedId = imageId(image); }}
+                    ondblclick={() => gallery.openLightbox(image)}
+                    onkeydown={(e) => { if (e.key === "Enter" && selectedImage !== null && imageId(selectedImage) === imageId(image)) { e.preventDefault(); gallery.openLightbox(image); } }}
+                  >
+                    <img
+                      use:lazyThumbnail={{ image }}
+                      alt={image.filename}
+                      class="w-full h-full object-contain"
+                    />
+                  </button>
+                  <span class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-neutral-950/80 px-1.5 py-1 text-[10px] text-neutral-300">{image.filename}</span>
+                  {#if selectedImage !== null && imageId(selectedImage) === imageId(image)}<span class="pointer-events-none absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-ui-accent text-ui-accent-foreground text-[10px]">✓</span>{/if}
+                  {#if isVideoImage(image)}
+                    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div class="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-white translate-x-px" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                  {/if}
+                  {#if (selectedImage !== null && imageId(selectedImage) === imageId(image) || gallery.showGenerationTime) && image.generationTimeMs != null}
+                    <div
+                      class="absolute top-1.5 left-1.5 flex items-center gap-1 bg-black/65 text-white text-[10px] font-medium px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none"
+                      title={locale.t("generation.gen_time_label")}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                      </svg>
+                      {formatGenerationTime(image.generationTimeMs, locale.current)}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+</div>
+
+
 </div>

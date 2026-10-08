@@ -74,7 +74,7 @@
   }
 
   function setOwnSettings(enabled: boolean) {
-    if (!layer) return;
+    if (!layer || layer.locked || hasOwnSettings === enabled) return;
     canvasHistory.snapshotDocument(canvas.layers, canvas.activeLayerId);
     const layerId = layer.id;
     canvas.setLayerGenerationOverride(layerId, enabled);

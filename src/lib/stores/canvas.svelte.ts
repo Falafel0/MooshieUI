@@ -7,7 +7,7 @@ import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
 import type { RegionalPromptSelection } from "../types/index.js";
 import { captureLayer, maskToGrayscale } from "../utils/canvasLayerExport.js";
-import type { InpaintSettings } from "../utils/inpaintSettings.js";
+import { withMaskProcessingSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
@@ -1531,15 +1531,11 @@ class CanvasStore {
   }
 
   setLayerGenerationOverride(id: string, enabled: boolean) {
-    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? {
-      ...layer,
-      inpaintSettings: enabled ? { ...generation.inpaintSettings } : undefined,
-      maskGrow: enabled ? generation.growMaskBy : undefined,
-      inpaintWidth: enabled ? (layer.inpaintWidth ?? generation.width) : undefined,
-      inpaintHeight: enabled ? (layer.inpaintHeight ?? generation.height) : undefined,
-      inpaintAspectLocked: enabled ? (layer.inpaintAspectLocked ?? true) : undefined,
-      denoise: enabled && layer.type === "mask" ? generation.denoise : undefined,
-    } : layer);
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" && !layer.locked
+      ? withMaskProcessingSettings(layer, enabled ? {
+        settings: generation.inpaintSettings, width: generation.width, height: generation.height,
+      } : null)
+      : layer);
   }
 
   /** A mask defines the denoise and the mask settings. Prompts belong to regions

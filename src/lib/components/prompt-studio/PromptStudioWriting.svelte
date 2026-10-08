@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { FileText, Scale, Sparkles, LoaderCircle, Plus } from '@lucide/svelte';
-  import PromptTextarea from '../generation/PromptTextarea.svelte';
+  import PromptStudioPromptArea from './PromptStudioPromptArea.svelte';
   import PromptStudioDatabase from './PromptStudioDatabase.svelte';
   import PromptStudioConverter from './PromptStudioConverter.svelte';
   import { restoreTool, saveTool } from '../../prompt-studio/tool-state.js';
@@ -129,8 +129,8 @@
 
 <section class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={locale.t('prompt_studio.v2.writing_title')}>
   <nav class="flex shrink-0 items-center gap-1 border-b border-neutral-800 px-4 py-3" aria-label={locale.t('prompt_studio.v2.writing_views')}>
-    <button type="button" aria-pressed={view === 'text'} class="touch-target flex items-center gap-2 rounded-lg px-3 text-sm {view === 'text' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}" onclick={() => selectView('text')}><FileText size={16} />{locale.t('prompt_studio.v2.writing_text')}</button>
-    <button type="button" aria-pressed={view === 'weights'} class="touch-target flex items-center gap-2 rounded-lg px-3 text-sm {view === 'weights' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}" onclick={() => selectView('weights')}><Scale size={16} />{locale.t('prompt_studio.v2.writing_weights')}</button>
+    <button type="button" aria-pressed={view === 'text'} class="ui-control flex items-center gap-2 rounded-lg px-3 text-sm {view === 'text' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}" onclick={() => selectView('text')}><FileText size={16} />{locale.t('prompt_studio.v2.writing_text')}</button>
+    <button type="button" aria-pressed={view === 'weights'} class="ui-control flex items-center gap-2 rounded-lg px-3 text-sm {view === 'weights' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}" onclick={() => selectView('weights')}><Scale size={16} />{locale.t('prompt_studio.v2.writing_weights')}</button>
   </nav>
 
   <div class:hidden={view !== 'weights'} class="min-h-0 flex-1 overflow-y-auto overscroll-contain"><PromptStudioConverter /></div>
@@ -141,32 +141,24 @@
         <p class="mt-1 text-sm leading-relaxed text-neutral-400">{locale.t('prompt_studio.v2.writing_hint')}</p>
       </div>
 
-      <div>
-        {#if studio.rawPrompt !== undefined}
-          <div class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2">
-            <p class="min-w-40 flex-1 text-xs leading-relaxed text-neutral-400">{locale.t('prompt_studio.manual_prompt_hint')}</p>
-            <button type="button" class="touch-target shrink-0 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 hover:bg-neutral-800" onclick={() => studio.editPrompt(undefined)}>{locale.t('prompt_studio.return_constructor')}</button>
-          </div>
-        {/if}
-        <PromptTextarea bind:value={() => studio.basePrompt, value => studio.editPrompt(value)} rows={12} minHeight="min-h-72" storageKey="studio-writing-base" placeholder={locale.t('generation.prompts.positive_placeholder')} />
-      </div>
+      {#if active}<PromptStudioPromptArea large={true} />{/if}
 
       <details bind:open={assistantOpen} ontoggle={toggleAssistant} class="rounded-xl border border-neutral-800 bg-neutral-900">
-        <summary class="touch-target flex cursor-pointer items-center gap-2 rounded-xl px-4 py-3 text-sm text-neutral-300 focus-visible:outline-2 focus-visible:outline-amber-400"><Sparkles size={16} class="text-neutral-400" />{locale.t('prompt_studio.v2.ai_optional')}</summary>
+        <summary class="ui-control flex cursor-pointer items-center gap-2 rounded-xl px-4 py-3 text-sm text-neutral-300 focus-visible:outline-2 focus-visible:outline-indigo-400"><Sparkles size={16} class="text-neutral-400" />{locale.t('prompt_studio.v2.ai_optional')}</summary>
         <form class="space-y-3 border-t border-neutral-800 p-4" onsubmit={event => { event.preventDefault(); void compose(); }}>
           <p class="text-xs leading-relaxed text-neutral-400">{locale.t('prompt_studio.v2.ai_hint')}</p>
           <label class="block">
             <span class="mb-2 block text-xs text-neutral-300">{locale.t('prompt_studio.v2.ai_description')}</span>
-            <textarea bind:value={description} disabled={composing} rows="3" placeholder={locale.t('prompt_assistant.describe_placeholder')} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-200 outline-none focus:border-amber-400 disabled:opacity-60"></textarea>
+            <textarea bind:value={description} disabled={composing} rows="3" placeholder={locale.t('prompt_assistant.describe_placeholder')} class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm text-neutral-200 outline-none focus:border-indigo-400 disabled:opacity-60"></textarea>
           </label>
           <div class="flex flex-wrap items-center gap-3">
             <label class="flex items-center gap-2 text-xs text-neutral-400">
               {locale.t('prompt_assistant.length')}
-              <select bind:value={length} disabled={composing} class="touch-target rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-neutral-200 outline-none focus:border-amber-400">
+              <select bind:value={length} disabled={composing} class="ui-control rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-neutral-200 outline-none focus:border-indigo-400">
                 {#each ['short', 'medium', 'detailed'] as option}<option value={option}>{locale.t(`prompt_assistant.length_${option}`)}</option>{/each}
               </select>
             </label>
-            <button type="submit" disabled={composing || promptAssistant.isGenerating || !promptAssistant.isAvailable || !description.trim()} class="touch-target flex items-center gap-2 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-40">
+            <button type="submit" disabled={composing || promptAssistant.isGenerating || !promptAssistant.isAvailable || !description.trim()} class="ui-control flex items-center gap-2 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-40">
               {#if composing}<LoaderCircle size={15} class="animate-spin" />{locale.t('prompt_assistant.generating')}{:else}<Sparkles size={15} />{locale.t('prompt_studio.v2.ai_compose')}{/if}
             </button>
           </div>
@@ -176,15 +168,15 @@
             <div class="space-y-3 border-t border-neutral-800 pt-3">
               <label class="block">
                 <span class="mb-2 block text-xs text-neutral-300">{locale.t('prompt_studio.v2.ai_result')}</span>
-                <textarea bind:value={result} rows="5" class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm leading-relaxed text-neutral-200 outline-none focus:border-amber-400"></textarea>
+                <textarea bind:value={result} rows="5" class="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-sm leading-relaxed text-neutral-200 outline-none focus:border-indigo-400"></textarea>
               </label>
               <div class="flex flex-wrap items-end gap-3">
-                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.library.chunk_name')}</span><input bind:value={groupName} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-amber-400" /></label>
-                <button type="button" disabled={!result.trim() || !groupName.trim()} class="touch-target flex items-center gap-2 rounded-lg bg-amber-400 px-3 text-xs font-medium text-neutral-950 hover:bg-amber-300 disabled:opacity-40" onclick={addResult}><Plus size={15} />{locale.t('prompt_studio.v2.ai_add_group')}</button>
+                <label class="min-w-40 flex-1"><span class="mb-2 block text-xs text-neutral-400">{locale.t('prompt_studio.library.chunk_name')}</span><input bind:value={groupName} class="ui-control w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-200 outline-none focus:border-indigo-400" /></label>
+                <button type="button" disabled={!result.trim() || !groupName.trim()} class="ui-control flex items-center gap-2 rounded-lg bg-indigo-400 px-3 text-xs font-medium text-neutral-950 hover:bg-indigo-300 disabled:opacity-40" onclick={addResult}><Plus size={15} />{locale.t('prompt_studio.v2.ai_add_group')}</button>
               </div>
             </div>
           {/if}
-          {#if added}<p role="status" class="text-xs text-amber-300">{locale.t('prompt_studio.v2.ai_added')}</p>{/if}
+          {#if added}<p role="status" class="text-xs text-indigo-300">{locale.t('prompt_studio.v2.ai_added')}</p>{/if}
         </form>
       </details>
     </div>
