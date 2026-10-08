@@ -1,3 +1,30 @@
+## What's New in v2.3.9-fork.6
+
+### Desktop generation workspace
+- Keep sources and active prompt/instruction beside the canvas, with compact composition, sampling and output controls. Preserve custom section placement, prompt split view and saved editor heights.
+- Replace the flat bottom bar with a shared Shelf for Resources, Results and Workflow. Pin frequent panels, browse horizontal cards, open Models and LoRAs from the Inspector, and retain independent open/height state for each image mode.
+- Improve scoped settings search, keyboard navigation, command discovery, panel resizing and desktop density.
+
+### Inpainting, layers and ControlNet
+- Edit masks define generation passes. Prompt regions and ControlNet layers modify those passes without creating extra steps. Remove the duplicate left Inpaint Masks panel; select and inspect masks in the document layer panel.
+- Add layer groups, raster clipping, raster-alpha edit limits, linked ControlNet sources and explicit modifier targets. Broken links remain visible for repair and never silently expand their effect. Projects and undo preserve relationships and fractional painted erasure.
+- Distinguish ControlNet source images from processed control maps. Switch the Inspector and selected layer's canvas guide between them; linked raster references respect the processed preview. Guide opacity and visibility are independent of generation strength and participation.
+- Keep model selections explicit across ControlNet inventories and architecture changes, including Anima model patches. Preserve unavailable controls when changing providers and explain their availability in context.
+- Separate mask coverage, visual overlay opacity, raster opacity and density-based denoising. Respect raster-alpha limits after mask growth, blur and inversion. Zero base denoise preserves source pixels without lossy VAE reconstruction.
+- Consolidate brush/eraser, fill shapes, transform and view tools. Painted and mixed raster layers transform as a whole, brush thickness scales once, and source-placement edits support undo. Fill is one undo action; Clear pixels and Delete layer are distinct. Improve layer selection, drag ordering, locking, keyboard actions and canvas context guides.
+
+### Patchy integration
+- Add a pinnable Patchy panel in MooshieUI with live document preview and hierarchy, native MCP read-back, guarded layer visibility/opacity editing, undo/redo and composite import.
+- Use Patchy 1.07's documented `--attach` API. The panel remains beside the canvas and retains its session when collapsed. This is a MooshieUI integration panel; Patchy does not expose a dock-panel extension API.
+
+### Upstream and validation
+- Merge upstream through v2.3.16, including Krea 2 GGUF support fixes, stale managed-ComfyUI restart and optional encoder selection, while retaining the fork's Windows installer and signed updater pipeline.
+- Check the running ComfyUI inpainting-node contract before submitting density-aware or raster-limited edits. Remote servers need current Mooshie nodes and a restart when the UI requests it.
+- Validate frontend build, all 12 locales, 228 Node tests, 1004 Rust server library tests (7 ignored) plus the server test, 1050 Windows native tests (10 ignored), 21 CPU tensor tests and 5 release-artifact tests. Windows native compilation/tests and browser interaction checks cover the workspace changes.
+- GPU inference and an interactive Windows Patchy roundtrip were not exercised in the cloud environment; Patchy UI tests use simulated native-host replies.
+
+---
+
 ## What's New in v2.3.9-fork.5
 
 ### Prompt alternation sampler compatibility

@@ -179,7 +179,7 @@ means the user's own editor was in front — that one is never touched.
 |---|---|---|---|
 | ~~**A. Native hand-off**~~ | Implemented. See above. | - | - |
 | **B. WASM embed** | Build the `wasm-release` preset (emsdk 4.0.7 plus Qt 6.10.3 `wasm_multithread`, static) and ship the bundle inside the app; the WebView serves it locally | Restores an in-app editing panel and works in browser mode | Multi-GB Qt-for-wasm provisioning in CI, COOP/COEP cross-origin isolation required by the threaded build, a ~4 GB memory ceiling, and no printing, scanner import or CLI in the browser build |
-| **C. MCP / scripting** | Live read-back uses `patchy-mcp --attach`; automated edits are future work | The existing editor stays open while its pixels are read | Mutating scripts would need state-token checks and explicit user actions |
+| **C. MCP / scripting** | Live read-back and guarded visibility/opacity edits use `patchy-mcp --attach`; broader editing automation remains future work | The existing editor stays open while its pixels are read | Implemented layer mutations require expected-state checks, valid unlocked layer IDs and explicit user actions |
 
 A note on PSD: MooshieUI sends one flattened PNG. Patchy may save a layered PSD/PSB beside it; the read path flattens that file back to one PNG. The four canvas targets do not reconstruct Patchy's layers.
 
