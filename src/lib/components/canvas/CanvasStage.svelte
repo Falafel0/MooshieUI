@@ -256,7 +256,7 @@
     selectionTransformer.on('transformstart', () => {
       if (canvas.activeTool === 'canvasResize') return;
       if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId);
-      isTransformingRaster = canvas.activeLayer?.type === 'raster';
+      isTransformingRaster = selectionTransformer?.nodes()[0]?.name() === 'raster-asset';
       beginOnCanvasTransform();
     });
     selectionTransformer.on('transform', applyOnCanvasTransform);
@@ -337,9 +337,8 @@
    * raster. This is why the handles sit where they should: Konva's own client
    * rect would add a stroke's width to the box and the box would lie. */
   function layerContentBounds(layer: CanvasLayer): BoxGeometry | null {
-    if (layer.type === 'raster') {
+    if (layer.type === 'raster' && layer.image && !hasRasterPaint(layer.id)) {
       const image = layer.image;
-      if (!image) return null;
       // Raster selections use the real Konva.Image below. Keep this fallback
       // upright for callers which run before the asset node has been created;
       // an axis-aligned proxy for a rotated image used to make the first resize
@@ -366,16 +365,37 @@
     ].join('|');
     if (contentBoundsCache?.key === key) return contentBoundsCache.bounds;
 
-    const source = canvas.exportMaskLayer(layer.id);
+    const source = layer.type === 'raster' ? canvas.exportRasterLayer(layer.id, { raw: true }) : canvas.exportMaskLayer(layer.id);
     if (!source) {
       contentBoundsCache = { key, bounds: null };
       return null;
     }
-    const processed = buildProcessedMask(source, grow, blur, invert, tint, layer.targetRasterId);
-    const bounds = processed.bounds;
+    const bounds = layer.type === 'raster' ? paintedAlphaBounds(source) : buildProcessedMask(source, grow, blur, invert, tint, layer.targetRasterId).bounds;
     const result = bounds ? clampToDocument(identityBox(bounds.x, bounds.y, bounds.width, bounds.height), canvas.canvasWidth, canvas.canvasHeight) : null;
     contentBoundsCache = { key, bounds: result };
     return result;
+  }
+
+  function hasRasterPaint(id: string): boolean {
+    return konvaLayers.get(id)?.getChildren().some(node => node.name() !== 'raster-asset' && node.name() !== 'raster-clip-mask') ?? false;
+  }
+
+  /** Selection bounds depend on alpha, including dark paint and fractional erasure. */
+  function paintedAlphaBounds(source: HTMLCanvasElement) {
+    const scale = Math.min(1, 512 / Math.max(source.width, source.height));
+    const preview = document.createElement('canvas');
+    preview.width = Math.max(1, Math.round(source.width * scale));
+    preview.height = Math.max(1, Math.round(source.height * scale));
+    const ctx = preview.getContext('2d')!;
+    ctx.drawImage(source, 0, 0, preview.width, preview.height);
+    const pixels = ctx.getImageData(0, 0, preview.width, preview.height).data;
+    let minX = preview.width, minY = preview.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < preview.height; y++) for (let x = 0; x < preview.width; x++) {
+      if (pixels[(y * preview.width + x) * 4 + 3] > 0) {
+        minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+      }
+    }
+    return maxX < 0 ? null : { x: minX / scale, y: minY / scale, width: (maxX - minX + 1) / scale, height: (maxY - minY + 1) / scale };
   }
 
   function nodeGeometry(node: Konva.Node): NodeGeometry {
@@ -394,7 +414,7 @@
 
   function beginOnCanvasTransform() {
     const layer = canvas.activeLayer;
-    if (layer?.type === 'raster') {
+    if (isTransformingRaster) {
       transformBase = null;
       return;
     }
@@ -481,6 +501,7 @@
     }
     isTransformingRaster = false;
     transformBase = null;
+    canvas.bumpPaintRevision();
     resetOverlayTransform();
     scheduleThumbRefresh(layer.id);
     selectionTransformer.forceUpdate();
@@ -519,7 +540,7 @@
         rotationSnapTolerance: 4,
         enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
       });
-      if (canTransform && layer.type === 'raster' && layer.image) {
+      if (canTransform && layer.type === 'raster' && layer.image && !hasRasterPaint(layer.id)) {
         // Do not transform an axis-aligned stand-in for a raster. Konva's image
         // node owns its actual rotation/flip pivot, which keeps its pixels and
         // handles in the same coordinate system throughout a resize.
@@ -1042,6 +1063,7 @@
         }
         const hasLiveRasterGeometry =
           (isTransformingRaster && layer.id === canvas.activeLayerId) ||
+          (transformBase !== null && layer.id === canvas.activeLayerId) ||
           (isMovingLayer && layer.id === movingLayerId);
         if (!hasLiveRasterGeometry) {
           node.setAttrs({ image: node.image(), x: asset.x + (asset.flipX ? asset.width : 0), y: asset.y + (asset.flipY ? asset.height : 0), width: asset.width, height: asset.height, rotation: asset.rotation, scaleX: asset.flipX ? -1 : 1, scaleY: asset.flipY ? -1 : 1 });
@@ -1856,6 +1878,7 @@
     moveStartPos = null;
     moveNodeStarts = [];
     canvas.endMove();
+    canvas.bumpPaintRevision();
     resetOverlayTransform();
     selectionTransformer?.forceUpdate();
     // The handles and the guides must sit on the moved content, and a moved

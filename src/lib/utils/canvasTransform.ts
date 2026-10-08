@@ -51,7 +51,6 @@ export function projectNode(base: NodeGeometry, box: BoxGeometry, reference: Box
   const localY = (base.y - reference.y) * sy;
   const cos = Math.cos(deltaRotation * DEG);
   const sin = Math.sin(deltaRotation * DEG);
-  const weight = (Math.abs(sx) + Math.abs(sy)) / 2;
   const projected: NodeGeometry = {
     x: box.x + localX * cos - localY * sin,
     y: box.y + localX * sin + localY * cos,
@@ -59,7 +58,9 @@ export function projectNode(base: NodeGeometry, box: BoxGeometry, reference: Box
     scaleX: base.scaleX * sx,
     scaleY: base.scaleY * sy,
   };
-  if (base.strokeWidth !== undefined) projected.strokeWidth = base.strokeWidth * weight;
+  // Konva scales the stroke with the node. Multiplying its width here as well
+  // would scale brush/eraser thickness twice (2x resize produced a 4x stroke).
+  if (base.strokeWidth !== undefined) projected.strokeWidth = base.strokeWidth;
   return projected;
 }
 

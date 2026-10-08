@@ -3392,6 +3392,7 @@ const ru: Record<string, string> = {
   "canvas.layer_negative_prompt": "Негативный промпт",
   "canvas.layer_prompt_optional": "Необязательно — основной промпт сохраняется",
   "canvas.mask_processing_summary": "размытие {blur}px",
+  "canvas.source_placement": "Положение исходного изображения",
   "canvas.transform": "Трансформация",
   "canvas.resize_document_on_canvas": "Изменить размер холста на холсте",
   "canvas.image_x": "Позиция X",

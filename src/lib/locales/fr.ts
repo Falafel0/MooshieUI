@@ -3417,6 +3417,7 @@ const fr: Record<string, string> = {
   "canvas.layer_negative_prompt": "Negative prompt",
   "canvas.layer_prompt_optional": "Optional — the document prompt is still used",
   "canvas.mask_processing_summary": "blur {blur}px",
+  "canvas.source_placement": "Placement de l’image source",
   "canvas.transform": "Transform",
   "canvas.resize_document_on_canvas": "Resize canvas on canvas",
   "canvas.image_x": "X position",

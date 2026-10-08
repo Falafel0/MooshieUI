@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { canvas } from "../../../stores/canvas.svelte.js";
+  import { canvas, type CanvasLayer } from "../../../stores/canvas.svelte.js";
   import { generation } from "../../../stores/generation.svelte.js";
   import { locale } from "../../../stores/locale.svelte.js";
   import { canvasHistory } from "../../../stores/canvasHistory.svelte.js";
@@ -48,6 +48,13 @@
   function setOpacity(value: number) {
     if (!layer || layer.opacity === value || !beginSliderEdit()) return;
     canvas.setLayerOpacity(layer.id, value, false);
+  }
+
+  function setSourcePlacement(patch: Partial<NonNullable<CanvasLayer['image']>>) {
+    const image = layer?.image;
+    if (!layer || !image || layer.locked || Object.entries(patch).every(([key, value]) => image[key as keyof typeof image] === value)) return;
+    canvasHistory.snapshot(layer.id);
+    canvas.updateLayerImage(layer.id, patch);
   }
 
   function setCoverage(value: number) {
@@ -315,15 +322,15 @@
 
       {#if layer.image && layer.type === 'raster'}
         <fieldset disabled={layer.locked} class="border-t border-neutral-800 pt-2 disabled:opacity-50">
-          <legend class="mb-1 text-[11px] font-medium text-neutral-300">{locale.t('canvas.transform')}</legend>
+          <legend class="mb-1 text-[11px] font-medium text-neutral-300">{locale.t('canvas.source_placement')}</legend>
           <div class="grid grid-cols-3 gap-1.5 text-[11px] text-neutral-500">
             {#each ['x', 'y', 'width', 'height', 'rotation'] as key}
-              <label>{locale.t('canvas.image_' + key)}<input type="number" step="1" min={key === 'width' || key === 'height' ? 1 : undefined} value={layer.image[key as 'x']} onchange={(event) => { const value = Number(event.currentTarget.value); if (Number.isFinite(value)) canvas.updateLayerImage(layer.id, { [key]: key === 'width' || key === 'height' ? Math.max(1, value) : value }); }} class="mt-0.5 h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-1.5 text-[11px] text-neutral-200" /></label>
+              <label>{locale.t('canvas.image_' + key)}<input type="number" step="1" min={key === 'width' || key === 'height' ? 1 : undefined} value={layer.image[key as 'x']} onchange={(event) => { const value = Number(event.currentTarget.value); if (Number.isFinite(value)) setSourcePlacement({ [key]: key === 'width' || key === 'height' ? Math.max(1, value) : value }); }} class="mt-0.5 h-7 w-full rounded border border-neutral-700 bg-neutral-950 px-1.5 text-[11px] text-neutral-200" /></label>
             {/each}
           </div>
           <div class="mt-1.5 grid grid-cols-2 gap-1.5">
-            <button type="button" class="h-7 rounded border border-neutral-700 text-[11px] text-neutral-300 hover:border-sky-500" onclick={() => canvas.updateLayerImage(layer.id, { flipX: !layer.image!.flipX })}>{locale.t('canvas.flip_x')}</button>
-            <button type="button" class="h-7 rounded border border-neutral-700 text-[11px] text-neutral-300 hover:border-sky-500" onclick={() => canvas.updateLayerImage(layer.id, { flipY: !layer.image!.flipY })}>{locale.t('canvas.flip_y')}</button>
+            <button type="button" class="h-7 rounded border border-neutral-700 text-[11px] text-neutral-300 hover:border-sky-500" onclick={() => setSourcePlacement({ flipX: !layer.image!.flipX })}>{locale.t('canvas.flip_x')}</button>
+            <button type="button" class="h-7 rounded border border-neutral-700 text-[11px] text-neutral-300 hover:border-sky-500" onclick={() => setSourcePlacement({ flipY: !layer.image!.flipY })}>{locale.t('canvas.flip_y')}</button>
           </div>
         </fieldset>
       {/if}
