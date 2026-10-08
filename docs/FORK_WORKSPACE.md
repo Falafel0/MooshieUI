@@ -35,7 +35,7 @@ The pills are the prompt editor. Click a pill to edit its text, including its we
 
 Undo and redo restore edits, removals, weights and pin changes. Clear prompt clears the output and disables chunks without deleting their content; Undo restores it. Text and chunk tools manage enabled chunks, their content and reusable saved chunks. Approximate CLIP tokens and syntax warnings help review the prompt; the counter is an estimate rather than a model tokenizer.
 
-Use Review & send to choose Create, Transform or Inpaint, positive or negative, and append/prepend/replace. The dialog shows the resulting text before applying. Named prompt blocks remain available. Ctrl+Enter commits the active pill and opens this review. Cancel leaves generation unchanged.
+Use Review & send to choose Text to Image, Image to Image or Inpainting, positive or negative, and append/prepend/replace. The dialog shows the resulting text before applying. Named prompt blocks remain available. Ctrl+Enter commits the active pill and opens this review. Cancel leaves generation unchanged.
 
 ## Prompt alternation
 
