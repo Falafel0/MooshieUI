@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { effectiveLayerVisibility } from "./lib/utils/layerRelations.js";
+  import { patchyDocumentMatches } from "./lib/utils/patchyHandoff.js";
   import { onMount, onDestroy, untrack } from "svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, startHeartbeat, getAuthToken, setAuthToken, setAuthUser, authHeaders, wasRememberMe, userScopedKey } from "./lib/utils/ipc.js";
   import { useMobileLayout } from "./lib/utils/device.js";
@@ -24,7 +26,11 @@
   import { uploadImageBytes, getConfig, updateConfig, readImageMetadata, getQueue, recoverPromptOutputs, readTempImage, readTempImageDisplay } from "./lib/utils/api.js";
   import { loadOutputImageForGenerationInput, uploadOutputImageForGenerationInput, sendImageToVideoFrame, addImageToVideoReference, videoReferenceSlotsFree } from "./lib/utils/galleryActions.js";
   import { H3_MAX_REF_IMAGES } from "./lib/utils/videoParams.js";
-  import { videoWorkspaceVisible, musicWorkspaceVisible } from "./lib/utils/workspaces.js";
+  import { videoWorkspaceVisible, musicWorkspaceVisible, availableWorkspaces, availableSettingsShortcuts, type WorkspaceId } from "./lib/utils/workspaces.js";
+  import { workspace } from "./lib/stores/workspace.svelte.js";
+  import { commands } from "./lib/stores/commands.svelte.js";
+  import CommandPalette from "./lib/components/ui/CommandPalette.svelte";
+  import { Search } from "@lucide/svelte";
   import { UPSCALE_ACTION } from "./lib/utils/novelaiEnhance.js";
   import { prepareOutputImageForEditMode } from "./lib/utils/editImagePreparation.js";
   import { shouldSuppressRegionalChainGallerySave, clearRegionalChainGallerySuppress } from "./lib/utils/regionalChainGallery.js";
@@ -33,6 +39,8 @@
   import { music } from "./lib/stores/music.svelte.js";
   import { musicCover } from "./lib/stores/musicCover.svelte.js";
   import { stopScorePreview } from "./lib/utils/musicPreview.js";
+  untrack(() => generation.setDocumentControlProvider(() => canvas.layers.map(layer => ({ ...layer, visible: effectiveLayerVisibility(layer, canvas.groups) }))));
+
   $effect(() => { const id = musicCover.nativeJob?.prompt_id; if (id) untrack(() => music.rememberPrompt(id)); });
   $effect(() => { if (music.playing) untrack(stopScorePreview); });
   import { autocomplete } from "./lib/stores/autocomplete.svelte.js";
@@ -175,6 +183,11 @@
       : `sim-${accessibility.visionSimulatorMode}`
   );
 
+  $effect(() => {
+    document.documentElement.dataset.density = accessibility.density;
+    document.documentElement.dataset.motion = accessibility.motion;
+  });
+
   let lastProgressEventAt = 0;
 
   /** Images received via WebSocket during generation, keyed by prompt_id. */
@@ -187,7 +200,6 @@
   const FETCH_TIMEOUT_MS = 45_000;
   const GENERATION_DONE_TOAST_VISIBLE_MS = 6_000;
   const GENERATION_DONE_TOAST_EXIT_MS = 220;
-  type PrimaryPage = "generate" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "studio" | "settings";
   type GenerationDoneToast = {
     id: number;
     imageUrl: string;
@@ -502,7 +514,7 @@
       // Skip the base img2img pass — the user wants to upscale this image
       // as-is, not regenerate it first.
       generation.refineOnly = true;
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.closeLightbox();
       gallery.showToast(locale.t("gallery.toast.loaded_upscale"), "success");
     } catch (e) {
@@ -514,7 +526,7 @@
   async function makeVideoFromImage(image: OutputImage) {
     try {
       await sendImageToVideoFrame(image);
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.closeLightbox();
       gallery.showToast(locale.t("gallery.toast.loaded_video_frame"), "success");
     } catch (e) {
@@ -533,7 +545,7 @@
     }
     try {
       const slot = await addImageToVideoReference(image);
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.closeLightbox();
       gallery.showToast(
         locale.t("gallery.toast.loaded_video_reference", { index: slot }),
@@ -585,7 +597,7 @@
         }
       }
 
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.closeLightbox();
 
       gallery.showToast(
@@ -736,24 +748,42 @@
   }
 
   let setupComplete = $state<boolean | null>(null); // null = loading
-  let currentPage = $state<PrimaryPage>("generate");
-  let mobileCurrentTab = $state<PrimaryPage>("generate");
-  let mobileGenerateNavigationVersion = $state(0);
   let generationDoneToast = $state<GenerationDoneToast | null>(null);
 
-  function openGenerationWorkspace(workspace: "image" | "video") {
-    generation.setMode(workspace === "video" ? "video" : generation.lastImageMode);
-    if (workspace === "video") canvas.isCanvasMode = false;
-    currentPage = "generate";
+  function openGenerationWorkspace(target: "image" | "video") {
+    generation.setMode(target === "video" ? "video" : generation.lastImageMode);
+    if (target === "video") canvas.isCanvasMode = false;
+    workspace.current = "generate";
   }
 
   // Auth gate state (browser mode LAN access)
   let authRequired = $state(false);
   let authChecked = $state(false);
   let userRole = $state<"admin" | "moderator" | "user" | "anonymous">("admin");
-  /** Settings section requested by a mooshie:open-settings event, or null. */
-  let settingsSection = $state<string | null>(null);
   let canUseModelhub = $state(true);
+
+  function navigateWorkspace(id: WorkspaceId) {
+    if (!availableWorkspaces({ canUseModelhub, canUseVideo: !generation.isNovelAi }).some((entry) => entry.id === id)) return;
+    if (id === "generate" || id === "video") openGenerationWorkspace(id === "video" ? "video" : "image");
+    else workspace.open(id);
+  }
+
+  $effect(() => {
+    commands.register([
+      ...availableWorkspaces({ canUseModelhub, canUseVideo: !generation.isNovelAi }).map((entry) => ({
+        id: `workspace.${entry.id}`,
+        labelKey: entry.labelKey,
+        keywords: entry.keywords,
+        run: () => navigateWorkspace(entry.id),
+      })),
+      ...availableSettingsShortcuts(isBrowserMode).map((entry) => ({
+        id: `settings.${entry.id}`,
+        labelKey: entry.labelKey,
+        keywords: entry.keywords,
+        run: () => workspace.openSettings(entry.id),
+      })),
+    ]);
+  });
   let loginUser = $state("");
   let loginPass = $state("");
   let loginError = $state<string | null>(null);
@@ -883,7 +913,7 @@
   }
   let versionTapCount = $state(0);
   function handleVersionTap() {
-    if (currentPage !== "settings") return;
+    if (workspace.current !== "settings") return;
     versionTapCount++;
     if (versionTapCount >= 10) {
       versionTapCount = 0;
@@ -1022,7 +1052,12 @@
     target: "base" | "raster" | "mask" | "region",
     suggestedName: string,
     sourceBytes?: number[],
+    exportedSourceVersion?: number,
   ) {
+    if (!patchyDocumentMatches(exportedSourceVersion, canvas.inpaintSourceVersion)) {
+      gallery.showToast(locale.t("patchy.document_changed"), "error");
+      return false;
+    }
     const sourceVersion = canvas.inpaintSourceVersion;
     const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
     let previewUrl: string | null = URL.createObjectURL(blob);
@@ -1080,7 +1115,7 @@
       generation.mode = "inpainting";
       canvas.isCanvasMode = true;
       canvas.selectedWorkspaceSection = "layers";
-      currentPage = "generate";
+      workspace.current = "generate";
 
       if (canvas.layers.length === 0) {
         generation.width = dimensions.width;
@@ -1251,14 +1286,14 @@
     // Keep the existing UX where inserting from the gallery page snaps the
     // user back to the generate view so they can see the prompt update.
     if (!artistInsert.pending) {
-      currentPage = "generate";
+      workspace.current = "generate";
     }
   }
 
   function handleCharacterInsert(character: AnimadexCharacter) {
     characterInsert.request(character);
     if (!characterInsert.pending) {
-      currentPage = "generate";
+      workspace.current = "generate";
     }
   }
 
@@ -1351,12 +1386,12 @@
 
   function finishCharacterInsert() {
     characterInsert.dismiss();
-    currentPage = "generate";
+    workspace.current = "generate";
   }
 
   function applyArtistTag(withAt: string, mode: "add" | "replace") {
     artistInsert.apply(withAt, mode);
-    currentPage = "generate";
+    workspace.current = "generate";
   }
   let interrogateResult = $state<InterrogationResult | null>(null);
   let interrogateLoading = $state(false);
@@ -1565,7 +1600,7 @@
       const name = await uploadModelPreviewImage(url, "model_preview.png");
       generation.mode = "img2img";
       generation.setModeInput('img2img', { input: name, mask: null, preview: url, aspect: null });
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.showToast(locale.t("gallery.toast.loaded_img2img"), "success");
     } catch (e) {
       console.error("Failed to load preview for img2img:", e);
@@ -1586,7 +1621,7 @@
         generation.samplerName = "euler_ancestral";
       }
       generation.saveSettings();
-      currentPage = "generate";
+      workspace.current = "generate";
       gallery.showToast(locale.t("generation.style_transfer.reference_loaded"), "success");
 
       // Actually ensure style transfer nodes are installed and take action when the
@@ -2514,7 +2549,7 @@
   }
 
   function viewingGeneratePage(): boolean {
-    return useMobileLayout ? mobileCurrentTab === "generate" : currentPage === "generate";
+    return workspace.current === "generate";
   }
 
   function dismissGenerationDoneToast() {
@@ -2572,11 +2607,7 @@
   }
 
   function openGenerateFromDoneToast() {
-    currentPage = "generate";
-    if (useMobileLayout) {
-      mobileCurrentTab = "generate";
-      mobileGenerateNavigationVersion += 1;
-    }
+    workspace.current = "generate";
     dismissGenerationDoneToast();
   }
 
@@ -3649,13 +3680,12 @@
     };
     window.addEventListener("mooshie:model-preview-action", modelPreviewActionHandler);
 
-    // Settings asked for by another view. The settings page is conditionally mounted, so
-    // the requested section travels down as a prop instead of a second listener
-    // on that page, which would miss an event fired as it mounts.
+    // Settings are conditionally mounted in either shell. Keep the request in
+    // shared workspace state so the page can read it after mounting.
     settingsRequestHandler = (event: Event) => {
       const detail = (event as CustomEvent<{ section?: string }>).detail;
-      settingsSection = detail?.section ?? null;
-      currentPage = "settings";
+      if (detail?.section) workspace.openSettings(detail.section);
+      else workspace.open("settings");
     };
     window.addEventListener("mooshie:open-settings", settingsRequestHandler);
 
@@ -3907,9 +3937,7 @@
   <MobileApp
     canUseModelhub={canUseModelhub}
     {userRole}
-    navigationTarget="generate"
-    navigationVersion={mobileGenerateNavigationVersion}
-    onTabChange={(tab) => (mobileCurrentTab = tab)}
+    onNavigate={navigateWorkspace}
   />
 {:else}
 <div class="flex h-full flex-col bg-neutral-950">
@@ -3947,14 +3975,14 @@
     >
     <div class="relative mx-auto">
       <button
-        class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
+        class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {workspace.current ===
         'generate' && generation.mode !== 'video'
           ? 'bg-indigo-600 text-white'
           : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
         onclick={() => openGenerationWorkspace("image")}
         title={locale.t('nav.generate')}
         aria-label={locale.t('nav.generate')}
-        aria-current={currentPage === "generate" && generation.mode !== "video" ? "page" : undefined}
+        aria-current={workspace.current === "generate" && generation.mode !== "video" ? "page" : undefined}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -3971,13 +3999,13 @@
           >
           </button>
           <button
-          class="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage === 'studio'
+          class="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors {workspace.current === 'studio'
             ? 'bg-indigo-600 text-white'
             : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
-          onclick={() => (currentPage = "studio")}
+          onclick={() => (workspace.current = "studio")}
           title={locale.t('nav.prompt_studio')}
           aria-label={locale.t('nav.prompt_studio')}
-          aria-current={currentPage === "studio" ? "page" : undefined}
+          aria-current={workspace.current === "studio" ? "page" : undefined}
           >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -4012,7 +4040,7 @@
           {/if}
         </div>
       {/if}
-      {#if progress.isGenerating && progress.currentMode !== "video" && progress.totalSteps > 0 && (currentPage !== "generate" || generation.mode === "video")}
+      {#if progress.isGenerating && progress.currentMode !== "video" && progress.totalSteps > 0 && (workspace.current !== "generate" || generation.mode === "video")}
         <div class="absolute bottom-0 left-0.5 right-0.5 h-0.5 bg-neutral-700 rounded-full overflow-hidden pointer-events-none">
           <div
             class="h-full rounded-full transition-[width] duration-200 {progress.wasUpscaled && progress.samplingPass >= 2 ? 'bg-emerald-400' : 'bg-indigo-400'}"
@@ -4024,11 +4052,11 @@
     {#if !generation.isNovelAi && videoWorkspaceVisible}
       <div class="relative mx-auto">
         <button
-          class="touch-target flex items-center justify-center rounded-lg transition-colors {currentPage === 'generate' && generation.mode === 'video' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+          class="touch-target flex items-center justify-center rounded-lg transition-colors {workspace.current === 'generate' && generation.mode === 'video' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
           onclick={() => openGenerationWorkspace("video")}
           title={locale.t("generation.mode.video")}
           aria-label={locale.t("generation.mode.video")}
-          aria-current={currentPage === "generate" && generation.mode === "video" ? "page" : undefined}
+          aria-current={workspace.current === "generate" && generation.mode === "video" ? "page" : undefined}
         >
           <svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg>
         </button>
@@ -4041,8 +4069,8 @@
     {/if}
     {#if musicWorkspaceVisible}
       <button
-        class="touch-target mx-auto flex items-center justify-center rounded-lg transition-colors {currentPage === 'music' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
-        onclick={() => (currentPage = "music")}
+        class="touch-target mx-auto flex items-center justify-center rounded-lg transition-colors {workspace.current === 'music' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+        onclick={() => (workspace.current = "music")}
         title={locale.t("nav.music")}
         aria-label={locale.t("nav.music")}
       >
@@ -4050,11 +4078,11 @@
       </button>
     {/if}
     <button
-      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
+      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {workspace.current ===
       'gallery'
         ? 'bg-indigo-600 text-white'
         : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
-      onclick={() => (currentPage = "gallery")}
+      onclick={() => (workspace.current = "gallery")}
       title={locale.t('nav.gallery')}
     >
       <svg
@@ -4081,11 +4109,11 @@
     </button>
     {#if canUseModelhub}
     <button
-      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
+      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {workspace.current ===
       'modelhub'
         ? 'bg-indigo-600 text-white'
         : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
-      onclick={() => (currentPage = "modelhub")}
+      onclick={() => (workspace.current = "modelhub")}
       title={locale.t('nav.modelhub')}
     >
       <svg
@@ -4102,12 +4130,13 @@
     </button>
     {/if}
     <button
-      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
-      'artists'
+      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {(workspace.current === "artists" || workspace.current === "characters")
         ? 'bg-indigo-600 text-white'
         : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
-      onclick={() => (currentPage = "artists")}
+      onclick={() => (workspace.current = "artists")}
       title={locale.t("nav.artist_gallery")}
+      aria-label={locale.t("nav.artist_gallery")}
+      aria-current={workspace.current === "artists" || workspace.current === "characters" ? "page" : undefined}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -4121,6 +4150,7 @@
         ><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-7 8-7s8 3 8 7" /></svg
       >
     </button>
+    <button type="button" class="ui-icon-button mx-auto flex items-center justify-center rounded-lg text-neutral-400 hover:bg-ui-selected hover:text-neutral-100" onclick={() => commands.show()} aria-label={locale.t("commands.open")} title={locale.t("commands.open")}><Search size={18} /></button>
     <div class="flex-1"></div>
 
     <div class="relative mx-auto">
@@ -4181,11 +4211,11 @@
     </div>
 
     <button
-      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {currentPage ===
+      class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors {workspace.current ===
       'settings'
         ? 'bg-indigo-600 text-white'
         : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'} mx-auto"
-      onclick={() => (currentPage = "settings")}
+      onclick={() => (workspace.current = "settings")}
       title={locale.t('nav.settings')}
     >
       <svg
@@ -4203,7 +4233,7 @@
       >
     </button>
 
-    <NotificationBell onOpenSettings={() => (currentPage = "settings")} />
+    <NotificationBell onOpenSettings={() => (workspace.current = "settings")} />
 
     <!-- Connection status dot -->
     <div
@@ -4339,32 +4369,39 @@
       </div>
     {/if}
     <div class="relative flex-1 overflow-hidden md:min-h-0 md:rounded-xl md:bg-neutral-950" inert={startup.locked}>
-    {#if currentPage === "generate"}
+    {#if workspace.current === "generate"}
       <GenerationPage oneditpatchy={isTauri ? editInPatchy : undefined} />
-    {:else if currentPage === "music"}
+    {:else if workspace.current === "music"}
       <MusicPage {userRole} />
-    {:else if currentPage === "gallery"}
-      <GalleryPage onSwitchToGenerate={() => (currentPage = "generate")} />
-    {:else if currentPage === "modelhub"}
+    {:else if workspace.current === "gallery"}
+      <GalleryPage onSwitchToGenerate={() => (workspace.current = "generate")} />
+    {:else if workspace.current === "modelhub"}
       <ModelHubPage />
-    {:else if currentPage === "artists"}
+    {:else if workspace.current === "artists" || workspace.current === "characters"}
+      {#key workspace.current}
       <ArtistGalleryPage
+        initialTab={workspace.current === "characters" ? "characters" : "artists"}
         manifestUrl={connection.artistGalleryManifestUrl}
         oninsertTag={handleArtistTagInsert}
         oninsertCharacter={handleCharacterInsert}
         ongeneratePreview={handleArtistGeneratePreview}
         previewStatus={artistPreviewStatus}
       />
-    {:else if currentPage === "studio"}
-      <PromptStudio onApply={() => (currentPage = "generate")} />
-    {:else if currentPage === "settings"}
-      <SettingsPage {userRole} section={settingsSection} />
+      {/key}
+    {:else if workspace.current === "studio"}
+      <PromptStudio onApply={() => (workspace.current = "generate")} />
+    {:else if workspace.current === "settings"}
+      <SettingsPage {userRole} />
     {/if}
     </div>
   </main>
 </div>
-<MusicBottomPlayer onOpen={() => { music.view = "generate"; currentPage = "music"; }} />
+<MusicBottomPlayer onOpen={() => { music.view = "generate"; workspace.current = "music"; }} />
 </div>
+{/if}
+
+{#if setupComplete && !authRequired}
+  <CommandPalette />
 {/if}
 
 <!-- Lightbox overlay -->

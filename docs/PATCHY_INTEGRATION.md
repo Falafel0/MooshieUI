@@ -1,6 +1,42 @@
 # Replacing Photopea with Patchy
 
-Status: **native hand-off and live read-back implemented, plus automatic installation and process lifecycle**. Photopea is gone; MooshieUI installs Patchy, hands it a document, and can read either a saved result or the unsaved canvas of its open window. The WASM embed remains future work.
+Status: **native hand-off, a pinnable workspace panel, live layer properties and read-back implemented, plus automatic installation and process lifecycle**. Photopea is gone; MooshieUI installs Patchy, hands it a document, and can read either a saved result or the unsaved canvas of its open window. The WASM embed remains future work.
+
+## Workspace panel and the Patchy 1.07 contract
+
+Pin the Patchy panel to keep the MooshieUI canvas interactive. Collapse keeps the
+handoff and live session intact; closing disconnects only the MCP proxy, leaving
+Patchy's unsaved document and history open. The panel shows the actual document
+hierarchy, visibility, locks and opacity (0–100) from `get_state`. Visibility and
+opacity actions validate the layer ID and value, reject locked layers, and use
+`expectedState` before creating an undoable edit. Undo/Redo and adding the source
+as a reference layer are available without manually running a script.
+
+This uses the packaged **native `patchy-mcp --attach`** connector. No external
+JavaScript runtime or desktop input automation is required. The optional return
+menu script remains a shortcut; live preview and import do not depend on it.
+A layer list is not a layered import: read-back imports the canvas composite.
+Mask/region imports keep their established painted-coverage rules.
+
+The following upstream documentation was checked at the pinned v1.07 source:
+
+- [Local AI control](https://github.com/SethRobinson/Patchy/blob/v1.07/docs/ai-control.md):
+  attached workspaces, layer state, previews, mutations, expected-state guards.
+- [Scripting](https://github.com/SethRobinson/Patchy/blob/v1.07/docs/scripting.md)
+  and [public API types](https://github.com/SethRobinson/Patchy/blob/v1.07/scripts/bundled/patchy.d.ts):
+  document/layer lookup and native property setters.
+- [Plugins](https://github.com/SethRobinson/Patchy/blob/v1.07/docs/plugins.md):
+  8BF is a Windows filter host; the native C ABI is declared but has no loader.
+  Neither exposes an extension API for persistent editor panels.
+
+The MooshieUI panel is a supported native integration, not a dock plugin loaded
+inside Patchy. Embedding the editor or implementing a new Patchy UI plugin host
+requires a separate Patchy build. Those capabilities are not included here.
+
+Validation: native command tests run in Windows CI; the browser UI contract check
+uses mocked host responses. A real Windows interactive roundtrip and a GPU
+inpainting session must be qualified separately; local Linux checks do not prove
+those environments.
 
 ## What Patchy is
 
@@ -9,7 +45,7 @@ Status: **native hand-off and live read-back implemented, plus automatic install
 | Source | https://github.com/SethRobinson/Patchy |
 | Licence | MIT, Copyright (c) 2026 Seth A. Robinson |
 | Vendored at | `third-party/patchy` (shallow submodule) |
-| Pinned commit | `7d14d1f6ede2dc8fb52c11eefcc7cc8783473711` (v0.99) |
+| Pinned commit | `75406d5` (v1.07; release of 2026-10-07) |
 | Language | C++ / Qt 6 |
 | Targets | Windows, macOS, Linux desktop builds, plus an Emscripten WebAssembly build of the same editor |
 | Automation | JavaScript scripting API, `--run-script`, `--headless`, CLI screenshots, and a separate MCP server binary (`patchy-mcp.exe`) |
@@ -76,7 +112,9 @@ the request fail safely rather than editing a stale document. The reference
 image is imported through Patchy's `importFilesAsLayers` script API and the
 temporary copy is removed afterward. No plug-in is installed inside Patchy.
 
-Mask and region imports compare the edited pixels with the exact PNG sent to Patchy, so the original image's brightness cannot turn the whole canvas into a mask. A size mismatch is rejected for masks and regions. The canvas handler also checks for a document change while the import is being decoded.
+When the hand-off source is a photo or raster, mask and region imports compare the edited pixels with the exact PNG sent to Patchy, so a bright photograph cannot become a full-canvas mask. When the source is already a mask or region, the complete edited coverage is imported, preserving unchanged areas. Spatial exports use grayscale coverage instead of the coloured display overlay. A size mismatch is rejected for photo-derived masks and regions. Canvas exports record their document version; read-back is refused after opening another document, as well as when the document changes during decoding. Gallery return remains available.
+
+The v1.07 integration checks `exportAs`'s success result before reporting a headless export complete. The live MCP connection completes the initialized handshake and accepts protocol notifications before the matching response, while rejecting unrelated response IDs. Latest-release installation retains checksum verification and respects a manually selected executable. Scripting API 1 changes in v1.07 are additive; resizing behavior changed but the connector does not call `resizeImage`.
 
 ### Executable resolution
 
@@ -152,7 +190,7 @@ A note on PSD: MooshieUI sends one flattened PNG. Patchy may save a layered PSD/
   (manually, on Linux, or when automatic installation is turned off).
 - **One image returns.** The exported source has no MooshieUI layer structure. A PSD/PSB saved in Patchy can retain its layers on disk, but only its flattened pixels return to the chosen MooshieUI destination.
 - **Layered flattening needs a native check.** The script uses Patchy's documented `doc.exportAs` and `--headless --run-script` interfaces, while the failure path has a regression test. A real Windows Patchy layered round trip and all five UI actions still need hands-on validation before claiming full integration.
-- **The attached connector needs a native check.** Its protocol follows Patchy v0.99's documented `--attach`, `get_state`, `get_preview` and `expectedState` contracts. The Windows build and a real interactive round trip must verify reconnection, image tiles, Undo/Redo and the reference layer before calling the integration complete.
+- **The attached connector needs a native check.** Its protocol follows Patchy v1.07's documented `--attach`, `get_state`, `get_preview` and `expectedState` contracts. The Windows build and a real interactive round trip must verify reconnection, image tiles, Undo/Redo and the reference layer before calling the integration complete.
 - **Saved-file mode needs a save.** If the file is never saved, it reports that no saved result exists; live mode can capture unsaved pixels from the open editor.
 
 ## Files

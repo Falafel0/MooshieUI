@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { generation } from "../../stores/generation.svelte.js";
+  import { prepareControlnetReference } from "../../utils/controlnetReference.js";
+  import { canvasPngBytes, matteControlnetReference } from "../../utils/canvasLayerExport.js";
+  import { controlnetEditor as generation, controlnetEditorContext, setControlnetSourceData } from "../../stores/controlnetEditor.svelte.js";
   import { canvas } from "../../stores/canvas.svelte.js";
   import { models } from "../../stores/models.svelte.js";
   import { connection } from "../../stores/connection.svelte.js";
@@ -10,7 +12,6 @@
     uploadImageBytes,
     readClipboardImageSafe,
     checkNodeAvailable,
-    isCustomNodeInstalled,
     installCustomNode,
     stopComfyui,
     startComfyui,
@@ -27,7 +28,10 @@
     type ControlNetModelEntry,
   } from "../../config/controlnet-presets.js";
   import { ipcListen, isTauri, authHeaders } from "../../utils/ipc.js";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { LatestControlnetRequest, controlnetRequestKey } from "../../utils/controlnetState.js";
+  import { createComfyReadyWait } from "../../utils/comfyReadyWait.js";
+  import { resolveAvailableModel } from "../../utils/modelAvailability.js";
   import InfoTip from "../ui/InfoTip.svelte";
   import { scrollCapture } from "../../utils/scrollCapture.js";
 
@@ -40,12 +44,34 @@
   let preprocessorPreviewPromptId = $state<string | null>(null);
   let preprocessorPreviewStatus = $state<"idle" | "preparing" | "ready" | "failed">("idle");
   let preprocessorPreviewUrl = $state<string | null>(null);
+  let previewKind = $state<'source' | 'processed'>('source');
   let downloading = $state<string | null>(null);
   let downloadError = $state<string | null>(null);
   let dlBytes = $state(0);
   let dlTotal = $state(0);
   let uploadingImage = $state(false);
-  let imagePreviewUrl = $state<string | null>(null);
+  const linkedReferenceId = $derived(controlnetEditorContext() ? canvas.activeLayer?.referenceRasterId ?? null : null);
+  let linkedPreviewUrl = $state<string | null>(null);
+  const imagePreviewUrl = $derived(linkedReferenceId ? linkedPreviewUrl : generation.controlnetPreviewUrl);
+  const displayedPreviewUrl = $derived(previewKind === 'processed' && preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl);
+  $effect(() => {
+    const id = linkedReferenceId;
+    void canvas.paintRevision;
+    void canvas.layers;
+    untrack(() => {
+      const pixels = id ? canvas.exportRasterLayer(id) : null;
+      linkedPreviewUrl = pixels ? matteControlnetReference(pixels).toDataURL('image/png') : null;
+    });
+  });
+  const imageRequests = new LatestControlnetRequest();
+  const previewRequests = new LatestControlnetRequest();
+  let previewRequest: ReturnType<LatestControlnetRequest['begin']> | null = null;
+  let mounted = false;
+  let imageError = $state<string | null>(null);
+  const requestKey = (previewOnly = false) => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, linkedReferenceId, linkedReferenceId ? canvas.paintRevision : 0, linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null, controlnetRequestKey(generation, previewOnly)]);
+  const previewPreprocessor = $derived(generation.controlnetPreprocessor?.trim() || null);
+  const sourceImage = $derived(generation.mode === 'image_edit' ? generation.editReferenceImages[0] ?? null : generation.mode === 'img2img' || generation.mode === 'inpainting' ? generation.inputImage : null);
+  let readyWait: Awaited<ReturnType<typeof createComfyReadyWait>> | null = null;
   let controlnetDropZone = $state<HTMLElement | null>(null);
   let controlnetPasteActive = $state(false);
   const ANIMA_PRESET_IDS = ["depth", "anytest_2000", "anytest_1000", "inpainting"];
@@ -59,7 +85,8 @@
 
   $effect(() => {
     const handler = async (event: ClipboardEvent) => {
-      if (!controlnetPasteActive || generation.controlnetImage) return;
+      if (!controlnetPasteActive && !(generation.mode === "inpainting" && controlnetEditorContext())) return;
+      if (controlnetEditorContext() && canvas.activeLayer?.locked) return;
       const target = event.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
       event.preventDefault();
@@ -86,13 +113,11 @@
     generation.isAnima ? models.modelPatches : models.controlnetModels,
   );
 
-  const selectedPresetPreprocessor = $derived(
-    generation.controlnetMode === "preset" && generation.controlnetPreset
-      ? getPresetPreprocessor(generation.controlnetPreset, generation.modelFamily)
-      : null,
-  );
-  const presetNeedsPreprocessor = $derived(!!selectedPresetPreprocessor);
+  const selectedModelMissing = $derived(!!generation.controlnetModel && !models.loading && !customModeModels.includes(generation.controlnetModel));
+  const presetNeedsPreprocessor = $derived(!!previewPreprocessor);
 
+  function beginControlEdit() { const id = controlnetEditorContext(); if (id) canvas.beginControlnetEdit(id); }
+  function endControlEdit() { canvas.endControlnetEdit(); }
   let preprocessorPreviewTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function clearPreprocessorPreviewTimeout() {
@@ -102,66 +127,48 @@
     }
   }
 
-  async function nodePackageAvailable(packageName: string, verifyNode: string): Promise<boolean> {
-    try {
-      const installed = await isCustomNodeInstalled(packageName);
-      if (installed) return true;
-      return await checkNodeAvailable(verifyNode);
-    } catch {
-      return false;
-    }
-  }
-
-  onMount(async () => {
-    await ipcListen("download:progress", (event: any) => {
-      const data = event.payload as {
-        filename: string;
-        downloaded: number;
-        total: number;
-        done: boolean;
-      };
-      if (data.done) {
-        dlBytes = 0;
-        dlTotal = 0;
-      } else {
-        dlBytes = data.downloaded;
-        dlTotal = data.total;
-      }
+  onMount(() => {
+    mounted = true;
+    let listeners: (() => void)[] = [];
+    const register = (name: string, handler: (event: any) => void) => {
+      void ipcListen(name, handler).then((unlisten) => { if (!mounted) unlisten(); else listeners = [...listeners, unlisten]; }).catch((error) => console.warn('ControlNet listener failed', error));
+    };
+    register('download:progress', (event) => {
+      const data = event.payload;
+      if (!downloading || data.filename !== downloading) return;
+      dlBytes = data.done ? 0 : data.downloaded; dlTotal = data.done ? 0 : data.total;
     });
-    await ipcListen("install:progress", (event: any) => {
-      const data = event.payload as {
-        node_name: string;
-        step: string;
-        message: string;
-        done: boolean;
-      };
-      installStep = data.step;
-      installMessage = data.message;
+    register('install:progress', (event) => {
+      const data = event.payload;
+      if (!installing || data.node_name !== 'comfyui_controlnet_aux') return;
+      installStep = data.step; installMessage = data.message;
     });
-    // Check the preprocessor package and the core Anima LLLite nodes.
-    // AnimaLLLiteApply is checked by input signature, not just by name: the old
-    // kohya-ss custom node registers the same class name with a `lllite_name`
-    // input instead of `model_patch`, and ComfyUI resolves that collision in
-    // core's favour, so the name alone says nothing about which one is loaded.
-    try {
-      [preprocessorAvailable, animaLlliteAvailable] = await Promise.all([
-        nodePackageAvailable("comfyui_controlnet_aux", "CannyEdgePreprocessor"),
-        checkNodeAvailable("AnimaLLLiteApply", ["model_patch"]).catch(() => false),
-      ]);
-    } catch {
-      preprocessorAvailable = false;
-      animaLlliteAvailable = false;
-    }
-
-    // Register the preprocessor preview listener once for the component lifetime
-    // to avoid leaks and races on repeated previews.
-    await ipcListen("comfyui:controlnet_preprocessor", handlePreprocessorPreviewEvent);
+    register('comfyui:controlnet_preprocessor', handlePreprocessorPreviewEvent);
+    return () => {
+      mounted = false; endControlEdit();
+      for (const unlisten of listeners) unlisten();
+      imageRequests.invalidate(); previewRequests.invalidate(); readyWait?.cancel();
+      clearPreprocessorPreviewTimeout(); pendingPreprocessorEvents.clear();
+      if (preprocessorPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(preprocessorPreviewUrl);
+    };
+  });
+  let probe = 0;
+  $effect(() => {
+    const connected = connection.connected;
+    const preprocessor = previewPreprocessor;
+    const version = ++probe;
+    preprocessorAvailable = null; animaLlliteAvailable = null;
+    if (!connected) return;
+    void Promise.all([
+      preprocessor ? checkNodeAvailable(preprocessor).catch(() => false) : Promise.resolve(true),
+      checkNodeAvailable('AnimaLLLiteApply', ['model_patch']).catch(() => false),
+    ]).then(([aux, anima]) => { if (mounted && probe === version) { preprocessorAvailable = aux; animaLlliteAvailable = anima; } });
   });
 
   function isModelInstalled(entry: ControlNetModelEntry): boolean {
     const installed =
       modelCategory(entry) === "model_patches" ? models.modelPatches : models.controlnetModels;
-    return installed.includes(entry.filename);
+    return !!resolveAvailableModel(entry.filename, installed);
   }
 
   function applyPresetState(presetId: string) {
@@ -177,117 +184,113 @@
     if (defaults?.endPercent !== undefined) generation.controlnetEndPercent = defaults.endPercent;
 
     const model = getPresetModel(presetId, generation.modelFamily);
-    generation.controlnetModel = model?.filename ?? null;
+    generation.controlnetModel = model ? resolveAvailableModel(model.filename, modelCategory(model) === "model_patches" ? models.modelPatches : models.controlnetModels) ?? model.filename : null;
     return model;
   }
 
-  async function selectPreset(presetId: string) {
-    const preset = getPreset(presetId);
-    if (!preset) return;
-
-    const model = applyPresetState(presetId);
-    if (model) {
-      if (!isModelInstalled(model)) {
-        downloading = model.filename;
-        downloadError = null;
-        try {
-          await downloadModel(model.url, modelCategory(model), model.filename);
-          await models.refresh();
-        } catch (e) {
-          downloadError = locale.t('generation.controlnet.download_failed', { error: String(e) });
-          generation.controlnetModel = null;
-        } finally {
-          downloading = null;
-        }
-      }
-    }
+  function selectPreset(presetId: string) {
+    if (!presetAvailable(presetId)) return;
+    applyPresetState(presetId);
     generation.saveSettings();
   }
-
-  function setPreview(file: File) {
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    imagePreviewUrl = URL.createObjectURL(file);
+  async function downloadPresetModel() {
+    const model = getPresetModel(generation.controlnetPreset ?? '', generation.modelFamily);
+    if (!model || downloading) return;
+    downloading = model.filename; downloadError = null; dlBytes = 0; dlTotal = 0;
+    try { await downloadModel(model.url, modelCategory(model), model.filename); await models.refresh(); }
+    catch (error) { if (mounted) downloadError = locale.t('generation.controlnet.download_failed', { error: String(error) }); }
+    finally { downloading = null; }
   }
 
+  function setPreview(file: Blob) {
+    clearPreview(); generation.controlnetPreviewUrl = URL.createObjectURL(file);
+  }
   function clearPreview() {
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-      imagePreviewUrl = null;
-    }
+    if (generation.controlnetPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(generation.controlnetPreviewUrl);
+    generation.controlnetPreviewUrl = null;
+  }
+  function resetPreparedPreview() {
+    previewRequests.invalidate(); previewRequest = null; preprocessorPreviewPromptId = null;
+    clearPreprocessorPreviewTimeout(); pendingPreprocessorEvents.clear();
+    if (preprocessorPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(preprocessorPreviewUrl);
+    preprocessorPreviewUrl = null; preprocessorPreviewStatus = 'idle'; previewKind = 'source';
+  }
+  function removeImage() {
+    if (linkedReferenceId && canvas.activeLayer) { canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null }); resetPreparedPreview(); return; }
+    imageRequests.invalidate(); uploadingImage = false; generation.controlnetImage = null;
+    clearPreview(); setControlnetSourceData(null); resetPreparedPreview(); generation.saveSettings();
+  }
+  async function useSourceImage() {
+    if (!sourceImage) return;
+    if (linkedReferenceId && canvas.activeLayer) canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null });
+    imageRequests.invalidate(); uploadingImage = false; resetPreparedPreview(); clearPreview();
+    generation.controlnetImage = sourceImage;
+    setControlnetSourceData(null);
+    generation.saveSettings();
+    // Own a separate object URL: removing the control must never revoke the source preview.
+    const sourcePreview = generation.mode === 'image_edit' ? null : generation.inputPreviewUrl;
+    if (!sourcePreview) return;
+    const request = imageRequests.begin(requestKey());
+    try {
+      const response = await fetch(sourcePreview);
+      const blob = await response.blob();
+      if (mounted && imageRequests.current(request, requestKey())) {
+        generation.controlnetPreviewUrl = URL.createObjectURL(blob);
+        const reader = new FileReader(); reader.onload = () => { if (mounted && imageRequests.current(request, requestKey())) setControlnetSourceData(String(reader.result)); }; reader.readAsDataURL(blob);
+      }
+    } catch (error) { console.warn('ControlNet source preview failed', error); }
+  }
+  async function uploadControlImage(file: File) {
+    const request = imageRequests.begin(requestKey()); uploadingImage = true; imageError = null;
+    try {
+      if (!file.type.startsWith('image/')) throw new Error(locale.t('generation.controlnet.image_type'));
+      const result = await prepareControlnetReference(file);
+      if (!mounted || !imageRequests.current(request, requestKey())) return;
+      if (linkedReferenceId && canvas.activeLayer) canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null });
+      resetPreparedPreview(); generation.controlnetImage = result.name; setPreview(result.blob);
+      if (controlnetEditorContext()) setControlnetSourceData(result.sourceData);
+      generation.saveSettings();
+    } catch (error) { if (mounted && imageRequests.current(request, requestKey())) imageError = locale.t('generation.controlnet.image_failed', { error: String(error) }); }
+    finally { if (mounted && imageRequests.current(request, request.key)) uploadingImage = false; }
+  }
+  async function useRasterReference(id: string) {
+    if (!controlnetEditorContext() || !canvas.activeLayer || canvas.activeLayer.locked) return;
+    if (!canvas.layers.some(layer => layer.id === id && layer.type === 'raster')) return;
+    canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: id });
+    resetPreparedPreview();
   }
 
   async function handleImageUpload(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    uploadingImage = true;
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(buffer));
-      const result = await uploadImageBytes(bytes, file.name);
-      generation.controlnetImage = result.name;
-      setPreview(file);
-    } catch (e) {
-      console.error("Failed to upload control image:", e);
-    } finally {
-      uploadingImage = false;
-    }
+    const input = event.currentTarget as HTMLInputElement, file = input.files?.[0]; input.value = '';
+    if (file) await uploadControlImage(file);
   }
-
   async function handleImagePaste() {
+    const request = imageRequests.begin(requestKey());
     try {
       const bytes = await readClipboardImageSafe();
-      uploadingImage = true;
-      const result = await uploadImageBytes(bytes, "pasted_image.png");
-      generation.controlnetImage = result.name;
-      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
-      const file = new File([blob], "pasted_image.png", { type: "image/png" });
-      setPreview(file);
-    } catch (e) {
-      console.error("Failed to paste image:", e);
-    } finally {
-      uploadingImage = false;
-    }
+      if (mounted && imageRequests.current(request, requestKey())) await uploadControlImage(new File([new Uint8Array(bytes)], 'pasted_image.png', { type: 'image/png' }));
+    } catch (error) { if (mounted && imageRequests.current(request, requestKey())) imageError = locale.t('generation.controlnet.image_failed', { error: String(error) }); }
   }
-
   async function handleImageDrop(event: DragEvent) {
-    event.preventDefault();
-    const file = event.dataTransfer?.files?.[0];
-    if (!file) return;
-
-    uploadingImage = true;
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(buffer));
-      const result = await uploadImageBytes(bytes, file.name);
-      generation.controlnetImage = result.name;
-      setPreview(file);
-    } catch (e) {
-      console.error("Failed to upload control image:", e);
-    } finally {
-      uploadingImage = false;
-    }
+    event.preventDefault(); const file = event.dataTransfer?.files?.[0]; if (file) await uploadControlImage(file);
   }
-
-  /** Handle Tauri native drag-drop via custom event dispatched from parent. */
-  async function handleTauriFileDrop(e: Event) {
-    const { path, filename } = (e as CustomEvent).detail as { path: string; filename: string };
-    uploadingImage = true;
+  async function handleTauriFileDrop(event: Event) {
+    const { path, filename } = (event as CustomEvent).detail;
+    const request = imageRequests.begin(requestKey()); uploadingImage = true; imageError = null;
     try {
       const result = await uploadImage(path);
-      generation.controlnetImage = result.name;
+      if (!mounted || !imageRequests.current(request, requestKey())) return;
+      resetPreparedPreview(); generation.controlnetImage = result.name; clearPreview(); generation.saveSettings();
+      const appliedKey = requestKey();
       if (isTauri) {
-        const { readFile } = await import("@tauri-apps/plugin-fs");
-        const bytes = await readFile(path);
-        const blob = new Blob([bytes], { type: "image/png" });
-        setPreview(new File([blob], filename, { type: "image/png" }));
+        const { readFile } = await import('@tauri-apps/plugin-fs'); const bytes = await readFile(path);
+        if (mounted && imageRequests.current(request, appliedKey) && requestKey() === appliedKey) {
+          setPreview(new File([bytes], filename, { type: 'image/png' }));
+          setControlnetSourceData(`data:image/png;base64,${btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''))}`);
+        }
       }
-    } catch (e) {
-      console.error("Failed to upload control image from Tauri drop:", e);
-    } finally {
-      uploadingImage = false;
-    }
+    } catch (error) { if (mounted && imageRequests.current(request, requestKey())) imageError = locale.t('generation.controlnet.image_failed', { error: String(error) }); }
+    finally { if (mounted && imageRequests.current(request, request.key)) uploadingImage = false; }
   }
 
   /** Generic node-package installer that handles clone → restart → verify flow */
@@ -311,35 +314,21 @@
       await stopComfyui();
 
       installMessage = locale.t('generation.controlnet.install_starting_nodes');
-      await startComfyui();
-
+      readyWait = await createComfyReadyWait(120_000);
+      if (!mounted) { readyWait.cancel(); readyWait = null; return; }
+      const started = await startComfyui();
+      if (started === 'already_running' || started === 'skipped') readyWait.cancel();
       installMessage = locale.t('generation.controlnet.install_waiting_ready');
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error(locale.t('generation.controlnet.install_timeout')));
-        }, 120_000);
-
-        const unlistenReady = ipcListen("comfyui:server_ready", () => {
-          clearTimeout(timeout);
-          unlistenReady.then((fn) => fn());
-          unlistenError.then((fn) => fn());
-          resolve();
-        });
-
-        const unlistenError = ipcListen("comfyui:server_error", (event: any) => {
-          clearTimeout(timeout);
-          unlistenReady.then((fn) => fn());
-          unlistenError.then((fn) => fn());
-          reject(new Error(event.payload?.error || locale.t('generation.controlnet.install_start_failed')));
-        });
-      });
+      await readyWait.promise;
+      if (!mounted) return;
 
       installStep = "verify";
       installMessage = locale.t('generation.controlnet.install_verifying');
       try {
-        onAvailableChange(await checkNodeAvailable(verifyNode));
+        const available = await checkNodeAvailable(verifyNode);
+        if (mounted) onAvailableChange(available);
       } catch {
-        onAvailableChange(false);
+        if (mounted) onAvailableChange(false);
       }
 
       installing = false;
@@ -350,7 +339,7 @@
       installing = false;
       installStep = "";
       installMessage = "";
-    }
+    } finally { readyWait?.cancel(); readyWait = null; }
   }
 
   async function installPreprocessors() {
@@ -358,7 +347,7 @@
       "controlnet_aux",
       "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
       "comfyui_controlnet_aux",
-      "CannyEdgePreprocessor",
+      previewPreprocessor ?? "CannyEdgePreprocessor",
       (available) => { preprocessorAvailable = available; },
     );
   }
@@ -396,74 +385,53 @@
   /** Buffer for events that arrive before the prompt ID is registered */
   const pendingPreprocessorEvents = new Map<string, any>();
 
-  /** Apply the preprocessor result: upload it, set as new control image, show preview */
+  /** Preview is non-destructive: generation still preprocesses the original reference exactly once. */
   async function applyPreparedPreprocessorImage(data: any) {
+    const request = previewRequest;
+    if (!request || !previewRequests.current(request, requestKey(true))) return;
     clearPreprocessorPreviewTimeout();
     try {
       const result = await imageBytesFromPreprocessorEvent(data);
-      if (!result) throw new Error(locale.t("generation.controlnet.no_image_data"));
-      const filename = `controlnet-preprocessed-${Date.now()}.png`;
-      const uploaded = await uploadImageBytes(result.bytes, filename);
-      generation.controlnetImage = uploaded.name;
-      generation.controlnetPreprocessor = null;
-      // Update control image preview to show the preprocessed output
-      if (imagePreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(imagePreviewUrl);
-      imagePreviewUrl = URL.createObjectURL(result.blob);
-      // Also set the preprocessor preview URL
-      if (preprocessorPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(preprocessorPreviewUrl);
-      preprocessorPreviewUrl = URL.createObjectURL(result.blob);
-      preprocessorPreviewStatus = "ready";
-    } catch {
-      preprocessorPreviewStatus = "failed";
-    } finally {
-      preprocessorPreviewPromptId = null;
-    }
+      if (!mounted || !previewRequests.current(request, requestKey(true))) return;
+      if (!result) throw new Error(locale.t('generation.controlnet.no_image_data'));
+      if (preprocessorPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(preprocessorPreviewUrl);
+      preprocessorPreviewUrl = URL.createObjectURL(result.blob); preprocessorPreviewStatus = 'ready'; previewKind = 'processed';
+    } catch { if (previewRequests.current(request, requestKey(true))) preprocessorPreviewStatus = 'failed'; }
+    finally { if (previewRequests.current(request, requestKey(true))) preprocessorPreviewPromptId = null; }
   }
-
   async function handlePreprocessorPreviewEvent(event: any) {
-    const data = event.payload;
-    const pid = data?.prompt_id;
-    if (!pid) return;
-    if (preprocessorPreviewPromptId && pid === preprocessorPreviewPromptId) {
-      await applyPreparedPreprocessorImage(data);
-      return;
+    const data = event.payload, pid = data?.prompt_id;
+    if (!pid || !previewRequest || preprocessorPreviewStatus !== 'preparing' || !previewRequests.current(previewRequest, requestKey(true))) return;
+    if (preprocessorPreviewPromptId === pid) { await applyPreparedPreprocessorImage(data); return; }
+    if (!preprocessorPreviewPromptId) {
+      if (pendingPreprocessorEvents.size >= 32) pendingPreprocessorEvents.delete(pendingPreprocessorEvents.keys().next().value!);
+      pendingPreprocessorEvents.set(pid, data);
     }
-    // Buffer for when the prompt ID arrives later
-    pendingPreprocessorEvents.set(pid, data);
   }
-
   async function preparePreprocessorImage() {
-    if (!generation.controlnetImage || !selectedPresetPreprocessor) return;
-    preprocessorPreviewStatus = "preparing";
-    if (preprocessorPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(preprocessorPreviewUrl);
-    preprocessorPreviewUrl = null;
-    preprocessorPreviewPromptId = null;
-    clearPreprocessorPreviewTimeout();
-
+    let image = generation.controlnetImage;
+    const preprocessor = previewPreprocessor;
+    if ((!image && !linkedReferenceId) || !preprocessor || preprocessorPreviewStatus === 'preparing') return;
+    resetPreparedPreview(); const request = previewRequests.begin(requestKey(true)); previewRequest = request;
+    preprocessorPreviewStatus = 'preparing';
     preprocessorPreviewTimeout = setTimeout(() => {
-      if (preprocessorPreviewStatus === "preparing") {
-        preprocessorPreviewStatus = "failed";
-        preprocessorPreviewPromptId = null;
-      }
+      if (previewRequests.current(request, requestKey(true))) { preprocessorPreviewStatus = 'failed'; preprocessorPreviewPromptId = null; previewRequests.invalidate(); pendingPreprocessorEvents.clear(); }
     }, 120_000);
-
     try {
-      const result = await generateControlnetPreprocessorPreview(
-        generation.controlnetImage,
-        selectedPresetPreprocessor,
-      );
-      preprocessorPreviewPromptId = result.prompt_id;
-      // Check if the event already arrived in the buffer (listener registered in onMount)
-      const buffered = pendingPreprocessorEvents.get(result.prompt_id);
-      if (buffered) {
-        pendingPreprocessorEvents.delete(result.prompt_id);
-        await applyPreparedPreprocessorImage(buffered);
+      if (linkedReferenceId) {
+        const reference = canvas.exportRasterLayer(linkedReferenceId);
+        if (!reference) throw new Error(locale.t('canvas.missing_connection'));
+        const bytes = await canvasPngBytes(matteControlnetReference(reference));
+        const uploaded = await uploadImageBytes(bytes, `control-preview-${controlnetEditorContext()}.png`);
+        if (!mounted || !previewRequests.current(request, requestKey(true))) return;
+        image = uploaded.name;
       }
-    } catch {
-      preprocessorPreviewStatus = "failed";
-      preprocessorPreviewPromptId = null;
-      clearPreprocessorPreviewTimeout();
-    }
+      const result = await generateControlnetPreprocessorPreview(image!, preprocessor);
+      if (!mounted || !previewRequests.current(request, requestKey(true))) return;
+      preprocessorPreviewPromptId = result.prompt_id;
+      const buffered = pendingPreprocessorEvents.get(result.prompt_id); pendingPreprocessorEvents.clear();
+      if (buffered) await applyPreparedPreprocessorImage(buffered);
+    } catch { if (mounted && previewRequests.current(request, requestKey(true))) { preprocessorPreviewStatus = 'failed'; clearPreprocessorPreviewTimeout(); preprocessorPreviewPromptId = null; } }
   }
 
   function presetAvailable(presetId: string): boolean {
@@ -481,38 +449,41 @@
     return locale.t("generation.controlnet.not_available");
   }
 
+  let presetContext: { mode: string; preset: string | null; family: string; context: string } | null = null;
   $effect(() => {
-    if (
-      generation.isAnima &&
-      generation.controlnetMode === "preset" &&
-      generation.controlnetPreset &&
-      !ANIMA_PRESET_IDS.includes(generation.controlnetPreset)
-    ) {
-      applyPresetState("depth");
+    const context = controlnetEditorContext();
+    const mode = generation.controlnetMode, preset = generation.controlnetPreset, family = generation.modelFamily;
+    const previous = presetContext?.context === context ? presetContext : null;
+    presetContext = { mode, preset, family, context };
+    if (mode !== 'preset' || !preset) return;
+    untrack(() => {
+      const model = getPresetModel(preset, family);
+      const basename = (name: string | null) => name?.replace(/\\/g, '/').split('/').pop();
+      const changed = previous && (previous.family !== family || previous.preset !== preset || previous.mode !== mode);
+      const mismatched = basename(generation.controlnetModel) !== basename(model?.filename ?? null);
+      if (!changed && !mismatched) return;
+      generation.controlnetModel = model ? resolveAvailableModel(model.filename, modelCategory(model) === 'model_patches' ? models.modelPatches : models.controlnetModels) ?? model.filename : null;
+      generation.controlnetPreprocessor = getPresetPreprocessor(preset, family);
       generation.saveSettings();
-    }
+    });
+  });
+  $effect(() => {
+    const key = requestKey(true);
+    untrack(() => {
+      if (previewRequest && !previewRequests.current(previewRequest, key)) resetPreparedPreview();
+      if (uploadingImage) uploadingImage = false;
+    });
   });
 
   $effect(() => {
-    if (generation.controlnetMode !== "preset" || !generation.controlnetPreset) return;
-    const presetPreprocessor = getPresetPreprocessor(
-      generation.controlnetPreset,
-      generation.modelFamily,
-    );
-    if (
-      generation.controlnetPreprocessor !== null &&
-      generation.controlnetPreprocessor !== presetPreprocessor
-    ) {
-      generation.controlnetPreprocessor = presetPreprocessor;
-    }
-  });
-
-  $effect(() => {
-    canvas.controlContextPreviewUrl = generation.controlnetEnabled
-      ? (preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl)
-      : null;
+    const context = controlnetEditorContext();
+    canvas.controlContextPreviewLayerId = context || null;
+    canvas.controlContextPreviewKind = previewKind;
+    canvas.controlContextPreviewUrl = context ? displayedPreviewUrl : null;
     return () => {
       canvas.controlContextPreviewUrl = null;
+      canvas.controlContextPreviewLayerId = null;
+      canvas.controlContextPreviewKind = 'source';
     };
   });
 
@@ -526,7 +497,7 @@
         text={locale.t('generation.controlnet.tip')}
       /></label
     >
-    <button
+    {#if !controlnetEditorContext()}<button
       title={locale.t('generation.controlnet.toggle')}
       class="relative w-10 h-5 rounded-full transition-colors {generation.controlnetEnabled
         ? 'bg-indigo-600'
@@ -538,6 +509,7 @@
         generation.saveSettings();
       }}
       role="switch"
+      aria-label={locale.t("generation.controlnet.toggle")}
       aria-checked={generation.controlnetEnabled}
     >
       <span
@@ -545,10 +517,10 @@
           ? 'translate-x-5'
           : ''}"
       ></span>
-    </button>
+    </button>{/if}
   </div>
 
-  {#if generation.controlnetEnabled}
+  {#if generation.controlnetEnabled || controlnetEditorContext()}
     <!--
       Anima LLLite comes from ComfyUI core (ModelPatchLoader + AnimaLLLiteApply),
       so there is nothing to install: an older ComfyUI simply cannot run it.
@@ -561,7 +533,7 @@
     {/if}
 
     <!-- Preprocessor warning / install progress -->
-    {#if preprocessorAvailable === false && generation.controlnetMode === "preset" && presetNeedsPreprocessor}
+    {#if preprocessorAvailable === false && presetNeedsPreprocessor}
       <div
         class="bg-amber-900/30 border border-amber-700/50 rounded-lg px-3 py-2 text-xs text-amber-300"
       >
@@ -619,7 +591,7 @@
         'preset'
           ? 'bg-neutral-700 text-white'
           : 'text-neutral-400 hover:text-neutral-300'}"
-        onclick={() => (generation.controlnetMode = "preset")}
+        aria-pressed={generation.controlnetMode === "preset"} onclick={() => { generation.controlnetMode = "preset"; generation.saveSettings(); }}
       >
         {locale.t('generation.controlnet.presets')}
       </button>
@@ -628,36 +600,24 @@
         'custom'
           ? 'bg-neutral-700 text-white'
           : 'text-neutral-400 hover:text-neutral-300'}"
-        onclick={() => (generation.controlnetMode = "custom")}
+        aria-pressed={generation.controlnetMode === "custom"} onclick={() => { generation.controlnetMode = "custom"; generation.saveSettings(); }}
       >
         {locale.t('generation.controlnet.custom')}
       </button>
     </div>
 
     {#if generation.controlnetMode === "preset"}
-      <!-- Preset grid -->
-      <div class="grid grid-cols-2 gap-1.5">
-        {#each visibleControlNetPresets as preset}
-          {@const available = presetAvailable(preset.id)}
-          {@const selected = generation.controlnetPreset === preset.id}
-          <button
-            onclick={() => available && selectPreset(preset.id)}
-            disabled={!available || downloading !== null}
-            class="text-left p-2 rounded-lg border transition-colors {selected
-              ? 'border-indigo-500 bg-indigo-500/10'
-              : available
-                ? 'border-neutral-700 bg-neutral-800/50 hover:border-neutral-600'
-                : 'border-neutral-800 bg-neutral-900/30 opacity-40 cursor-not-allowed'}"
-          >
-            <div class="text-xs font-medium {selected ? 'text-indigo-300' : 'text-neutral-200'}">
-              {locale.t('generation.controlnet.preset_' + preset.id)}
-            </div>
-            <div class="text-[10px] text-neutral-500 mt-0.5 leading-tight">
-              {available ? locale.t('generation.controlnet.preset_' + preset.id + '_desc') : presetUnavailableText(preset.id)}
-            </div>
-          </button>
-        {/each}
-      </div>
+      <label class="block text-xs text-neutral-400">{locale.t('generation.controlnet.presets')}
+        <select value={generation.controlnetPreset ?? ''} onchange={(event) => selectPreset(event.currentTarget.value)} class="ui-control mt-1 w-full rounded-lg border border-ui-border bg-ui-surface px-2 text-sm text-neutral-200">
+          <option value="">{locale.t('generation.controlnet.select_preset')}</option>
+          {#each visibleControlNetPresets as preset}<option value={preset.id} disabled={!presetAvailable(preset.id)}>{locale.t('generation.controlnet.preset_' + preset.id)}{presetAvailable(preset.id) ? '' : ` — ${presetUnavailableText(preset.id)}`}</option>{/each}
+        </select>
+      </label>
+      {#if generation.controlnetPreset}
+        <p class="text-xs text-neutral-500">{presetAvailable(generation.controlnetPreset) ? locale.t('generation.controlnet.preset_' + generation.controlnetPreset + '_desc') : presetUnavailableText(generation.controlnetPreset)}</p>
+        {@const selectedModel = getPresetModel(generation.controlnetPreset, generation.modelFamily)}
+        {#if selectedModel}<div class="rounded-lg border border-ui-border p-2 text-xs"><p class="truncate text-neutral-400" title={selectedModel.filename}>{selectedModel.filename}</p>{#if !isModelInstalled(selectedModel)}<button type="button" disabled={!!downloading} onclick={downloadPresetModel} class="ui-control mt-1 w-full rounded-md bg-ui-selected text-ui-accent disabled:opacity-40">{locale.t('generation.controlnet.download_model')}</button>{/if}</div>{/if}
+      {/if}
 
       <!-- Download progress -->
       {#if downloading}
@@ -696,8 +656,63 @@
         <p class="text-xs text-red-400">{downloadError}</p>
       {/if}
 
+    {:else}
+      <!-- Custom mode -->
+      <div>
+        <label class="block text-xs text-neutral-400 mb-1"
+          >{locale.t('generation.controlnet.controlnet_model')}<InfoTip
+            text={locale.t('generation.controlnet.model_tip')}
+          /></label
+        >
+        <select
+          aria-label={locale.t('generation.controlnet.controlnet_model')}
+          bind:value={generation.controlnetModel}
+          onchange={() => generation.saveSettings()}
+          class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value={null}>{locale.t('generation.controlnet.select_model')}</option>
+          {#if selectedModelMissing}<option value={generation.controlnetModel} disabled>{generation.controlnetModel} — {locale.t('generation.controlnet.not_available')}</option>{/if}
+          {#each customModeModels as model}
+            <option value={model}>{model}</option>
+          {/each}
+        </select>
+        {#if selectedModelMissing}<p role="status" class="mt-1 text-xs text-amber-300">{locale.t('generation.controlnet.model_missing', { model: generation.controlnetModel ?? '' })}</p>{/if}
+      </div>
+
+      <div class="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="cn-use-preprocessor"
+          checked={!!generation.controlnetPreprocessor}
+          onchange={(e) => {
+            generation.controlnetPreprocessor = (e.target as HTMLInputElement).checked
+              ? "CannyEdgePreprocessor"
+              : null;
+            generation.saveSettings();
+          }}
+          class="w-4 h-4 accent-indigo-500 rounded"
+        />
+        <label for="cn-use-preprocessor" class="text-xs text-neutral-400">
+          {locale.t('generation.controlnet.use_preprocessor')}
+        </label>
+      </div>
+
+      {#if generation.controlnetPreprocessor !== null}
+        <div>
+          <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.controlnet.preprocessor_label')}</label>
+          <input
+            type="text"
+            bind:value={generation.controlnetPreprocessor}
+            oninput={() => generation.saveSettings()}
+            placeholder={locale.t('generation.controlnet.preprocessor_placeholder')}
+            class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      {/if}
+    {/if}
+
       <!-- Preprocessor preview -->
-      {#if presetNeedsPreprocessor && generation.controlnetImage && connection.connected}
+      {#if presetNeedsPreprocessor && (generation.controlnetImage || linkedReferenceId) && connection.connected}
         <div class="flex items-center justify-between">
           <span class="text-xs text-neutral-400">{locale.t('generation.controlnet.prepare_preprocessor')}<InfoTip text={locale.t('generation.controlnet.prepare_preprocessor_tip')} /></span>
           {#if preprocessorPreviewStatus === "preparing"}
@@ -724,81 +739,42 @@
             </button>
           {/if}
         </div>
-        {#if preprocessorPreviewUrl && preprocessorPreviewStatus === "ready"}
-          <div class="relative rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700">
-            <img src={preprocessorPreviewUrl} alt={locale.t("controlnet.preprocessor_preview_alt")} class="w-full max-h-32 object-contain" />
-          </div>
-        {/if}
       {/if}
-    {:else}
-      <!-- Custom mode -->
-      <div>
-        <label class="block text-xs text-neutral-400 mb-1"
-          >{locale.t('generation.controlnet.controlnet_model')}<InfoTip
-            text={locale.t('generation.controlnet.model_tip')}
-          /></label
-        >
-        <select
-          bind:value={generation.controlnetModel}
-          class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
-        >
-          <option value={null}>{locale.t('generation.controlnet.select_model')}</option>
-          {#each customModeModels as model}
-            <option value={model}>{model}</option>
-          {/each}
-        </select>
-      </div>
 
-      <div class="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="cn-use-preprocessor"
-          checked={!!generation.controlnetPreprocessor}
-          onchange={(e) => {
-            generation.controlnetPreprocessor = (e.target as HTMLInputElement).checked
-              ? "CannyEdgePreprocessor"
-              : null;
-          }}
-          class="w-4 h-4 accent-indigo-500 rounded"
-        />
-        <label for="cn-use-preprocessor" class="text-xs text-neutral-400">
-          {locale.t('generation.controlnet.use_preprocessor')}
-        </label>
-      </div>
-
-      {#if generation.controlnetPreprocessor !== null}
-        <div>
-          <label class="block text-xs text-neutral-400 mb-1">{locale.t('generation.controlnet.preprocessor_label')}</label>
-          <input
-            type="text"
-            bind:value={generation.controlnetPreprocessor}
-            placeholder={locale.t('generation.controlnet.preprocessor_placeholder')}
-            class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      {/if}
+    {#if sourceImage}<button type="button" onclick={useSourceImage} class="ui-control w-full rounded-lg border border-ui-border text-xs text-neutral-300 hover:bg-ui-selected">{locale.t('generation.controlnet.use_source')}</button>{/if}
+    {#if controlnetEditorContext() && canvas.layers.some(layer => layer.type === 'raster')}
+      <select aria-label={locale.t('generation.controlnet.use_layer')} value="" onchange={event => { const id = event.currentTarget.value; event.currentTarget.value = ''; void useRasterReference(id); }} class="ui-control w-full rounded-md border border-ui-border bg-neutral-950 px-2 text-xs text-neutral-300">
+        <option value="" disabled>{locale.t('generation.controlnet.use_layer')}</option>
+        {#each canvas.sortedLayers.filter(layer => layer.type === 'raster') as layer (layer.id)}<option value={layer.id}>{layer.name}</option>{/each}
+      </select>
     {/if}
-
+    {#if imageError}<p role="alert" class="text-xs text-red-400">{imageError}</p>{/if}
     <!-- Control image upload -->
     <div>
       <label class="block text-xs text-neutral-400 mb-1"
-        >{locale.t('generation.controlnet.control_image_label')}<InfoTip
+        >{locale.t('generation.controlnet.source_image')}<InfoTip
           text={locale.t('generation.controlnet.image_tip')}
         /></label
       >
-      {#if generation.controlnetImage}
+      {#if generation.controlnetImage || linkedReferenceId}
         <div class="space-y-2">
-          {#if imagePreviewUrl}
+          {#if presetNeedsPreprocessor}
+            <div class="flex gap-1 rounded-md bg-neutral-950 p-1" role="group" aria-label={locale.t('generation.controlnet.canvas_preview')}>
+              <button type="button" aria-pressed={previewKind === 'source'} onclick={() => previewKind = 'source'} class="min-h-7 flex-1 rounded px-2 text-[11px] {previewKind === 'source' ? 'bg-ui-selected text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}">{locale.t('generation.controlnet.source_image')}</button>
+              <button type="button" aria-pressed={previewKind === 'processed'} disabled={preprocessorPreviewStatus !== 'ready'} onclick={() => previewKind = 'processed'} class="min-h-7 flex-1 rounded px-2 text-[11px] disabled:opacity-40 {previewKind === 'processed' ? 'bg-ui-selected text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}">{locale.t('generation.controlnet.processed_input')}</button>
+            </div>
+          {/if}
+          {#if displayedPreviewUrl}
             <div class="relative rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700">
               <img
-                src={imagePreviewUrl}
-                alt={locale.t('generation.controlnet.control_image_alt')}
-                class="w-full max-h-48 object-contain"
+                src={displayedPreviewUrl}
+                alt={locale.t(previewKind === 'processed' ? 'generation.controlnet.processed_input' : 'generation.controlnet.source_image')}
+                class="w-full max-h-24 object-contain"
               />
               <div class="absolute top-1.5 right-1.5">
                 <button
-                  onclick={() => { generation.controlnetImage = null; clearPreview(); }}
-                  class="p-1 rounded bg-neutral-900/80 text-neutral-400 hover:text-red-400 transition-colors"
+                  onclick={removeImage}
+                  aria-label={locale.t('generation.controlnet.remove')} class="ui-icon-button flex items-center justify-center rounded bg-neutral-900/80 text-neutral-400 hover:text-red-400 transition-colors"
                   title={locale.t('generation.controlnet.remove')}
                 >
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -809,10 +785,10 @@
             </div>
           {/if}
           <div class="flex items-center gap-2 bg-neutral-800 rounded-lg px-3 py-2">
-            <span class="text-xs text-neutral-300 truncate flex-1">{generation.controlnetImage}</span>
+            <span class="text-xs text-neutral-300 truncate flex-1">{linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId)?.name ?? locale.t("canvas.missing_target") : generation.controlnetImage}</span>
             {#if !imagePreviewUrl}
               <button
-                onclick={() => { generation.controlnetImage = null; clearPreview(); }}
+                onclick={removeImage}
                 class="text-xs text-red-400 hover:text-red-300 shrink-0"
               >
                 {locale.t('generation.controlnet.remove')}
@@ -828,6 +804,7 @@
               />
             </label>
           </div>
+          <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t(presetNeedsPreprocessor ? 'generation.controlnet.input_processed_note' : 'generation.controlnet.input_raw_note')}</p>
         </div>
       {:else}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -883,7 +860,10 @@
       </label>
       <input
         type="range"
+        onpointerdown={beginControlEdit} onpointerup={endControlEdit} onpointercancel={endControlEdit} onkeydown={beginControlEdit} onkeyup={endControlEdit} onblur={endControlEdit}
         bind:value={generation.controlnetStrength}
+        aria-label={locale.t("generation.controlnet.strength")}
+        onchange={() => generation.saveSettings()}
         min="0"
         max={controlnetStrengthMax}
         step="0.05"
@@ -905,7 +885,10 @@
         </label>
         <input
           type="range"
-          bind:value={generation.controlnetStartPercent}
+        onpointerdown={beginControlEdit} onpointerup={endControlEdit} onpointercancel={endControlEdit} onkeydown={beginControlEdit} onkeyup={endControlEdit} onblur={endControlEdit}
+          value={generation.controlnetStartPercent}
+          aria-label={locale.t('generation.controlnet.start_percent')}
+          oninput={(event) => { generation.controlnetStartPercent = Math.min(event.currentTarget.valueAsNumber, Math.max(0, generation.controlnetEndPercent - 0.05)); generation.saveSettings(); }}
           min="0"
           max="1"
           step="0.05"
@@ -925,7 +908,10 @@
         </label>
         <input
           type="range"
-          bind:value={generation.controlnetEndPercent}
+        onpointerdown={beginControlEdit} onpointerup={endControlEdit} onpointercancel={endControlEdit} onkeydown={beginControlEdit} onkeyup={endControlEdit} onblur={endControlEdit}
+          value={generation.controlnetEndPercent}
+          aria-label={locale.t('generation.controlnet.end_percent')}
+          oninput={(event) => { generation.controlnetEndPercent = Math.max(event.currentTarget.valueAsNumber, Math.min(1, generation.controlnetStartPercent + 0.05)); generation.saveSettings(); }}
           min="0"
           max="1"
           step="0.05"

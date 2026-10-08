@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
+  import { bottomPanelContext, shelfSelectionKey } from "../../utils/bottomPanel.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { compare } from "../../stores/compare.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
   import { scrollCapture } from "../../utils/scrollCapture.js";
   import { wheelScrollLock } from "../../utils/wheelScrollLock.js";
+  import { GENERATION_SECTIONS, normalizeGenerationSections, type GenerationSectionId } from "../../utils/generationLayout.js";
   import PromptInputs from "./PromptInputs.svelte";
   import RegionalPromptModal from "./RegionalPromptModal.svelte";
   import ModelSelector from "./ModelSelector.svelte";
@@ -23,6 +26,8 @@
   import H3PromptGuidePanel from "../video/H3PromptGuidePanel.svelte";
   import { h3Guide } from "../../stores/h3Guide.svelte.js";
   import InfoTip from "../ui/InfoTip.svelte";
+  import { commands } from "../../stores/commands.svelte.js";
+  import { Search, ChevronsDownUp, ChevronsUpDown, ArrowLeftRight } from "@lucide/svelte";
   import EditableValue from "../ui/EditableValue.svelte";
   import ProgressBar from "../progress/ProgressBar.svelte";
   import PreviewImage from "../progress/PreviewImage.svelte";
@@ -30,7 +35,7 @@
   import InpaintSettings from "../canvas/InpaintSettings.svelte";
   import LayerPanel from "../canvas/layers/LayerPanel.svelte";
   import { canvas } from "../../stores/canvas.svelte.js";
-  import { captureLayer } from "../../utils/canvasLayerExport.js";
+  import { captureLayer, maskToGrayscale } from "../../utils/canvasLayerExport.js";
   import { uploadImage, uploadImageBytes, getOutputImage, readClipboardImageSafe } from "../../utils/api.js";
   import { uploadOutputImageForGenerationInput } from "../../utils/galleryActions.js";
   import {
@@ -70,6 +75,8 @@
   async function editCanvasSourceInPatchy(target: "base" | "layer") {
     if (!oneditpatchy) return;
     const sourceVersion = canvas.inpaintSourceVersion;
+    const sourceKind = target === "base" ? "base" : canvas.activeLayer?.type;
+    if (!sourceKind || sourceKind === "controlnet") return;
     try {
       const pixels = document.createElement("canvas");
       pixels.width = canvas.canvasWidth;
@@ -78,7 +85,15 @@
         const id = canvas.activeLayerId;
         const node = canvas.getStageRef()?.getLayers?.().find((layer: { id: () => string }) => layer.id() === id);
         if (!node) return;
-        pixels.getContext("2d")!.drawImage(captureLayer(node, pixels.width, pixels.height), 0, 0);
+        const captured = captureLayer(node, pixels.width, pixels.height);
+        const context = pixels.getContext("2d")!;
+        if (sourceKind === "mask" || sourceKind === "region") {
+          // Export coverage, not the coloured canvas overlay. Even a completely
+          // filled mask must round-trip independently of its display tint.
+          const mask = maskToGrayscale(captured);
+          if (mask) context.drawImage(mask, 0, 0);
+          else { context.fillStyle = "black"; context.fillRect(0, 0, pixels.width, pixels.height); }
+        } else context.drawImage(captured, 0, 0);
       } else {
         const context = pixels.getContext("2d")!;
         context.fillStyle = canvas.baseColor;
@@ -100,7 +115,7 @@
       const sessionBlob = await new Promise<Blob>((resolve, reject) =>
         pixels.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Failed to encode canvas image")), "image/png"));
       if (sourceVersion !== canvas.inpaintSourceVersion) return;
-      oneditpatchy({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-patchy", generation_mode: "inpainting", sessionBlob });
+      oneditpatchy({ filename: `${target}_${Date.now()}.png`, subfolder: "", type: "output", prompt_id: "canvas-patchy", generation_mode: "inpainting", sessionBlob, patchySourceKind: sourceKind, patchySourceVersion: sourceVersion });
     } catch (error) {
       console.error("Failed to open canvas source in Patchy:", error);
       gallery.showToast(locale.t("patchy.load_failed"), "error");
@@ -108,27 +123,29 @@
   }
 
   const storageSuffix = mobileFriendly ? ".mobile" : ".desktop";
+  $effect(() => {
+    if (generation.mode !== 'inpainting' || canvas.legacyControlnetMigrated) return;
+    canvas.legacyControlnetMigrated = true;
+    if (!generation.controlnetEnabled || canvas.layers.some(layer => layer.type === 'controlnet')) return;
+    const id = canvas.addLayer('controlnet');
+    canvas.updateControlnetLayer(id, {
+      enabled: generation.controlnetEnabled, mode: generation.controlnetMode,
+      preset: generation.controlnetPreset, model: generation.controlnetModel,
+      preprocessor: generation.controlnetPreprocessor, image: generation.controlnetImage,
+      strength: generation.controlnetStrength, startPercent: generation.controlnetStartPercent,
+      endPercent: generation.controlnetEndPercent,
+    });
+    const preview = generation.controlnetPreviewUrl;
+    if (preview) void fetch(preview).then(response => response.blob()).then(blob => {
+      const reader = new FileReader();
+      reader.onload = () => { if (canvas.layers.some(layer => layer.id === id)) canvas.updateControlnetLayer(id, { sourceData: String(reader.result) }); };
+      reader.readAsDataURL(blob);
+    }).catch(error => console.warn('Legacy ControlNet preview migration failed', error));
+  });
   const DIMENSIONS_LAYOUT_KEY = `mooshieui.generation.dimensions.layout.v1${storageSuffix}`;
   const SECTION_LAYOUT_KEY = `mooshieui.generation.sections.layout.v1${storageSuffix}`;
 
-  type SectionId =
-    | "dimensions"
-    | "prompts"
-    | "imageInputs"
-    | "imageEdit"
-    | "videoSettings"
-    | "inpaintLayers"
-    | "generationSettings"
-    | "model"
-    | "sampler"
-    | "novelai"
-    | "naiFaceDetail"
-    | "controlnet"
-    | "styleTransfer"
-    | "styleRef"
-    | "facefix"
-    | "upscaleHistory";
-
+  type SectionId = GenerationSectionId;
   type SectionSide = "left" | "right";
 
   const ALL_MODES = [
@@ -162,7 +179,6 @@
   let dragOver = $state(false);
   let maskDragOver = $state(false);
   let imagePasteTarget = $state<"input" | "mask" | null>(null);
-  let promptsSectionOpen = $state(true);
   let regionalPromptModalOpen = $state(false);
 
   /** Which section (or "preview") currently has an image dragged over it */
@@ -202,54 +218,8 @@
   let leftColumnRef = $state<HTMLElement | null>(null);
   let rightColumnRef = $state<HTMLElement | null>(null);
 
-  const SECTION_ORDER: SectionId[] = [
-    "dimensions",
-    "prompts",
-    "imageInputs",
-    "imageEdit",
-    "videoSettings",
-    "inpaintLayers",
-    "generationSettings",
-    "model",
-    "sampler",
-    "novelai",
-    "naiFaceDetail",
-    "controlnet",
-    "styleTransfer",
-    "styleRef",
-    "facefix",
-    "upscaleHistory",
-  ];
-
+  const SECTION_ORDER: readonly SectionId[] = GENERATION_SECTIONS;
   let sectionOrder = $state<SectionId[]>([...SECTION_ORDER]);
-
-  function normalizeSectionOrder(order: unknown): SectionId[] {
-    if (!Array.isArray(order)) return [...SECTION_ORDER];
-    const allowed = new Set<SectionId>(SECTION_ORDER);
-    const seen = new Set<SectionId>();
-    const out: SectionId[] = [];
-    for (const item of order) {
-      if (typeof item !== "string") continue;
-      // Migrate legacy "modelSampler" → "model" + "sampler"
-      if (item === "modelSampler") {
-        for (const replacement of ["model", "sampler"] as SectionId[]) {
-          if (!seen.has(replacement)) {
-            seen.add(replacement);
-            out.push(replacement);
-          }
-        }
-        continue;
-      }
-      const id = item as SectionId;
-      if (!allowed.has(id) || seen.has(id)) continue;
-      seen.add(id);
-      out.push(id);
-    }
-    for (const id of SECTION_ORDER) {
-      if (!seen.has(id)) out.push(id);
-    }
-    return out;
-  }
 
   function loadSectionPlacement() {
     try {
@@ -280,7 +250,7 @@
         };
 
         if (parsed && typeof parsed === "object" && "order" in parsed) {
-          sectionOrder = normalizeSectionOrder(parsed.order);
+          sectionOrder = normalizeGenerationSections(parsed.order, true);
         }
         return;
       }
@@ -352,25 +322,37 @@
     return !!pendingDrop && pendingDrop.side === side && pendingDrop.index === index;
   }
 
+  const SECTION_LABEL_KEYS: Record<SectionId, string> = {
+    dimensions: "generation.dimensions.title",
+    prompts: "generation.prompts.title",
+    imageInputs: "generation.image.title",
+    imageEdit: "generation.image_edit.title",
+    videoSettings: "generation.video.title",
+    inpaintLayers: "canvas.workspace_title",
+    generationSettings: "generation.settings.title",
+    model: "generation.model.title",
+    sampler: "generation.sampler.title",
+    novelai: "generation.novelai.title",
+    naiFaceDetail: "generation.nai_face_detail.title",
+    controlnet: "generation.controlnet.title",
+    styleTransfer: "generation.style_transfer.title",
+    styleRef: "generation.style_ref.title",
+    facefix: "generation.facefix.title",
+    upscaleHistory: "generation.upscale.title",
+  };
+
+  function sectionLabelKey(section: SectionId): string {
+    if (section === "dimensions") return generation.mode === "inpainting" ? "canvas.document_size" : generation.mode === "txt2img" ? "generation.workspace.composition" : "generation.workspace.output";
+    if (section === "prompts" && generation.mode === "image_edit") return "generation.workspace.instruction";
+    return SECTION_LABEL_KEYS[section];
+  }
+
   function sectionLabel(section: SectionId): string {
-    if (section === "dimensions") return locale.t('generation.dimensions.title');
-    if (section === "prompts") return locale.t('generation.prompts.title');
-    if (section === "imageInputs") return locale.t('generation.image.title');
-    if (section === "imageEdit") return locale.t('generation.image_edit.title');
-    if (section === "videoSettings") return locale.t('generation.video.title');
-    if (section === "inpaintLayers") return locale.t('canvas.workspace_title');
-    if (section === "generationSettings") return locale.t('generation.settings.title');
-    if (section === "model") return locale.t('generation.model.title');
-    if (section === "sampler") return locale.t('generation.sampler.title');
-    if (section === "novelai") return locale.t('generation.novelai.title');
-    if (section === "naiFaceDetail") return locale.t('generation.nai_face_detail.title');
-    if (section === "facefix") return locale.t('generation.facefix.title');
-    if (section === "styleTransfer") return locale.t('generation.style_transfer.title');
-    if (section === "styleRef") return locale.t('generation.style_ref.title');
-    return locale.t('generation.upscale.title');
+    return locale.t(sectionLabelKey(section));
   }
 
   function sectionVisible(section: SectionId): boolean {
+    if (section === "dimensions" && generation.mode === "inpainting") return false;
     // Video carries its own geometry, model trio and sampler settings inside the
     // video panel, so every image-pipeline section is inapplicable there.
     if (generation.mode === "video")
@@ -434,6 +416,7 @@
 
   const savedCollapse = typeof window !== "undefined" ? loadCollapseState() : {};
 
+  let promptsSectionOpen = $state(savedCollapse.prompts !== false);
   let dimensionsSectionOpen = $state(savedCollapse.dimensions !== false);
   let imageSectionOpen = $state(savedCollapse.imageInputs !== false);
   let imageEditSectionOpen = $state(savedCollapse.imageEdit !== false);
@@ -450,9 +433,59 @@
   let facefixSectionOpen = $state(savedCollapse.facefix !== false);
   let postSectionOpen = $state(savedCollapse.upscaleHistory !== false);
 
+  function setSectionOpen(section: SectionId, open: boolean) {
+    switch (section) {
+      case "dimensions": dimensionsSectionOpen = open; break;
+      case "prompts": promptsSectionOpen = open; break;
+      case "imageInputs": imageSectionOpen = open; break;
+      case "imageEdit": imageEditSectionOpen = open; break;
+      case "videoSettings": videoSettingsSectionOpen = open; break;
+      case "inpaintLayers": layersSectionOpen = open; break;
+      case "generationSettings": controlsSectionOpen = open; break;
+      case "model": modelSectionOpen = open; break;
+      case "sampler": samplerSectionOpen = open; break;
+      case "novelai": novelaiSectionOpen = open; break;
+      case "naiFaceDetail": naiFaceDetailSectionOpen = open; break;
+      case "controlnet": controlnetSectionOpen = open; break;
+      case "styleTransfer": styleTransferSectionOpen = open; break;
+      case "styleRef": styleRefSectionOpen = open; break;
+      case "facefix": facefixSectionOpen = open; break;
+      case "upscaleHistory": postSectionOpen = open; break;
+    }
+  }
+
+  function setVisibleSectionsOpen(open: boolean) {
+    for (const section of sectionOrder.filter(sectionVisible)) setSectionOpen(section, open);
+  }
+
+  async function revealSection(section: SectionId) {
+    if (!sectionVisible(section)) return;
+    const side = sectionSides[section];
+    if (side === "left" && leftCollapsed) toggleLeftPanel();
+    if (side === "right" && rightCollapsed) toggleRightPanel();
+    setSectionOpen(section, true);
+    await tick();
+    const target = sectionRefs[section];
+    target?.scrollIntoView({ block: "start", inline: "nearest" });
+    target?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.focus({ preventScroll: true });
+  }
+
+  $effect(() => {
+    if (mobileFriendly) return;
+    commands.register(sectionOrder.filter((id) => sectionVisible(id) && id !== draggingSection).map((id) => ({
+      id: `generation.section.${id}`,
+      labelKey: sectionLabelKey(id),
+      descriptionKey: "generation.navigation.setting",
+      keywords: `generation settings ${id}`,
+      run: () => { void revealSection(id); },
+    })), "generation");
+    return () => commands.unregister("generation");
+  });
+
   let collapseSaveTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => {
     const state: Record<string, boolean> = {
+      prompts: promptsSectionOpen,
       dimensions: dimensionsSectionOpen,
       imageInputs: imageSectionOpen,
       imageEdit: imageEditSectionOpen,
@@ -685,6 +718,14 @@
    *  paste event's clipboardData (webkit2gtk populates this on Linux, where the native
    *  clipboard `read_image` is unreliable), falling back to the system clipboard read. */
   async function pasteRaster(file?: File | null) {
+    if (canvas.activeLayer?.type === 'controlnet') {
+      const id = canvas.activeLayerId;
+      try {
+        const image = file ?? new File([new Uint8Array(await readClipboardImageSafe())], 'pasted-control.png', {type:'image/png'});
+        if (canvas.activeLayerId === id) await canvasEditorRef?.setControlnetReference(image);
+      } catch (error) { gallery.showToast(locale.t('generation.controlnet.image_failed', {error:String(error)}), 'error'); }
+      return;
+    }
     let url: string | null = null;
     try {
       rasterImportBusy = true;
@@ -923,7 +964,7 @@
         const s = JSON.parse(raw) as {
           left?: number; right?: number; bottom?: number;
           leftCollapsed?: boolean; rightCollapsed?: boolean; bottomCollapsed?: boolean;
-          bottomByMode?: Record<string, boolean>;
+          bottomByMode?: Record<string, boolean>; bottomHeightByMode?: Record<string, number>;
         };
         return {
           left: typeof s.left === "number" ? Math.min(LEFT_MAX, Math.max(LEFT_MIN, s.left)) : LEFT_DEFAULT,
@@ -932,42 +973,47 @@
           leftCollapsed: s.leftCollapsed === true,
           rightCollapsed: s.rightCollapsed === true,
           bottomCollapsed: s.bottomCollapsed === true,
-          bottomByMode: s.bottomByMode ?? {},
+          bottomByMode: Object.fromEntries(Object.entries(s.bottomByMode ?? {}).filter(([, value]) => typeof value === "boolean")),
+          bottomHeightByMode: Object.fromEntries(Object.entries(s.bottomHeightByMode ?? {}).filter(([, value]) => typeof value === "number" && Number.isFinite(value)).map(([key, value]) => [key, Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, value))])),
         };
       }
     } catch {}
-    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomByMode: {} as Record<string, boolean> };
+    return { left: LEFT_DEFAULT, right: RIGHT_DEFAULT, bottom: BOTTOM_DEFAULT, leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomByMode: {} as Record<string, boolean>, bottomHeightByMode: {} as Record<string, number> };
   }
 
   function savePanelLayout() {
     try {
       bottomByMode[layoutMode] = bottomCollapsed;
-      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed, bottomByMode }));
+      bottomHeightByMode[layoutMode] = bottomHeight;
+      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify({ left: leftWidth, right: rightWidth, bottom: bottomHeight, leftCollapsed, rightCollapsed, bottomCollapsed, bottomByMode, bottomHeightByMode }));
     } catch {}
   }
 
   const LEFT_DEFAULT = 360;
   const RIGHT_DEFAULT = 310;
-  const BOTTOM_DEFAULT = 180;
+  const BOTTOM_DEFAULT = 220;
   const LEFT_MIN = 260;
   const LEFT_MAX = 520;
   const RIGHT_MIN = 240;
   const RIGHT_MAX = 450;
-  const BOTTOM_MIN = 100;
+  const BOTTOM_MIN = 180;
   const BOTTOM_MAX = 500;
 
   const _savedLayout = loadPanelLayout();
   const bottomByMode = _savedLayout.bottomByMode;
+  const bottomHeightByMode = _savedLayout.bottomHeightByMode;
   let layoutMode = untrack(() => generation.mode);
   let leftWidth = $state(_savedLayout.left);
   let rightWidth = $state(_savedLayout.right);
-  let bottomHeight = $state(_savedLayout.bottom);
+  let bottomHeight = $state(bottomHeightByMode[layoutMode] ?? _savedLayout.bottom);
 
   // Panel collapse state (restored from persisted layout)
   let leftCollapsed = $state(_savedLayout.leftCollapsed);
   let rightCollapsed = $state(_savedLayout.rightCollapsed);
   let bottomCollapsed = $state(bottomByMode[layoutMode] ?? (layoutMode === 'inpainting' || _savedLayout.bottomCollapsed));
   let workspaceWidth = $state(1500);
+  let workspaceHeight = $state(1000);
+  const shelfMaxHeight = $derived(Math.max(BOTTOM_MIN, Math.min(BOTTOM_MAX, Math.floor(workspaceHeight * 0.45))));
   const panelScale = $derived(Math.min(1, Math.max(0, workspaceWidth - 360) /
     Math.max(1, (leftCollapsed ? 0 : leftWidth) + (rightCollapsed ? 0 : rightWidth))));
   const visibleLeftWidth = $derived(Math.max(LEFT_MIN, Math.round(leftWidth * panelScale)));
@@ -977,7 +1023,7 @@
   // sizes so expanding a panel that was restored as collapsed brings back its real size.
   let leftWidthBeforeCollapse = _savedLayout.left;
   let rightWidthBeforeCollapse = _savedLayout.right;
-  let bottomHeightBeforeCollapse = _savedLayout.bottom;
+  let bottomHeightBeforeCollapse = bottomHeightByMode[layoutMode] ?? _savedLayout.bottom;
 
   function toggleLeftPanel() {
     if (mobileFriendly) {
@@ -1026,6 +1072,29 @@
     }
     savePanelLayout();
   }
+
+  function openShelf() {
+    if (mobileFriendly) setMobilePanel("bottom", true);
+    else { bottomCollapsed = false; savePanelLayout(); }
+  }
+
+  function setShelfHeight(height: number) {
+    bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, height));
+    bottomHeightBeforeCollapse = bottomHeight;
+    bottomCollapsed = false;
+    savePanelLayout();
+  }
+
+  $effect(() => {
+    const requested = bottomPanel.requestedPanel;
+    if (!requested) return;
+    untrack(() => {
+      const context = bottomPanelContext(generation.mode === "video", generation.isNovelAi);
+      bottomPanel.selectTab(shelfSelectionKey(context, generation.mode), requested);
+      bottomPanel.requestedPanel = null;
+      openShelf();
+    });
+  });
 
   let dragging = $state<"left" | "right" | "bottom" | null>(null);
   let dragStartX = 0;
@@ -1182,7 +1251,7 @@
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragStartWidth = side === "left" ? leftWidth : rightWidth;
-    dragStartHeight = bottomHeight;
+    dragStartHeight = Math.min(bottomHeight, shelfMaxHeight);
     e.preventDefault();
   }
 
@@ -1241,7 +1310,7 @@
     if (!dragging) return;
     if (dragging === "bottom") {
       const delta = e.clientY - dragStartY;
-      bottomHeight = Math.min(BOTTOM_MAX, Math.max(BOTTOM_MIN, dragStartHeight - delta));
+      bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, dragStartHeight - delta));
     } else {
       const delta = e.clientX - dragStartX;
       if (dragging === "left") {
@@ -1279,7 +1348,7 @@
 
       const next = [...remaining];
       next.splice(Math.max(0, insertAt), 0, draggingSection);
-      sectionOrder = normalizeSectionOrder(next);
+      sectionOrder = normalizeGenerationSections(next);
     }
     draggingSection = null;
     pendingDrop = null;
@@ -1302,6 +1371,21 @@
 
   function resetBottomHeight() {
     bottomHeight = BOTTOM_DEFAULT;
+    savePanelLayout();
+  }
+
+  function resizeBottomWithKeyboard(event: KeyboardEvent) {
+    if (bottomCollapsed) return;
+    let height: number;
+    if (event.key === "ArrowUp") height = Math.min(bottomHeight, shelfMaxHeight) + 20;
+    else if (event.key === "ArrowDown") height = Math.min(bottomHeight, shelfMaxHeight) - 20;
+    else if (event.key === "Home") height = BOTTOM_MIN;
+    else if (event.key === "End") height = shelfMaxHeight;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    bottomHeight = Math.min(shelfMaxHeight, Math.max(BOTTOM_MIN, height));
+    savePanelLayout();
   }
 
   $effect(() => {
@@ -1314,7 +1398,10 @@
     untrack(() => {
       if (layoutMode !== mode) {
         bottomByMode[layoutMode] = bottomCollapsed;
+        bottomHeightByMode[layoutMode] = bottomHeight;
         layoutMode = mode;
+        bottomHeight = bottomHeightByMode[mode] ?? BOTTOM_DEFAULT;
+        bottomHeightBeforeCollapse = bottomHeight;
         bottomCollapsed = bottomByMode[mode] ?? (isInpainting || mobileFriendly);
         imagePasteTarget = null;
       }
@@ -1645,7 +1732,7 @@
   {/snippet}
 
   {#snippet dimensionsSection()}
-    {@const dimensionsTitle = generation.mode === 'inpainting' ? locale.t('canvas.document_size') : locale.t('generation.dimensions.title')}
+    {@const dimensionsTitle = sectionLabel('dimensions')}
     <div bind:this={sectionRefs['dimensions']} data-drop-section="dimensions" class="relative rounded-lg bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'dimensions' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'dimensions' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-neutral-800'} transition-colors"
       ondragenter={(e) => onMetadataDragEnter(e, "dimensions")}
       ondragover={(e) => onMetadataDragOver(e, "dimensions")}
@@ -1655,8 +1742,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("dimensions")}
         <button
-          class="flex-1 flex items-center justify-between py-2 pr-3 text-xs text-neutral-300 hover:text-neutral-100 focus:outline-none"
+          class="ui-control flex-1 flex items-center justify-between pr-3 text-xs text-neutral-300 hover:text-neutral-100 focus:outline-none"
           onclick={() => (dimensionsSectionOpen = !dimensionsSectionOpen)}
+          aria-expanded={dimensionsSectionOpen}
           title={dimensionsSectionOpen ? locale.t('common.collapse', { section: dimensionsTitle }) : locale.t('common.expand', { section: dimensionsTitle })}
         >
           <span class="font-medium">{dimensionsTitle}</span>
@@ -1679,7 +1767,7 @@
   {/snippet}
 
   {#snippet promptsSection()}
-    <div bind:this={sectionRefs['prompts']} data-drop-section="prompts" class="relative rounded-lg bg-neutral-900/40 transition-[height,opacity] duration-150 {draggingSection === 'prompts' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'prompts' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-neutral-800'} transition-colors"
+    <div bind:this={sectionRefs['prompts']} data-drop-section="prompts" class="relative rounded-lg bg-ui-surface/70 transition-[height,opacity] duration-150 {draggingSection === 'prompts' ? 'h-0 overflow-hidden opacity-0 m-0! p-0! border-0!' : 'opacity-100'} border {metadataDropTarget === 'prompts' ? 'border-indigo-500/70 ring-2 ring-indigo-500/40' : 'border-ui-accent/20'} transition-colors"
       ondragenter={(e) => onMetadataDragEnter(e, "prompts")}
       ondragover={(e) => onMetadataDragOver(e, "prompts")}
       ondragleave={(e) => onMetadataDragLeave(e, "prompts")}
@@ -1688,11 +1776,12 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("prompts")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (promptsSectionOpen = !promptsSectionOpen)}
-          title={promptsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.prompts.title') }) : locale.t('common.expand', { section: locale.t('generation.prompts.title') })}
+          aria-expanded={promptsSectionOpen}
+          title={promptsSectionOpen ? locale.t('common.collapse', { section: sectionLabel('prompts') }) : locale.t('common.expand', { section: sectionLabel('prompts') })}
         >
-          <span class="font-medium">{locale.t('generation.prompts.title')}</span>
+          <span class="font-medium">{sectionLabel('prompts')}</span>
           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {promptsSectionOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
       </div>
@@ -1707,7 +1796,7 @@
       {#if metadataDropTarget === "prompts"}
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-lg bg-indigo-500/10 border-2 border-dashed border-indigo-400/60">
           <span class="text-xs font-medium text-indigo-300 bg-neutral-900/80 px-3 py-1.5 rounded-full">
-            {locale.t('common.drop_to_import', { section: locale.t('generation.prompts.title') })}
+            {locale.t('common.drop_to_import', { section: sectionLabel('prompts') })}
           </span>
         </div>
       {/if}
@@ -1729,28 +1818,16 @@
           {/if}
 
           <div class="{generation.mode !== 'inpainting' && canvas.currentStagingImage ? 'opacity-50 pointer-events-none' : ''}">
-            <p class="text-xs text-neutral-400 mb-1">{locale.t('generation.image.input')}</p>
+            {#if !imagePreviewUrl}<p class="text-xs text-neutral-400 mb-1">{locale.t('generation.image.input')}</p>{/if}
             {#if imagePreviewUrl}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                class="relative group"
-                data-drop-zone="img-input"
-                ondragenter={(e) => { e.preventDefault(); }}
-                ondragover={(e) => { e.preventDefault(); }}
-                ondrop={handleImageDrop}
-              >
-                <img
-                  src={imagePreviewUrl}
-                  alt={locale.t('generation.image.input')}
-                  class="w-full rounded-lg border border-neutral-700 object-contain max-h-40"
-                />
-                <button
-                  class="absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded bg-neutral-900/80 hover:bg-red-800 text-neutral-300 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                  onclick={clearImage}
-                  title={locale.t('common.remove')}
-                >
-                  &times;
-                </button>
+              <div class="flex items-center gap-3 rounded-lg border border-ui-border bg-ui-surface p-2" data-drop-zone="img-input" ondragenter={(event) => event.preventDefault()} ondragover={(event) => event.preventDefault()} ondrop={handleImageDrop}>
+                <img src={imagePreviewUrl} alt={locale.t('generation.image.input')} class="size-16 shrink-0 rounded-md bg-neutral-950 object-contain" />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-xs text-neutral-200" title={generation.inputImage ?? undefined}>{generation.inputImage}</p>
+                  <button type="button" onclick={browseImage} class="ui-control text-xs text-ui-accent hover:underline">{locale.t('generation.workspace.replace_source')}</button>
+                </div>
+                <button type="button" onclick={clearImage} aria-label={locale.t('common.remove')} class="ui-icon-button flex shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-red-400">×</button>
               </div>
             {:else}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1804,11 +1881,13 @@
           <div use:scrollCapture>
             <label class="flex items-center justify-between text-xs text-neutral-400 mb-1">
               <span>{locale.t('generation.image.denoise')}<InfoTip text={locale.t('generation.image.denoise_tip')} /></span>
-              <EditableValue value={generation.denoise} min={0} max={1} step={0.01} decimals={2} onchange={(v) => generation.denoise = v} />
+              <EditableValue value={generation.denoise} min={0} max={1} step={0.01} decimals={2} onchange={(v) => { generation.denoise = v; generation.saveSettings(); }} />
             </label>
             <input
               type="range"
               bind:value={generation.denoise}
+              aria-label={locale.t("generation.image.denoise")}
+              onchange={() => generation.saveSettings()}
               min="0"
               max="1"
               step="0.01"
@@ -1824,6 +1903,7 @@
                 <input
                   type="checkbox"
                   bind:checked={generation.differentialDiffusion}
+                  onchange={() => generation.saveSettings()}
                   class="accent-indigo-500 w-4 h-4 shrink-0"
                 />
               </label>
@@ -1920,6 +2000,8 @@
               <input
                 type="range"
                 bind:value={generation.growMaskBy}
+                aria-label={locale.t("generation.inpaint.grow_mask")}
+                onchange={() => generation.saveSettings()}
                 min="0"
                 max="64"
                 step="1"
@@ -1934,8 +2016,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("imageInputs")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (imageSectionOpen = !imageSectionOpen)}
+          aria-expanded={imageSectionOpen}
           title={imageSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image.title') }) : locale.t('common.expand', { section: locale.t('generation.image.title') })}
         >
           <span class="font-medium">{locale.t('generation.image.title')}</span>
@@ -1956,8 +2039,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("inpaintLayers")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (layersSectionOpen = !layersSectionOpen)}
+          aria-expanded={layersSectionOpen}
           title={layersSectionOpen ? locale.t('common.collapse', { section: locale.t('canvas.workspace_title') }) : locale.t('common.expand', { section: locale.t('canvas.workspace_title') })}
         >
           <span class="font-medium">{locale.t('canvas.workspace_title')}</span>
@@ -1966,8 +2050,8 @@
       </div>
       {#if layersSectionOpen}
         <div class="px-2 pb-2 pt-0.5 space-y-1.5">
-          <div class="sticky top-0 z-10 grid grid-cols-3 gap-0.5 rounded-md bg-neutral-950/95 p-0.5">
-            {#each ['base', 'layers', 'control'] as tab}
+          <div class="sticky top-0 z-10 grid grid-cols-2 gap-0.5 rounded-md bg-neutral-950/95 p-0.5">
+            {#each ['base', 'layers'] as tab}
               <button type="button" onclick={() => canvas.selectedWorkspaceSection = tab as 'base' | 'layers' | 'control'} aria-pressed={canvas.selectedWorkspaceSection === tab} class="h-7 rounded text-[11px] transition-colors {canvas.selectedWorkspaceSection === tab ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'}">{locale.t('canvas.tab_' + tab)}</button>
             {/each}
           </div>
@@ -1986,23 +2070,19 @@
             <div class="mt-2">{@render maskInputControls()}</div>
           </details>
           <details class="rounded-md border border-neutral-800 p-2">
-            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('canvas.document_settings')}</summary>
+            <summary class="cursor-pointer text-xs text-neutral-300">{locale.t('canvas.document_size')}</summary>
             <div class="mt-2 space-y-2">
-              {@render imageSettingsControls()}
-              {@render maskGrowthControls()}
-              {#if !generation.isNovelAi}<InpaintSettings settings={generation.inpaintSettings} onchange={(settings) => { generation.inpaintSettings = settings; generation.saveSettings(); }} />{/if}
+              <DimensionControls suggestedAspect={imageAspect} />
             </div>
           </details>
 
-          {:else if canvas.selectedWorkspaceSection === 'control'}
-            {#if !generation.isNovelAi}<ControlNetSettings />{/if}
           {:else}
           <div class="flex gap-1">
-            <label class="h-7 flex flex-1 cursor-pointer items-center justify-center rounded border border-neutral-700 px-2 text-center text-[10px] text-neutral-300 hover:border-indigo-500 focus-within:border-indigo-500">
-              {locale.t(rasterImportBusy ? 'generation.image.uploading' : 'canvas.import_raster')}
+            <label title={locale.t("canvas.import_raster")} class="ui-control flex flex-1 cursor-pointer items-center justify-center rounded border border-ui-border px-2 text-center text-xs text-neutral-300 hover:border-ui-accent focus-within:border-ui-accent">
+              {locale.t(rasterImportBusy ? 'generation.image.uploading' : 'common.import')}
               <input type="file" accept="image/*" disabled={rasterImportBusy} class="sr-only" onchange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void pasteRaster(file); event.currentTarget.value = ''; }} />
             </label>
-            <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} class="h-7 rounded border border-neutral-700 px-2 text-[10px] text-neutral-300 hover:border-indigo-500">{locale.t('generation.image.ctrl_v_paste')}</button>
+            <button type="button" disabled={rasterImportBusy} onclick={() => pasteRaster()} title={locale.t("generation.image.ctrl_v_paste")} class="ui-control rounded border border-ui-border px-3 text-xs text-neutral-300 hover:border-ui-accent">{locale.t('common.paste')}</button>
           </div>
           <LayerPanel oneditpatchy={oneditpatchy ? () => editCanvasSourceInPatchy('layer') : undefined} />
           {/if}
@@ -2016,8 +2096,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("generationSettings")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (controlsSectionOpen = !controlsSectionOpen)}
+          aria-expanded={controlsSectionOpen}
           title={controlsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.settings.title') }) : locale.t('common.expand', { section: locale.t('generation.settings.title') })}
         >
           <span class="font-medium">{locale.t('generation.settings.title')}</span>
@@ -2050,8 +2131,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("model")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (modelSectionOpen = !modelSectionOpen)}
+          aria-expanded={modelSectionOpen}
           title={modelSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.model.title') }) : locale.t('common.expand', { section: locale.t('generation.model.title') })}
         >
           <span class="font-medium">{locale.t('generation.model.title')}</span>
@@ -2083,8 +2165,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("sampler")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (samplerSectionOpen = !samplerSectionOpen)}
+          aria-expanded={samplerSectionOpen}
           title={samplerSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.sampler.title') }) : locale.t('common.expand', { section: locale.t('generation.sampler.title') })}
         >
           <span class="font-medium">{locale.t('generation.sampler.title')}</span>
@@ -2111,8 +2194,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("novelai")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (novelaiSectionOpen = !novelaiSectionOpen)}
+          aria-expanded={novelaiSectionOpen}
           title={novelaiSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.novelai.title') }) : locale.t('common.expand', { section: locale.t('generation.novelai.title') })}
         >
           <span class="font-medium">{locale.t('generation.novelai.title')}</span>
@@ -2132,8 +2216,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("naiFaceDetail")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (naiFaceDetailSectionOpen = !naiFaceDetailSectionOpen)}
+          aria-expanded={naiFaceDetailSectionOpen}
           title={naiFaceDetailSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.nai_face_detail.title') }) : locale.t('common.expand', { section: locale.t('generation.nai_face_detail.title') })}
         >
           <span class="font-medium">{locale.t('generation.nai_face_detail.title')}</span>
@@ -2153,8 +2238,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("controlnet")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (controlnetSectionOpen = !controlnetSectionOpen)}
+          aria-expanded={controlnetSectionOpen}
           title={controlnetSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.controlnet.title') }) : locale.t('common.expand', { section: locale.t('generation.controlnet.title') })}
         >
           <span class="font-medium">{locale.t('generation.controlnet.title')}</span>
@@ -2174,8 +2260,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("styleTransfer")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (styleTransferSectionOpen = !styleTransferSectionOpen)}
+          aria-expanded={styleTransferSectionOpen}
           title={styleTransferSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.style_transfer.title') }) : locale.t('common.expand', { section: locale.t('generation.style_transfer.title') })}
         >
           <span class="font-medium">{locale.t('generation.style_transfer.title')}</span>
@@ -2195,8 +2282,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("styleRef")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (styleRefSectionOpen = !styleRefSectionOpen)}
+          aria-expanded={styleRefSectionOpen}
           title={styleRefSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.style_ref.title') }) : locale.t('common.expand', { section: locale.t('generation.style_ref.title') })}
         >
           <span class="font-medium">{locale.t('generation.style_ref.title')}</span>
@@ -2216,8 +2304,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("imageEdit")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (imageEditSectionOpen = !imageEditSectionOpen)}
+          aria-expanded={imageEditSectionOpen}
           title={imageEditSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.image_edit.title') }) : locale.t('common.expand', { section: locale.t('generation.image_edit.title') })}
         >
           <span class="font-medium">{locale.t('generation.image_edit.title')}</span>
@@ -2237,8 +2326,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("videoSettings")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (videoSettingsSectionOpen = !videoSettingsSectionOpen)}
+          aria-expanded={videoSettingsSectionOpen}
           title={videoSettingsSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.video.title') }) : locale.t('common.expand', { section: locale.t('generation.video.title') })}
         >
           <span class="font-medium">{locale.t('generation.video.title')}</span>
@@ -2262,8 +2352,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("facefix")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (facefixSectionOpen = !facefixSectionOpen)}
+          aria-expanded={facefixSectionOpen}
           title={facefixSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.facefix.title') }) : locale.t('common.expand', { section: locale.t('generation.facefix.title') })}
         >
           <span class="font-medium">{locale.t('generation.facefix.title')}</span>
@@ -2295,8 +2386,9 @@
       <div class="flex items-stretch w-full rounded-t-lg transition-colors hover:bg-neutral-800/50">
         {@render dragHandle("upscaleHistory")}
         <button
-          class="flex-1 px-3 py-2 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
+          class="ui-control flex-1 px-3 flex items-center justify-between text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
           onclick={() => (postSectionOpen = !postSectionOpen)}
+          aria-expanded={postSectionOpen}
           title={postSectionOpen ? locale.t('common.collapse', { section: locale.t('generation.upscale.title') }) : locale.t('common.expand', { section: locale.t('generation.upscale.title') })}
         >
           <span class="font-medium">{locale.t('generation.upscale.title')}</span>
@@ -2357,11 +2449,26 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:clientWidth={workspaceWidth}
+    bind:clientHeight={workspaceHeight}
     class="flex flex-col h-full select-none {draggingSection ? 'cursor-grabbing' : ''}"
     onmousemove={onPointerMove}
     onmouseup={onPointerUp}
     onmouseleave={onPointerUp}
   >
+    {#if !mobileFriendly}
+      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-ui-border bg-ui-surface px-3 py-2" role="region" aria-label={locale.t("generation.navigation.toolbar")}>
+        <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label={locale.t("generation.navigation.mode")}>
+          {#if generation.mode === "video"}<span class="ui-control px-3 text-sm font-medium">{locale.t("generation.mode.video")}</span>{/if}
+          {#each modes as mode}
+            <button type="button" class="ui-control shrink-0 rounded-lg border px-3 text-xs font-medium transition-colors {generation.mode === mode.id ? 'border-ui-accent bg-ui-selected text-neutral-100' : 'border-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100'}" aria-pressed={generation.mode === mode.id} onclick={() => { generation.mode = mode.id; if (mode.id !== "inpainting") canvas.isCanvasMode = false; }}>{mode.label()}</button>
+          {/each}
+        </nav>
+        <button type="button" class="ui-control flex items-center gap-2 rounded-lg border border-ui-border px-3 text-xs text-neutral-300 hover:bg-neutral-800" onclick={() => commands.show("generation")}><Search size={15} />{locale.t("generation.navigation.find")}</button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.navigation.collapse")} aria-label={locale.t("generation.navigation.collapse")} onclick={() => setVisibleSectionsOpen(false)}><ChevronsDownUp size={17} /></button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.navigation.expand")} aria-label={locale.t("generation.navigation.expand")} onclick={() => setVisibleSectionsOpen(true)}><ChevronsUpDown size={17} /></button>
+        <button type="button" class="ui-icon-button flex items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800" title={locale.t("generation.swap_panels")} aria-label={locale.t("generation.swap_panels")} onclick={swapPanels}><ArrowLeftRight size={17} /></button>
+      </div>
+    {/if}
     <!-- Main row: side panels + preview. The bottom panel spans the full width below this row. -->
     <div class="flex flex-1 min-h-0">
     {#if mobileFriendly}
@@ -2376,7 +2483,7 @@
                 generation.mode = mode.id;
                 if (mode.id !== "inpainting") canvas.isCanvasMode = false;
               }}
-              class="shrink-0 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
+              class="ui-control shrink-0 whitespace-nowrap text-[11px] leading-none px-2.5 py-2 rounded-md transition-colors {generation.mode === mode.id
                 ? 'bg-neutral-700 text-white'
                 : 'text-neutral-400 hover:text-neutral-200'}"
             >
@@ -2421,45 +2528,27 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden pl-3 pr-5 pt-20 pb-6 flex flex-col gap-2' : 'contents'}">
-        {#if controlsSide === "left" && !mobileFriendly}
-          <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-2 pt-2 pb-2">
-            <div class="flex gap-1.5 items-center">
-              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
-                {#if generation.mode === "video"}
-                  <h1 class="flex-1 py-1.5 text-center text-xs font-medium text-neutral-200">{locale.t("generation.mode.video")}</h1>
-                {/if}
-                {#each modes as mode}
-                  <button
-                    onclick={() => {
-                      generation.mode = mode.id;
-                      if (mode.id !== "inpainting") canvas.isCanvasMode = false;
-                    }}
-                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
-                      ? 'bg-neutral-700 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'}"
-                  >
-                    {mode.label()}
-                  </button>
-                {/each}
-              </div>
-              <button
-                onclick={swapPanels}
-                class="p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
-                title={locale.t('generation.swap_panels')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
-              </button>
-            </div>
-
-          </div>
-        {/if}
-
         {@render sectionDropZone("left", 0)}
         {#each leftRenderSections as section, i}
           {@render renderSection(section)}
           {@render sectionDropZone("left", i + 1)}
         {/each}
 
+        {#if generation.mode === 'inpainting'}
+          <section aria-label={locale.t('canvas.document_settings')} class="rounded-lg border border-ui-border bg-ui-surface p-3">
+            <h3 class="mb-2 text-xs font-medium text-neutral-300">{locale.t('canvas.document_settings')}</h3>
+            <div class="space-y-2">{@render imageSettingsControls()}</div>
+            {#if !generation.isNovelAi}
+              <details class="mt-2 border-t border-ui-border pt-2">
+                <summary class="cursor-pointer text-xs text-neutral-400">{locale.t('canvas.mask_settings')}</summary>
+                <div class="mt-3 space-y-3">
+                  {@render maskGrowthControls()}
+                  <InpaintSettings settings={generation.inpaintSettings} onchange={(settings) => { generation.inpaintSettings = settings; generation.saveSettings(); }} />
+                </div>
+              </details>
+            {/if}
+          </section>
+        {/if}
         {#if controlsSide === "left"}
           <div class="sticky bottom-0 z-20 mt-auto border-t border-neutral-800 bg-neutral-950 rounded-t-lg px-3 pt-3 pb-5">
             <h3 class="text-xs text-neutral-400 mb-1.5 font-medium">{locale.t('generation.generate')}</h3>
@@ -2582,39 +2671,6 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto pl-5 pr-3 pt-20 pb-6 space-y-2' : 'contents'}">
-        {#if controlsSide === "right" && !mobileFriendly}
-          <div class="sticky top-0 z-10 bg-neutral-950 -mx-3 px-3 -mt-3 pt-3 pb-2">
-            <div class="flex gap-1.5 items-center">
-              <div class="flex min-w-0 gap-0.5 overflow-x-auto bg-neutral-900 rounded-lg p-1 flex-1 [scrollbar-width:none]">
-                {#if generation.mode === "video"}
-                  <h1 class="flex-1 py-1.5 text-center text-xs font-medium text-neutral-200">{locale.t("generation.mode.video")}</h1>
-                {/if}
-                {#each modes as mode}
-                  <button
-                    onclick={() => {
-                      generation.mode = mode.id;
-                      if (mode.id !== "inpainting") canvas.isCanvasMode = false;
-                    }}
-                    class="shrink-0 whitespace-nowrap px-2 text-[10px] py-1.5 rounded-md transition-colors {generation.mode === mode.id
-                      ? 'bg-neutral-700 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'}"
-                  >
-                    {mode.label()}
-                  </button>
-                {/each}
-              </div>
-              <button
-                onclick={swapPanels}
-                class="p-1.5 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
-                title={locale.t('generation.swap_panels')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7H20m0 0l-4-4m4 4l-4 4"/><path d="M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
-              </button>
-            </div>
-
-          </div>
-        {/if}
-
         {@render sectionDropZone("right", 0)}
         {#each rightRenderSections as section, i}
           {@render renderSection(section)}
@@ -2635,31 +2691,33 @@
     <!-- Bottom panel (LoRAs / Images / Prompts) — full width, below the side panels -->
     {#if !mobileFriendly}
       <div class="relative shrink-0 flex items-center group">
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- A focusable ARIA separator is the window-splitter keyboard control. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={locale.t('generation.drag_to_resize')}
+          aria-valuemin={BOTTOM_MIN}
+          aria-valuemax={shelfMaxHeight}
+          aria-valuenow={Math.min(bottomHeight, shelfMaxHeight)}
+          aria-controls="desktop-bottom-panel"
+          aria-disabled={bottomCollapsed}
+          tabindex={bottomCollapsed ? -1 : 0}
+          onkeydown={resizeBottomWithKeyboard}
           class="h-1 flex-1 cursor-row-resize hover:bg-indigo-500/40 transition-colors {dragging === 'bottom' ? 'bg-indigo-500/60' : 'bg-neutral-800'}"
           onmousedown={(e) => onDividerDown("bottom", e)}
           ondblclick={resetBottomHeight}
           title={locale.t('generation.drag_to_resize')}
         ></div>
-        <button
-          onclick={toggleBottomPanel}
-          class="absolute left-1/2 -translate-x-1/2 bottom-0 z-20 h-6 w-12 flex items-center justify-center rounded-t border border-b-0 transition-colors {bottomCollapsed
-            ? 'bg-indigo-600 border-indigo-500/70 text-white hover:bg-indigo-500'
-            : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'}"
-          title={bottomCollapsed ? locale.t('generation.panel.expand_bottom') : locale.t('generation.panel.collapse_bottom')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform {bottomCollapsed ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
+
       </div>
-      {#if !bottomCollapsed}
         <div
+          id="desktop-bottom-panel"
           class="overflow-hidden shrink-0 min-w-0 border-t border-neutral-800/50"
-          style="height: {bottomHeight}px"
+          style="height: {bottomCollapsed ? 34 : Math.min(bottomHeight, shelfMaxHeight)}px"
         >
-          <BottomPanel onupscale={upscaleImage} oninpaint={inpaintImage} onrefine={refineImage} oncontextmenu={handleSessionContextMenu} />
+          <BottomPanel collapsed={bottomCollapsed} onactivate={openShelf} oncollapse={toggleBottomPanel} onbrowse={() => setShelfHeight(BOTTOM_DEFAULT)} onexpand={() => setShelfHeight(shelfMaxHeight)} onupscale={upscaleImage} oninpaint={inpaintImage} onrefine={refineImage} oncontextmenu={handleSessionContextMenu} />
         </div>
-      {/if}
     {/if}
   </div>
 

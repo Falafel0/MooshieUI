@@ -49,3 +49,13 @@ export function resultOriginText(
 ): string {
   return flattened ? layeredSource ?? documentName : documentName;
 }
+
+/** A photo uses paint differences; an existing mask returns its whole coverage. */
+export function patchyUsesPaintDifference(sourceKind: "base" | "raster" | "mask" | "region" | undefined): boolean {
+  return sourceKind !== "mask" && sourceKind !== "region";
+}
+
+/** A canvas hand-off belongs to the document open when it was exported. */
+export function patchyDocumentMatches(sourceVersion: number | undefined, currentVersion: number): boolean {
+  return sourceVersion === undefined || sourceVersion === currentVersion;
+}

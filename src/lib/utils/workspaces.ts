@@ -14,3 +14,39 @@
  */
 export const videoWorkspaceVisible = false;
 export const musicWorkspaceVisible = false;
+
+export type WorkspaceId = "generate" | "studio" | "video" | "music" | "gallery" | "modelhub" | "artists" | "characters" | "settings";
+export type WorkspacePage = Exclude<WorkspaceId, "video">;
+
+export interface WorkspaceDefinition {
+  id: WorkspaceId;
+  labelKey: string;
+  keywords: string;
+}
+
+const WORKSPACES: WorkspaceDefinition[] = [
+  { id: "generate", labelKey: "nav.generate", keywords: "image txt2img img2img inpaint generation" },
+  { id: "studio", labelKey: "nav.prompt_studio", keywords: "prompt studio compose tags draft" },
+  { id: "video", labelKey: "generation.mode.video", keywords: "video animation" },
+  { id: "music", labelKey: "nav.music", keywords: "music audio" },
+  { id: "gallery", labelKey: "nav.gallery", keywords: "gallery images history" },
+  { id: "modelhub", labelKey: "nav.modelhub", keywords: "models download hub" },
+  { id: "artists", labelKey: "nav.artists", keywords: "artist styles library" },
+  { id: "characters", labelKey: "artist_gallery.tab_characters", keywords: "characters animadex" },
+  { id: "settings", labelKey: "nav.settings", keywords: "settings preferences configuration" },
+];
+
+export function availableWorkspaces(options: { canUseModelhub: boolean; canUseVideo: boolean }): WorkspaceDefinition[] {
+  return WORKSPACES.filter(({ id }) =>
+    (id !== "modelhub" || options.canUseModelhub) &&
+    (id !== "video" || (videoWorkspaceVisible && options.canUseVideo)) &&
+    (id !== "music" || musicWorkspaceVisible),
+  );
+}
+
+export function availableSettingsShortcuts(browserMode: boolean) {
+  return [
+    { id: "appearance", labelKey: "settings.sections.appearance", keywords: "density compact comfortable touch theme animation motion", desktopOnly: false },
+    { id: "projects", labelKey: "settings.sections.projects", keywords: "project workspace save load", desktopOnly: true },
+  ].filter((entry) => !entry.desktopOnly || !browserMode);
+}

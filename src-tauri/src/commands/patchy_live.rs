@@ -87,6 +87,20 @@ impl LiveSession {
                 }),
             )
             .await?;
+        timeout(REQUEST_TIMEOUT, async {
+            session
+                .input
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+                .await?;
+            session.input.flush().await
+        })
+        .await
+        .map_err(|_| failure("Patchy initialization notification timed out"))?
+        .map_err(|error| {
+            failure(format!(
+                "Patchy initialization notification failed: {error}"
+            ))
+        })?;
         Ok(session)
     }
 
@@ -100,29 +114,28 @@ impl LiveSession {
             self.input.write_all(&bytes).await?;
             self.input.write_all(b"\n").await?;
             self.input.flush().await?;
-            let mut line = String::new();
-            if (&mut self.output)
-                .take(16 * 1024 * 1024 + 1)
-                .read_line(&mut line)
-                .await?
-                == 0
-            {
-                return Err(failure("Patchy live connector disconnected"));
+            // Notifications may arrive before the matching response. They do not
+            // complete this request; a bounded loop also limits malformed peers.
+            for _ in 0..32 {
+                let mut line = String::new();
+                if (&mut self.output)
+                    .take(16 * 1024 * 1024 + 1)
+                    .read_line(&mut line)
+                    .await?
+                    == 0
+                {
+                    return Err(failure("Patchy live connector disconnected"));
+                }
+                if line.len() > 16 * 1024 * 1024 || !line.ends_with('\n') {
+                    return Err(failure("Patchy live response exceeds the protocol limit"));
+                }
+                let response: Value = serde_json::from_str(&line)
+                    .map_err(|error| failure(format!("Invalid Patchy response: {error}")))?;
+                if let Some(result) = response_result(response, id)? {
+                    return Ok(result);
+                }
             }
-            if line.len() > 16 * 1024 * 1024 || !line.ends_with('\n') {
-                return Err(failure("Patchy live response exceeds the protocol limit"));
-            }
-            let response: Value = serde_json::from_str(&line)
-                .map_err(|error| failure(format!("Invalid Patchy response: {error}")))?;
-            if response["id"].as_u64() != Some(id) {
-                return Err(failure(
-                    "Patchy live connector returned a mismatched request ID",
-                ));
-            }
-            if let Some(error) = response.get("error") {
-                return Err(failure(format!("Patchy live request failed: {error}")));
-            }
-            Ok(response.get("result").cloned().unwrap_or(Value::Null))
+            Err(failure("Patchy live connector sent too many notifications"))
         })
         .await
         .map_err(|_| failure("Patchy live connector timed out"))?
@@ -192,6 +205,7 @@ pub struct PatchyLiveRead {
     pub height: u32,
     pub full_resolution: bool,
     pub requested_target: Option<String>,
+    pub layers: Value,
 }
 
 /// Patchy's documented user-script directory is under Qt's RTsoft/Patchy
@@ -332,6 +346,7 @@ async fn read_from_session(
             height: 0,
             full_resolution: false,
             requested_target: take_return_request(handoff),
+            layers: document["layers"].clone(),
         });
     }
     if preview_only {
@@ -356,6 +371,7 @@ async fn read_from_session(
             height: image.height(),
             full_resolution: image.width() == width && image.height() == height,
             requested_target: take_return_request(handoff),
+            layers: document["layers"].clone(),
         });
     }
     let mut canvas = RgbaImage::new(width, height);
@@ -399,6 +415,7 @@ async fn read_from_session(
         height,
         full_resolution: true,
         requested_target: None,
+        layers: document["layers"].clone(),
     })
 }
 
@@ -434,6 +451,49 @@ pub async fn disconnect_patchy_live() -> Result<(), AppError> {
     Ok(())
 }
 
+fn find_live_layer<'a>(layers: &'a Value, id: &str) -> Option<&'a Value> {
+    for layer in layers.as_array()? {
+        if layer["id"].as_str() == Some(id) {
+            return Some(layer);
+        }
+        if let Some(found) = find_live_layer(&layer["children"], id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn validated_layer_change(
+    document: &Value,
+    action: &str,
+    change: &Value,
+) -> Result<Value, AppError> {
+    let id = change["id"]
+        .as_str()
+        .ok_or_else(|| failure("Patchy layer ID is missing"))?;
+    let layer = find_live_layer(&document["layers"], id)
+        .ok_or_else(|| failure("Patchy layer no longer exists; refresh the panel"))?;
+    if layer["locked"].as_bool().unwrap_or(true) {
+        return Err(failure("Patchy layer is locked"));
+    }
+    let value = match action {
+        "set_layer_visibility" => Value::Bool(
+            change["value"]
+                .as_bool()
+                .ok_or_else(|| failure("Layer visibility must be a boolean"))?,
+        ),
+        "set_layer_opacity" => {
+            let value = change["value"]
+                .as_f64()
+                .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+                .ok_or_else(|| failure("Layer opacity must be between 0 and 100"))?;
+            json!(value)
+        }
+        _ => return Err(failure("Unknown Patchy layer action")),
+    };
+    Ok(json!({"layerId": id, "value": value}))
+}
+
 /// Apply a deliberate, undoable action to the attached document. The token
 /// comes from a preview and is checked again immediately before the edit;
 /// changes made by the artist in between are never overwritten or retried.
@@ -444,6 +504,7 @@ pub async fn patchy_live_action(
     action: String,
     expected_state: String,
     source_bytes: Option<Vec<u8>>,
+    layer_change: Option<Value>,
 ) -> Result<bool, AppError> {
     let handoff = handoff_path(&path)?;
     let mut guard = LIVE.lock().await;
@@ -491,6 +552,21 @@ pub async fn patchy_live_action(
                 .as_bool()
                 .unwrap_or(false))
         }
+        "set_layer_visibility" | "set_layer_opacity" => {
+            let change = validated_layer_change(
+                doc,
+                &action,
+                &layer_change.ok_or_else(|| failure("Patchy layer change is missing"))?,
+            )?;
+            let code = if action == "set_layer_visibility" {
+                "var layer = app.getDocument(patchy.args.documentId).getLayer(patchy.args.layerId); layer.visible = patchy.args.value;"
+            } else {
+                "var layer = app.getDocument(patchy.args.documentId).getLayer(patchy.args.layerId); layer.opacity = patchy.args.value;"
+            };
+            session.tool("execute_script", json!({"name": "MooshieUI layer properties", "expectedState": expected_state,
+                "code": code, "args": {"documentId": document_id, "layerId": change["layerId"], "value": change["value"]}})).await?;
+            Ok(true)
+        }
         "add_reference_layer" => {
             let bytes = source_bytes.ok_or_else(|| failure("Source image is missing"))?;
             if bytes.len() > 64 * 1024 * 1024
@@ -516,9 +592,46 @@ pub async fn patchy_live_action(
     }
 }
 
+/// Ignore JSON-RPC notifications, but never accept another request's response.
+fn response_result(response: Value, id: u64) -> Result<Option<Value>, AppError> {
+    if response.get("id").is_none()
+        && response["method"]
+            .as_str()
+            .is_some_and(|method| method.starts_with("notifications/"))
+    {
+        return Ok(None);
+    }
+    if response["id"].as_u64() != Some(id) {
+        return Err(failure(
+            "Patchy live connector returned a mismatched request ID",
+        ));
+    }
+    if let Some(error) = response.get("error") {
+        return Err(failure(format!("Patchy live request failed: {error}")));
+    }
+    Ok(Some(response.get("result").cloned().unwrap_or(Value::Null)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_responses_ignore_notifications_and_reject_unrelated_ids() {
+        assert!(response_result(
+            json!({"jsonrpc":"2.0","method":"notifications/progress","params":{}}),
+            7
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            response_result(json!({"jsonrpc":"2.0","id":7,"result":{"ok":true}}), 7).unwrap(),
+            Some(json!({"ok":true}))
+        );
+        assert!(response_result(json!({"id":8,"result":{}}), 7).is_err());
+        assert!(response_result(json!({"id":7,"error":{"message":"failed"}}), 7).is_err());
+        assert!(response_result(json!({"method":"unknown"}), 7).is_err());
+    }
 
     #[test]
     fn live_document_match_is_scoped_to_the_handoff() {
@@ -527,5 +640,41 @@ mod tests {
         assert!(matches_handoff("/tmp/mooshie/portrait-123.psd", handoff));
         assert!(!matches_handoff("/tmp/other/portrait-123.psd", handoff));
         assert!(!matches_handoff("/tmp/mooshie/portrait-456.png", handoff));
+    }
+}
+
+#[cfg(test)]
+mod layer_change_tests {
+    use super::*;
+    #[test]
+    fn changes_only_known_unlocked_layers_with_valid_values() {
+        let doc = json!({"layers":[{"id":"group","locked":false,"children":[{"id":"paint","locked":false,"children":[]},{"id":"locked","locked":true}]}]});
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_visibility",
+            &json!({"id":"paint","value":false})
+        )
+        .is_ok());
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_opacity",
+            &json!({"id":"paint","value":42.5})
+        )
+        .is_ok());
+        for change in [
+            json!({"id":"missing","value":25}),
+            json!({"id":"locked","value":25}),
+            json!({"id":"paint","value":-1}),
+            json!({"id":"paint","value":101}),
+            json!({"id":"paint","value":"50"}),
+        ] {
+            assert!(validated_layer_change(&doc, "set_layer_opacity", &change).is_err());
+        }
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_visibility",
+            &json!({"id":"paint","value":1})
+        )
+        .is_err());
     }
 }

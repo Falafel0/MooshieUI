@@ -4,5 +4,5 @@
 var documentToExport = app.activeDocument;
 if (!documentToExport) throw new Error("No Patchy document was opened");
 if (!patchy.args.out) throw new Error("Missing output PNG path");
-documentToExport.exportAs(patchy.args.out);
+if (!documentToExport.exportAs(patchy.args.out)) throw new Error("Patchy could not export the PNG");
 console.log("MooshieUI export complete");

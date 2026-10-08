@@ -5,75 +5,62 @@
   import { locale } from "../../stores/locale.svelte.js";
   import BrushSettings from "./controls/BrushSettings.svelte";
   import ColorPicker from "./controls/ColorPicker.svelte";
-  import { PaintBucket, Trash2, Undo2, Redo2 } from "@lucide/svelte";
+  import { Undo2, Redo2 } from "@lucide/svelte";
 
-  const editable = $derived(canvas.selectedWorkspaceSection === 'layers' && !!canvas.activeLayer?.visible && !canvas.activeLayer?.locked);
-  const tools: { id: ToolType; labelKey: string; hotkey: string; icon: string }[] = [
-    {
-      id: "brush",
-      labelKey: "canvas.brush",
-      hotkey: "B",
-      icon: `<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>`,
-    },
-    {
-      id: "eraser",
-      labelKey: "canvas.eraser",
-      hotkey: "E",
-      icon: `<path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L13.8 2.4c.8-.8 2-.8 2.8 0L21 6.8c.8.8.8 2 0 2.8L12 18"/>`,
-    },
-    {
-      id: "rectFill",
-      labelKey: "canvas.rectangle",
-      hotkey: "U",
-      icon: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>`,
-    },
-    {
-      id: "ellipseFill",
-      labelKey: "canvas.ellipse", hotkey: "O", icon: '<ellipse cx="12" cy="12" rx="9" ry="7" />',
-    },
-    {
-      id: "lasso",
-      labelKey: "canvas.lasso",
-      hotkey: "Q",
-      icon: `<path d="M3 14.5A6.5 6.5 0 0 1 2 11c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12.6 12.6 0 0 1-4.7-.9"/><path d="M7 21.5a5 5 0 0 1-2-4"/><circle cx="5" cy="16" r="2"/>`,
-    },
-    {
-      id: "eyedropper",
-      labelKey: "canvas.eyedropper",
-      hotkey: "I",
-      icon: `<path d="M2 22l1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="M14.5 5.5l4-4a1.4 1.4 0 0 1 2 2l-4 4"/>`,
-    },
-    {
-      // Moving and resizing share one tool and one box: the handles sit on the
-      // layer's real content, and a drag anywhere else moves the layer.
-      id: "move",
-      labelKey: "canvas.move",
-      hotkey: "V",
-      icon: `<polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>`,
-    },
-    {
-      id: "canvasResize",
-      labelKey: "canvas.resize_document_on_canvas",
-      hotkey: "C",
-      icon: `<path d="M4 4v13a3 3 0 0 0 3 3h13"/><path d="M9 4h11v11"/><path d="M16 12l4 3 3-4"/>`,
-    },
-    {
-      id: "view",
-      labelKey: "canvas.pan",
-      hotkey: "H",
-      icon: `<path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.7-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15"/>`,
-    },
+  import { Brush, Eraser, RectangleHorizontal, Ellipse, Lasso, Pipette, Move, Hand, ChevronDown, MoreHorizontal } from "@lucide/svelte";
+  import ContextMenu from "../ui/ContextMenu.svelte";
+
+  const editable = $derived(canvas.selectedWorkspaceSection === 'layers' && canvas.activeLayer?.type !== 'controlnet' && canvas.visibleLayers.some(layer => layer.id === canvas.activeLayerId) && !canvas.activeLayer?.locked);
+  const shapes = [
+    { id: 'rectFill' as const, key: 'canvas.rectangle_fill', hotkey: 'U', icon: RectangleHorizontal },
+    { id: 'ellipseFill' as const, key: 'canvas.ellipse_fill', hotkey: 'O', icon: Ellipse },
+    { id: 'lasso' as const, key: 'canvas.freeform_fill', hotkey: 'Q', icon: Lasso },
   ];
-
-  function handleToolClick(id: ToolType) {
-    canvas.setTool(id);
+  const tools = [
+    { id: 'brush' as const, key: 'canvas.brush', hotkey: 'B', icon: Brush },
+    { id: 'eraser' as const, key: 'canvas.eraser', hotkey: 'E', icon: Eraser },
+    { id: 'move' as const, key: 'canvas.move', hotkey: 'V', icon: Move },
+    { id: 'view' as const, key: 'canvas.pan', hotkey: 'H', icon: Hand },
+  ];
+  let menu = $state<'shapes' | 'actions' | null>(null);
+  let menuPosition = $state({ x: 0, y: 0 });
+  let lastShape = $state<ToolType>('rectFill');
+  const currentShape = $derived(shapes.find(shape => shape.id === canvas.activeTool) ?? shapes.find(shape => shape.id === lastShape) ?? shapes[0]);
+  const painting = $derived(editable && ['brush', 'eraser', 'rectFill', 'ellipseFill', 'lasso'].includes(canvas.activeTool));
+  const menuItems = $derived(menu === 'shapes' ? shapes.map(shape => ({
+    label: `${locale.t(shape.key)} (${shape.hotkey})`,
+    action: () => { lastShape = shape.id; canvas.setTool(shape.id); },
+    disabled: !editable,
+  })) : [
+    { label: locale.t('canvas.fill_layer'), action: () => canvas.fillActiveLayer(), disabled: !editable },
+    { label: locale.t('canvas.clear_pixels'), action: () => { if (canvas.activeLayerId) canvas.clearLayer(canvas.activeLayerId); }, disabled: !editable, destructive: true },
+    { label: `${locale.t('canvas.resize_document')} (C)`, action: () => canvas.setTool('canvasResize'), separator: true },
+  ]);
+  function openMenu(event: MouseEvent, kind: 'shapes' | 'actions') {
+    if (menu === kind) { menu = null; return; }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    menuPosition = { x: rect.left, y: rect.bottom + 4 }; menu = kind;
+  }
+  function navigateTools(event: KeyboardEvent) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const buttons = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const index = buttons.indexOf(event.target as HTMLButtonElement);
+    if (index < 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    if (e.defaultPrevented) return;
     if (!canvas.isPointerOverStage) return;
 
     // Don't trigger if typing in a field — including a rich-text editor.
     if (isTypingTarget(e.target)) return;
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j' && canvas.activeLayerId) {
+      e.preventDefault(); canvas.duplicateLayer(canvas.activeLayerId); return;
+    }
 
     // Undo/Redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -95,7 +82,6 @@
     if (e.key === "Delete") {
       const layer = canvas.activeLayer;
       if (editable && layer && canvas.activeLayerId) {
-        canvasHistory.snapshot(layer.id);
         canvas.clearLayer(layer.id);
       }
       return;
@@ -121,62 +107,33 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="flex shrink-0 flex-wrap items-center gap-1 max-h-28 overflow-auto px-2 py-1 bg-neutral-900 border-b border-neutral-800 [scrollbar-width:thin]">
-  <!-- Tool buttons -->
-  <div class="flex shrink-0 items-center gap-0.5">
-    {#each tools.filter((tool) => tool.id !== 'eyedropper' || canvas.canPickColor) as tool}
-      <button
-        disabled={!editable && tool.id !== "view" && tool.id !== "canvasResize"}
-        aria-label={locale.t(tool.labelKey)}
-        onclick={() => handleToolClick(tool.id)}
-        class="disabled:opacity-30 relative w-8 h-8 flex items-center justify-center rounded-md transition-colors {canvas.activeTool === tool.id
-          ? 'bg-indigo-600 text-white'
-          : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'}"
-        title="{locale.t(tool.labelKey)} ({tool.hotkey})"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          {@html tool.icon}
-        </svg>
+<div class="shrink-0 border-b border-ui-border bg-ui-surface">
+  <div role="toolbar" aria-label={locale.t('canvas.toolbar')} tabindex="-1" onkeydown={navigateTools} class="flex items-center gap-1 px-2 py-1">
+    {#each tools as tool}
+      <button type="button" disabled={!editable && tool.id !== 'view'} aria-label={locale.t(tool.key)} aria-pressed={canvas.activeTool === tool.id} title={`${locale.t(tool.key)} (${tool.hotkey})`} onclick={() => canvas.setTool(tool.id)} class="ui-focus h-8 w-8 shrink-0 rounded-md flex items-center justify-center disabled:opacity-30 {canvas.activeTool === tool.id ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:bg-ui-hover hover:text-neutral-200'}">
+        <tool.icon size={17} />
       </button>
+      {#if tool.id === 'eraser'}
+        <div class="flex shrink-0 rounded-md {shapes.some(shape => shape.id === canvas.activeTool) ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400'}">
+          <button type="button" disabled={!editable} aria-label={locale.t(currentShape.key)} aria-pressed={shapes.some(shape => shape.id === canvas.activeTool)} title={`${locale.t(currentShape.key)} (${currentShape.hotkey})`} onclick={() => canvas.setTool(currentShape.id)} class="ui-focus h-8 w-8 flex items-center justify-center rounded-l-md hover:bg-ui-hover disabled:opacity-30"><currentShape.icon size={17} /></button>
+          <button type="button" disabled={!editable} aria-label={locale.t('canvas.fill_shapes')} aria-haspopup="menu" aria-expanded={menu === 'shapes'} onclick={(event) => openMenu(event, 'shapes')} class="ui-focus h-8 w-5 flex items-center justify-center rounded-r-md hover:bg-ui-hover disabled:opacity-30"><ChevronDown size={12} /></button>
+        </div>
+        <div class="mx-1 h-5 w-px bg-ui-border"></div>
+      {/if}
     {/each}
+    {#if canvas.canPickColor}
+      <button type="button" disabled={!editable} aria-label={locale.t('canvas.eyedropper')} aria-pressed={canvas.activeTool === 'eyedropper'} title={`${locale.t('canvas.eyedropper')} (I)`} onclick={() => canvas.setTool('eyedropper')} class="ui-focus h-8 w-8 flex items-center justify-center rounded-md disabled:opacity-30 {canvas.activeTool === 'eyedropper' ? 'bg-ui-selected text-ui-accent' : 'text-neutral-400 hover:bg-ui-hover'}"><Pipette size={17} /></button>
+    {/if}
+    <button type="button" aria-label={locale.t('canvas.more_actions')} title={locale.t('canvas.more_actions')} aria-haspopup="menu" aria-expanded={menu === 'actions'} onclick={(event) => openMenu(event, 'actions')} class="ui-focus h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-neutral-400 hover:bg-ui-hover"><MoreHorizontal size={17} /></button>
+    <div class="min-w-1 flex-1"></div>
+    <button type="button" onclick={() => canvasHistory.undo()} disabled={!canvasHistory.canUndo} aria-label={locale.t('canvas.undo')} title={`${locale.t('canvas.undo')} (Ctrl+Z)`} class="ui-focus h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-neutral-300 hover:bg-ui-hover disabled:opacity-30"><Undo2 size={16} /></button>
+    <button type="button" onclick={() => canvasHistory.redo()} disabled={!canvasHistory.canRedo} aria-label={locale.t('canvas.redo')} title={`${locale.t('canvas.redo')} (Ctrl+Shift+Z)`} class="ui-focus h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-neutral-300 hover:bg-ui-hover disabled:opacity-30"><Redo2 size={16} /></button>
   </div>
-
-  {#if editable && ['brush','eraser','rectFill','ellipseFill','lasso'].includes(canvas.activeTool)}
-    <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
-    <BrushSettings />
+  {#if painting}
+    <div class="flex flex-wrap items-center gap-3 border-t border-ui-border/50 px-3 py-1.5">
+      <BrushSettings />
+      {#if canvas.activeLayer?.type === 'raster' && canvas.activeTool !== 'eraser'}<ColorPicker />{/if}
+    </div>
   {/if}
-
-  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
-
-  {#if editable && canvas.activeLayer?.type === 'raster'}<ColorPicker />{/if}
-  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) canvasHistory.snapshot(canvas.activeLayerId); canvas.fillActiveLayer(); }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-30" aria-label={locale.t('canvas.fill_layer')} title={locale.t('canvas.fill_layer')}><PaintBucket size={16} /></button>
-  <button type="button" disabled={!editable} onclick={() => { if (canvas.activeLayerId) { canvasHistory.snapshot(canvas.activeLayerId); canvas.clearLayer(canvas.activeLayerId); } }} class="h-8 w-8 shrink-0 flex items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30" aria-label={locale.t('canvas.clear_layer')} title={locale.t('canvas.clear_layer')}><Trash2 size={16} /></button>
-
-  <div class="w-px h-5 shrink-0 bg-neutral-700 mx-1"></div>
-
-  <div class="flex items-center gap-1">
-    <button
-      onclick={() => canvasHistory.undo()}
-      disabled={!canvasHistory.canUndo}
-      class="h-8 w-8 shrink-0 flex items-center justify-center rounded transition-colors {canvasHistory.canUndo
-        ? 'text-neutral-300 hover:bg-neutral-800 hover:text-indigo-300'
-        : 'text-neutral-600 cursor-not-allowed'}"
-      aria-label={locale.t('canvas.undo')}
-      title={locale.t('canvas.undo') + ' (Ctrl+Z)'}
-    >
-      <Undo2 size={16} />
-    </button>
-    <button
-      onclick={() => canvasHistory.redo()}
-      disabled={!canvasHistory.canRedo}
-      class="h-8 w-8 shrink-0 flex items-center justify-center rounded transition-colors {canvasHistory.canRedo
-        ? 'text-neutral-300 hover:bg-neutral-800 hover:text-indigo-300'
-        : 'text-neutral-600 cursor-not-allowed'}"
-      aria-label={locale.t('canvas.redo')}
-      title={locale.t('canvas.redo') + ' (Ctrl+Shift+Z / Ctrl+Y)'}
-    >
-      <Redo2 size={16} />
-    </button>
-  </div>
-
 </div>
+<ContextMenu visible={menu !== null} items={menuItems} x={menuPosition.x} y={menuPosition.y} onclose={() => menu = null} />

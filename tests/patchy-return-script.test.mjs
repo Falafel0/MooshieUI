@@ -38,3 +38,16 @@ test('the connector is a visible Patchy script and supports unattended target se
     source: 'MooshieUI Connector',
   }]);
 });
+
+const exportScript = readFileSync(new URL('../src-tauri/resources/patchy/mooshieui-export.js', import.meta.url), 'utf8');
+test('headless Patchy export reports success only when exportAs succeeds', () => {
+  const calls = [], logs = [];
+  const context = { app: {activeDocument: {exportAs: path => {calls.push(path); return true;}}}, patchy: {args: {out: '/tmp/result.png'}}, console: {log: message => logs.push(message)} };
+  runInNewContext(exportScript, context);
+  assert.deepEqual(calls, ['/tmp/result.png']);
+  assert.equal(logs.length, 1);
+  context.app.activeDocument.exportAs = () => false;
+  logs.length = 0;
+  assert.throws(() => runInNewContext(exportScript, context), /could not export/);
+  assert.equal(logs.length, 0);
+});

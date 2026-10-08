@@ -541,6 +541,9 @@ pub struct GenerationParams {
     /// Optional ControlNet parameters
     #[serde(default)]
     pub controlnet: Option<ControlNetParam>,
+    /// Ordered document controls. Legacy global ControlNet remains supported.
+    #[serde(default)]
+    pub controlnet_layers: Vec<ControlNetParam>,
     /// Detected model architecture from the frontend (e.g. "sd3", "sdxl", "sd15", "illustrious", "unknown")
     #[serde(default)]
     pub model_architecture: String,

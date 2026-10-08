@@ -18,6 +18,127 @@ pub mod video_interpolate;
 pub mod video_refine;
 pub mod video_retake;
 
+#[cfg(test)]
+mod denoise_tests {
+    use super::graph_test_util::{build, linked, nodes, params, single};
+    use super::validate_generation_params;
+    use serde_json::json;
+
+    #[test]
+    fn zero_denoise_bypasses_lossy_vae_reconstruction() {
+        for mode in ["img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            p.denoise = 0.0;
+            p.inpaint_settings = Some(json!({"masked_content": "noise", "soft": true}));
+            let workflow = build(&p);
+            assert!(nodes(&workflow, "KSampler").is_empty(), "{mode}");
+            assert!(nodes(&workflow, "VAEEncode").is_empty(), "{mode}");
+            assert!(
+                nodes(&workflow, "MooshieInpaintEncode").is_empty(),
+                "{mode}"
+            );
+            assert!(nodes(&workflow, "VAEDecode").is_empty(), "{mode}");
+            let saved = single(&workflow, "MooshieSaveImage");
+            let image = linked(&workflow, &saved["inputs"]["images"]);
+            assert_eq!(
+                image["class_type"],
+                if mode == "img2img" {
+                    "ImageScale"
+                } else {
+                    "LoadImage"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn zero_base_denoise_keeps_an_independently_enabled_upscale_pass() {
+        let mut p = params("inpainting", "sdxl");
+        p.denoise = 0.0;
+        p.upscale_enabled = true;
+        p.upscale_method = "latent".into();
+        p.upscale_scale = 2.0;
+        p.upscale_steps = 8;
+        p.upscale_denoise = 0.2;
+        let workflow = build(&p);
+        assert_eq!(
+            single(&workflow, "KSampler")["inputs"]["denoise"],
+            json!(0.2)
+        );
+        assert!(nodes(&workflow, "MooshieInpaintEncode").is_empty());
+    }
+
+    #[test]
+    fn fractional_denoise_reaches_sampler_without_changing_steps_or_control_strength() {
+        for mode in ["img2img", "inpainting"] {
+            for denoise in [0.01, 0.42, 1.0] {
+                let mut p = params(mode, "sdxl");
+                p.denoise = denoise;
+                let workflow = build(&p);
+                let sampler = single(&workflow, "KSampler");
+                assert_eq!(sampler["inputs"]["denoise"], json!(denoise));
+                assert_eq!(sampler["inputs"]["steps"], json!(p.steps));
+            }
+        }
+    }
+
+    #[test]
+    fn density_sampling_requests_differential_diffusion_even_without_a_global_patch() {
+        let mut p = params("inpainting", "sdxl");
+        p.inpaint_settings = Some(json!({"density_denoise": true}));
+        let workflow = build(&p);
+        assert_eq!(nodes(&workflow, "DifferentialDiffusion").len(), 1);
+        assert_eq!(nodes(&workflow, "KSampler").len(), 1);
+        let encode = single(&workflow, "MooshieInpaintEncode");
+        let settings: serde_json::Value =
+            serde_json::from_str(encode["inputs"]["settings"].as_str().unwrap()).unwrap();
+        assert_eq!(settings["density_denoise"], json!(true));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_active_denoise_and_ignores_unused_state() {
+        for mode in ["img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            for value in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+                p.denoise = value;
+                let error = validate_generation_params(&p).unwrap_err();
+                assert!(error.contains("Denoising strength"), "{mode}: {error}");
+            }
+            for value in [0.0, 0.42, 1.0] {
+                p.denoise = value;
+                assert!(validate_generation_params(&p).is_ok());
+            }
+        }
+        let mut p = params("txt2img", "sdxl");
+        p.denoise = f64::NAN;
+        p.upscale_denoise = f64::NAN;
+        p.facefix_denoise = f64::NAN;
+        assert!(validate_generation_params(&p).is_ok());
+        p.upscale_enabled = true;
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Upscale denoising strength"));
+        p.upscale_enabled = false;
+        p.facefix_enabled = true;
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Face detail denoising strength"));
+    }
+    #[test]
+    fn linked_raster_alpha_limits_area_without_an_extra_sampling_job() {
+        let mut p = params("inpainting", "sdxl");
+        p.inpaint_settings =
+            Some(json!({"area_limit_image": "raster-alpha.png", "density_denoise": false}));
+        let workflow = build(&p);
+        assert_eq!(nodes(&workflow, "KSampler").len(), 1);
+        let prepare = single(&workflow, "MooshieInpaintPrepare");
+        let limit = linked(&workflow, &prepare["inputs"]["area_limit"]);
+        assert_eq!(limit["class_type"], "LoadImageMask");
+        assert_eq!(limit["inputs"]["image"], "raster-alpha.png");
+        assert_eq!(limit["inputs"]["channel"], "red");
+    }
+}
+
 use serde_json::{json, Value};
 
 use crate::comfyui::types::{BaseSources, GenerationParams, PromptSegment, StageContext};
@@ -160,6 +281,26 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
     let needs_input_image =
         matches!(params.mode.as_str(), "img2img" | "inpainting") || params.refine_only;
 
+    let check_denoise = |label: &str, value: f64| {
+        if value.is_finite() && (0.0..=1.0).contains(&value) {
+            Ok(())
+        } else {
+            Err(format!("{label} must be a finite value between 0 and 1."))
+        }
+    };
+    if matches!(params.mode.as_str(), "img2img" | "inpainting") && !params.refine_only {
+        check_denoise("Denoising strength", params.denoise)?;
+    }
+    if params.upscale_enabled && params.upscale_method != "seedvr2" {
+        check_denoise("Upscale denoising strength", params.upscale_denoise)?;
+    }
+    if params.facefix_enabled {
+        check_denoise("Face detail denoising strength", params.facefix_denoise)?;
+    }
+    for segment in &params.detail_segments {
+        check_denoise("Segment detail denoising strength", segment.creativity)?;
+    }
+
     if needs_input_image
         && params
             .input_image
@@ -214,7 +355,25 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
         ));
     }
 
-    if let Some(cn) = params.controlnet.as_ref() {
+    for cn in params
+        .controlnet
+        .iter()
+        .chain(params.controlnet_layers.iter())
+    {
+        if cn.enabled
+            && (!cn.strength.is_finite()
+                || cn.strength < 0.0
+                || !cn.start_percent.is_finite()
+                || !cn.end_percent.is_finite()
+                || cn.start_percent < 0.0
+                || cn.end_percent > 1.0
+                || cn.start_percent >= cn.end_percent)
+        {
+            return Err("ControlNet needs a finite, non-negative strength and a start/end range with 0 <= start < end <= 1.".into());
+        }
+        if cn.enabled && cn.preset.as_deref() == Some("inpainting") && params.mode != "inpainting" {
+            return Err("The inpainting ControlNet preset requires Inpainting mode.".into());
+        }
         if cn.enabled && cn.image.as_deref().map(str::trim).unwrap_or("").is_empty() {
             return Err(
                 "ControlNet is enabled but no reference image was provided — please upload one or disable ControlNet.".into(),
@@ -269,7 +428,12 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
                 "Style transfer is enabled but no style reference image was provided — please upload one.".into(),
             );
         }
-        if params.controlnet.as_ref().is_some_and(|cn| cn.enabled) {
+        if params
+            .controlnet
+            .iter()
+            .chain(params.controlnet_layers.iter())
+            .any(|cn| cn.enabled)
+        {
             return Err(
                 "Style transfer cannot be used with ControlNet enabled — disable one of them."
                     .into(),
@@ -1060,7 +1224,11 @@ fn build_image_stage(params: &GenerationParams, seed: i64) -> WorkflowResult {
     inject_sdxl_guidance_extras(&mut result, params);
 
     // Inject ControlNet if enabled
-    if let Some(ref cn) = params.controlnet {
+    for cn in params
+        .controlnet
+        .iter()
+        .chain(params.controlnet_layers.iter())
+    {
         if cn.enabled && cn.controlnet_model.is_some() && cn.image.is_some() {
             if params.model_architecture == "anima" {
                 let mask = params.mask_image.as_deref();
@@ -2262,6 +2430,139 @@ mod validation_and_seed_tests {
         cn.controlnet_model = None;
         p.controlnet = Some(cn);
         assert!(validate_generation_params(&p).is_ok());
+    }
+
+    #[test]
+    fn controlnet_rejects_invalid_ranges_and_wrong_preset_mode() {
+        let mut p = params("txt2img", "sdxl");
+        let valid = ControlNetParam {
+            enabled: true,
+            preset: None,
+            controlnet_model: Some("depth.safetensors".into()),
+            image: Some("source.png".into()),
+            preprocessor: Some("DepthAnythingV2Preprocessor".into()),
+            strength: 1.0,
+            start_percent: 0.0,
+            end_percent: 1.0,
+        };
+        for (strength, start, end) in [
+            (-1.0, 0.0, 1.0),
+            (f64::NAN, 0.0, 1.0),
+            (1.0, -0.1, 1.0),
+            (1.0, 0.5, 0.5),
+            (1.0, 0.8, 0.2),
+            (1.0, 0.0, 1.1),
+        ] {
+            p.controlnet = Some(ControlNetParam {
+                strength,
+                start_percent: start,
+                end_percent: end,
+                ..valid.clone()
+            });
+            assert!(
+                validate_generation_params(&p).is_err(),
+                "{strength}/{start}/{end}"
+            );
+        }
+        p.controlnet = Some(ControlNetParam {
+            strength: 0.0,
+            ..valid.clone()
+        });
+        assert!(validate_generation_params(&p).is_ok());
+        p.mask_image = Some("mask.png".into());
+        p.controlnet = Some(ControlNetParam {
+            preset: Some("inpainting".into()),
+            ..valid
+        });
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Inpainting mode"));
+        p.mode = "inpainting".into();
+        p.input_image = Some("source.png".into());
+        assert!(validate_generation_params(&p).is_ok());
+    }
+
+    #[test]
+    fn document_controls_chain_conditioning_and_align_each_inpaint_reference() {
+        for mode in ["txt2img", "img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            let control = |image: &str, strength| ControlNetParam {
+                enabled: true,
+                preset: None,
+                controlnet_model: Some("depth.safetensors".into()),
+                image: Some(image.into()),
+                preprocessor: Some("Canny".into()),
+                strength,
+                start_percent: 0.2,
+                end_percent: 0.8,
+            };
+            p.controlnet_layers = vec![control("first.png", 0.4), control("second.png", 0.7)];
+            let workflow = build(&p);
+            let applies = nodes(&workflow, "ControlNetApplyAdvanced");
+            assert_eq!(applies.len(), 2, "{mode}");
+            for (_, apply) in &applies {
+                let vae_id = apply["inputs"]["vae"][0].as_str().unwrap();
+                assert!(
+                    workflow.get(vae_id).is_some(),
+                    "control VAE must reference a loaded node"
+                );
+            }
+            let first = applies
+                .iter()
+                .find(|(_, node)| node["inputs"]["strength"] == json!(0.4))
+                .unwrap();
+            let second = applies
+                .iter()
+                .find(|(_, node)| node["inputs"]["strength"] == json!(0.7))
+                .unwrap();
+            assert_eq!(second.1["inputs"]["positive"], json!([first.0, 0]));
+            assert_eq!(second.1["inputs"]["negative"], json!([first.0, 1]));
+            let sampler = single(&workflow, "KSampler");
+            assert_eq!(sampler["inputs"]["positive"], json!([second.0, 0]));
+            assert_eq!(nodes(&workflow, "Canny").len(), 2);
+            assert_eq!(
+                nodes(&workflow, "MooshieInpaintControl").len(),
+                if mode == "inpainting" { 2 } else { 0 }
+            );
+            if mode == "inpainting" {
+                for (_, apply) in &applies {
+                    let image_id = apply["inputs"]["image"][0].as_str().unwrap();
+                    assert_eq!(workflow[image_id]["class_type"], "MooshieInpaintControl");
+                }
+            }
+            p.controlnet_layers[0].enabled = false;
+            assert_eq!(nodes(&build(&p), "ControlNetApplyAdvanced").len(), 1);
+            p.controlnet_layers[1].controlnet_model = None;
+            assert!(validate_generation_params(&p)
+                .unwrap_err()
+                .contains("no ControlNet model"));
+        }
+    }
+
+    #[test]
+    fn anima_document_controls_patch_the_sampler_in_sequence() {
+        let mut p = params("inpainting", "anima");
+        p.controlnet_layers = (0..2)
+            .map(|i| ControlNetParam {
+                enabled: true,
+                preset: None,
+                controlnet_model: Some(format!("patch-{i}.safetensors")),
+                image: Some(format!("hint-{i}.png")),
+                preprocessor: None,
+                strength: 1.0,
+                start_percent: 0.0,
+                end_percent: 1.0,
+            })
+            .collect();
+        let workflow = build(&p);
+        let patches = nodes(&workflow, "AnimaLLLiteApply");
+        assert_eq!(patches.len(), 2);
+        assert_eq!(nodes(&workflow, "MooshieInpaintControl").len(), 2);
+        let sampler = single(&workflow, "KSampler");
+        let final_id = sampler["inputs"]["model"][0].as_str().unwrap();
+        assert_eq!(workflow[final_id]["class_type"], "AnimaLLLiteApply");
+        let first_id = workflow[final_id]["inputs"]["model"][0].as_str().unwrap();
+        assert_eq!(workflow[first_id]["class_type"], "AnimaLLLiteApply");
     }
 
     #[test]

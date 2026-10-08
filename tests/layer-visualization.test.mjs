@@ -61,7 +61,6 @@ test('the layer colours are not duplicated across the components that draw them'
 test('the type colours in the interface come from the same map', () => {
   const chrome = [
     'src/lib/components/canvas/layers/LayerItem.svelte',
-    'src/lib/components/canvas/layers/LayerPanel.svelte',
     'src/lib/components/canvas/layers/LayerProperties.svelte',
     'src/lib/components/canvas/CanvasEditor.svelte',
     'src/lib/components/canvas/CanvasStatusBar.svelte',
@@ -131,7 +130,7 @@ test('drawing a layer and generating from it read different numbers', () => {
     'the display strength is a display default, not a run setting',
   );
   const panel = read('src/lib/components/canvas/layers/LayerPanel.svelte');
-  assert.match(panel, /canvas\.maskOverlayOpacity =/, 'the strength is adjustable from the panel');
+  assert.match(read('src/lib/components/canvas/layers/LayerProperties.svelte'), /canvas\.maskOverlayOpacity =/, 'display strength stays adjustable in the layer appearance settings');
 });
 
 test('changing a colour repaints what is already on the canvas', () => {
@@ -194,8 +193,8 @@ test('every string the new controls show exists in the base locale', () => {
 });
 
 test('no component keeps its own copy of the pass order', () => {
-  const panel = read('src/lib/components/canvas/layers/LayerPanel.svelte');
-  assert.match(panel, /editMaskPassOrder\(canvas\.sortedLayers\)/);
+  const panel = read('src/lib/components/canvas/layers/GroupLayerList.svelte');
+  assert.match(panel, /editMaskPassOrder\(canvas\.sortedLayers/);
   assert.equal(
     /filter\([^)]*type === ['"]mask['"][^)]*\)\.reverse\(\)/.test(panel),
     false,

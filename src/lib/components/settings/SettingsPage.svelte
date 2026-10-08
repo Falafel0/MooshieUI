@@ -20,6 +20,8 @@
   import QualityTagsEditor from "./QualityTagsEditor.svelte";
   import LlmProviderPanel from "./LlmProviderPanel.svelte";
   import ProjectsSection from "./ProjectsSection.svelte";
+  import InterfacePreferences from "./InterfacePreferences.svelte";
+  import { workspace } from "../../stores/workspace.svelte.js";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, authHeaders, clearAuthToken } from "../../utils/ipc.js";
   import { requestOsNotificationPermission } from "../../utils/osNotify.js";
   import { useMobileLayout, isMobileUA, setForceDesktopOverride } from "../../utils/device.js";
@@ -41,11 +43,9 @@
   interface Props {
     userRole?: string;
     mobileFriendly?: boolean;
-    /** Section to open, set when another part of the app asks for one. */
-    section?: string | null;
   }
 
-  let { userRole = "admin", mobileFriendly = false, section = null }: Props = $props();
+  let { userRole = "admin", mobileFriendly = false }: Props = $props();
 
   // Layout override: only meaningful on a mobile-capable device in browser mode,
   // where the mobile shell exists. The control lets the user flip between the
@@ -1144,20 +1144,20 @@
    *
    * This page is conditionally mounted, so a listener here would miss an event
    * fired in the same tick that switches to Settings. App.svelte owns the page
-   * switch and passes the section down as a prop instead. Applied once per
-   * distinct request, so navigating to another section afterwards sticks.
+   * switch and stores the requested section in the shared workspace state.
+   * Consume each request once so normal visits retain the user's last category.
    */
-  let appliedSection = $state<string | null>(null);
   $effect(() => {
-    if (!section || section === appliedSection) return;
-    appliedSection = section;
+    const section = workspace.settingsSection;
+    if (!section) return;
     selectCategory(section);
+    workspace.settingsSection = null;
   });
 
   const sections = [
     { key: "appMode", labelKey: "settings.sections.app_mode", keywords: "browser app mode desktop native window web switch ui trust localhost proxy sign in" },
     { key: "connection", labelKey: "settings.sections.connection", keywords: "server mode url port remote autolaunch" },
-    { key: "appearance", labelKey: "settings.sections.appearance", keywords: "theme dark light font scale palette custom create logo background branding import export color" },
+    { key: "appearance", labelKey: "settings.sections.appearance", keywords: "theme dark light font scale palette custom create logo background branding import export color density compact comfortable touch motion animation" },
     { key: "performance", labelKey: "settings.sections.performance", keywords: "vram mode high low normal keep alive close attention backend sage flash" },
     { key: "quality", labelKey: "settings.sections.quality", keywords: "quality tags auto masterpiece best quality anima illustrious noobai pony nanosaur positive negative prompt" },
     { key: "gpu", labelKey: "settings.sections.gpu", keywords: "gpu vram worker backend multi status utilization temperature power nvidia" },
@@ -2821,6 +2821,10 @@
             {#if themeImportDone}<p class="text-xs text-green-400">{locale.t("settings.appearance.themes_imported")}</p>{/if}
             {#if themeExportError}<p class="text-xs text-red-400">{themeExportError}</p>{/if}
             {#if themeExportDone}<p class="text-xs text-green-400">{locale.t("settings.appearance.themes_exported")}</p>{/if}
+          </div>
+
+          <div>
+            <InterfacePreferences />
           </div>
 
           <div>

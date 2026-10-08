@@ -13,16 +13,16 @@
   }
   let { suggestedAspect = null }: Props = $props();
 
-  const AR_COLLAPSE_KEY = "mooshieui.generation.aspectRatioCollapsed.v1";
-  let arOpen = $state(localStorage.getItem(AR_COLLAPSE_KEY) !== "true");
-  let arSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  $effect(() => {
-    const collapsed = String(!arOpen);
-    if (arSaveTimer) clearTimeout(arSaveTimer);
-    arSaveTimer = setTimeout(() => {
-      try { localStorage.setItem(AR_COLLAPSE_KEY, collapsed); } catch {}
-    }, 300);
-  });
+  const DETAILS_KEY = "mooshieui.generation.composition.details.v1";
+  function loadDetails(): boolean {
+    try { return localStorage.getItem(DETAILS_KEY) === "true"; } catch { return false; }
+  }
+  let detailsOpen = $state(loadDetails());
+  function toggleDetails() {
+    detailsOpen = !detailsOpen;
+    try { localStorage.setItem(DETAILS_KEY, String(detailsOpen)); } catch {}
+  }
+  const detailsId = $props.id();
 
   let aspectW = $state(1);
   let aspectH = $state(1);
@@ -355,178 +355,57 @@
   }
 </script>
 
-<div class="space-y-3">
-  <!-- Aspect Ratio -->
-  <div>
-    <div class="flex items-center mb-1.5">
-      <button
-        class="flex items-center text-xs text-neutral-400 hover:text-neutral-200 focus:outline-none"
-        onclick={() => (arOpen = !arOpen)}
-        title={arOpen ? locale.t('common.collapse', { section: locale.t('generation.dimensions.aspect_ratio') }) : locale.t('common.expand', { section: locale.t('generation.dimensions.aspect_ratio') })}
-      >{locale.t('generation.dimensions.aspect_ratio')}</button>
-      <InfoTip text={locale.t('generation.dimensions.aspect_ratio_tip')} />
-      {#if freePresets.size > 0}
-        <span
-          class="ml-auto mr-1 inline-flex items-center gap-1 rounded-full border border-green-500/40 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400"
-          title={locale.t('generation.dimensions.free_opus_tip')}
-        >
-          <span class="h-1.5 w-1.5 rounded-full bg-green-400"></span>
-          {locale.t('generation.dimensions.free_opus')}
-        </span>
-      {/if}
-      <button
-        class="{freePresets.size > 0 ? '' : 'ml-auto '}text-neutral-400 hover:text-neutral-200 focus:outline-none"
-        onclick={() => (arOpen = !arOpen)}
-        title={arOpen ? locale.t('common.collapse', { section: locale.t('generation.dimensions.aspect_ratio') }) : locale.t('common.expand', { section: locale.t('generation.dimensions.aspect_ratio') })}
-        aria-label={arOpen ? locale.t('common.collapse', { section: locale.t('generation.dimensions.aspect_ratio') }) : locale.t('common.expand', { section: locale.t('generation.dimensions.aspect_ratio') })}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform {arOpen ? '' : '-rotate-90'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-    </div>
-    {#if arOpen}
-    <div class="flex items-center gap-1 flex-wrap mb-2">
-      {#each presets as preset (preset.label)}
+<div class="space-y-2" data-composition-controls>
+  {#if generation.mode !== "inpainting"}
+    <div class="flex flex-wrap gap-1" role="group" aria-label={locale.t('generation.dimensions.aspect_ratio')}>
+      {#each presets.filter((preset) => detailsOpen || ["1:1", "4:3", "3:2", "16:9", "2:3"].includes(preset.label)) as preset (preset.label)}
         {@const preview = aspectPreviewSize(preset.w, preset.h)}
         {@const isFree = freePresets.has(preset.label)}
-        <button
-          onclick={() => applyPreset(preset.w, preset.h)}
-          class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border transition-colors {activePreset === preset.label
-            ? isFree
-              ? 'bg-indigo-600 border-green-400 text-white'
-              : 'bg-indigo-600 border-indigo-600 text-white'
-            : isFree
-              ? 'bg-neutral-800 border-green-500/60 text-neutral-400 hover:bg-neutral-700'
-              : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700'}"
-          title={isFree
-            ? `${preset.label} - ${locale.t('generation.dimensions.free_opus_tip')}`
-            : preset.label}
-        >
-          <span
-            class="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-visible"
-            aria-hidden="true"
-          >
-            <span
-              class="box-border rounded-sm border {activePreset === preset.label
-                ? 'border-white/70 bg-white/25'
-                : 'border-neutral-500 bg-neutral-600/50'}"
-              style="width: {preview.w}px; height: {preview.h}px"
-            ></span>
-          </span>
-          {preset.label}
+        <button type="button" onclick={() => applyPreset(preset.w, preset.h)} aria-pressed={activePreset === preset.label}
+          title={isFree ? `${preset.label} - ${locale.t('generation.dimensions.free_opus_tip')}` : preset.label}
+          class="flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md border px-1.5 text-xs transition-colors {activePreset === preset.label ? 'border-ui-accent/50 bg-ui-selected text-ui-accent' : 'border-ui-border bg-ui-surface text-neutral-400 hover:text-neutral-200'} {isFree ? 'ring-1 ring-green-500/60' : ''}">
+          <span class="rounded-sm border border-current opacity-60" aria-hidden="true" style="width: {preview.w}px; height: {preview.h}px"></span>{preset.label}
         </button>
       {/each}
     </div>
-    <div class="flex items-center gap-1.5">
-      <div class="flex-1">
-        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.width')}</span>
-        <input
-          type="text"
-          inputmode="decimal"
-          value={aspectWInput}
-          oninput={(e) => onAspectInput("w", (e.target as HTMLInputElement).value)}
-          class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-1.5 text-sm text-neutral-100 text-center focus:outline-none focus:border-indigo-500 transition-colors"
-        />
-      </div>
-      <span class="text-neutral-500 text-sm mt-4">:</span>
-      <div class="flex-1">
-        <span class="block text-[10px] text-neutral-500 mb-0.5">{locale.t('generation.dimensions.height')}</span>
-        <input
-          type="text"
-          inputmode="decimal"
-          value={aspectHInput}
-          oninput={(e) => onAspectInput("h", (e.target as HTMLInputElement).value)}
-          class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-1.5 text-sm text-neutral-100 text-center focus:outline-none focus:border-indigo-500 transition-colors"
-        />
-      </div>
-      <button
-        onclick={swapAspect}
-        class="text-neutral-400 hover:text-neutral-200 transition-colors shrink-0 mt-4"
-        title={locale.t('generation.dimensions.swap')}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/>
-        </svg>
-      </button>
-    </div>
-    <p class="text-[10px] text-neutral-500 mt-1">{locale.t('generation.dimensions.ratio_hint')}</p>
-    {/if}
+  {/if}
+  <div class="flex items-center gap-1.5">
+    <button type="button" onclick={toggleDetails} aria-expanded={detailsOpen} aria-controls={detailsId} aria-label={locale.t('generation.workspace.composition_details')}
+      class="ui-control flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-ui-border bg-ui-surface px-3 text-sm text-neutral-200 hover:border-ui-accent/50">
+      <span class="tabular-nums">{generation.width} × {generation.height}</span>
+      <span class="flex items-center gap-2 text-xs text-neutral-500">{activePreset || `${aspectW}:${aspectH}`}<svg class="size-3.5 transition-transform {detailsOpen ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+    </button>
+    <button type="button" onclick={() => { generation.resolutionLocked = !generation.resolutionLocked; generation.saveSettings(); }} aria-pressed={generation.resolutionLocked} aria-label={locale.t('generation.dimensions.lock')} title={locale.t('generation.dimensions.lock_tip')}
+      class="ui-icon-button flex shrink-0 items-center justify-center rounded-lg border border-ui-border {generation.resolutionLocked ? 'bg-ui-selected text-ui-accent' : 'text-neutral-500 hover:text-neutral-200'}">
+      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/>{#if generation.resolutionLocked}<path d="M7 11V7a5 5 0 0 1 10 0v4"/>{:else}<path d="M7 11V7a5 5 0 0 1 9.9-1"/>{/if}</svg>
+    </button>
   </div>
-
-  <!-- Side Length -->
-  <div>
-    <div class="flex items-center justify-between mb-1.5">
-      <label class="text-xs text-neutral-400">{locale.t('generation.dimensions.resolution')}<InfoTip text={locale.t('generation.dimensions.resolution_tip')} /></label>
-      <div class="flex items-center gap-2">
-        <button
-          onclick={() => { generation.resolutionLocked = !generation.resolutionLocked; generation.saveSettings(); }}
-          class="inline-flex items-center gap-1 text-[10px] transition-colors {generation.resolutionLocked ? 'text-indigo-400 hover:text-indigo-300' : 'text-neutral-400 hover:text-neutral-200'}"
-          title={locale.t('generation.dimensions.lock_tip')}
-          aria-pressed={generation.resolutionLocked}
-        >
-          {#if generation.resolutionLocked}
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-          {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2"/>
-              <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
-            </svg>
-          {/if}
-          {locale.t('generation.dimensions.lock')}
-        </button>
-        <button
-          onclick={() => applySideLength(DEFAULT_SIDE)}
-          class="inline-flex items-center gap-1 text-[10px] text-neutral-400 hover:text-neutral-200 transition-colors"
-          title={locale.t('generation.dimensions.reset', { res: DEFAULT_SIDE })}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-            <path d="M3 3v5h5"/>
-          </svg>
-          {locale.t('generation.dimensions.reset', { res: DEFAULT_SIDE })}
-        </button>
+  <div id={detailsId} hidden={!detailsOpen}>
+  {#if detailsOpen}
+    <div class="space-y-3 rounded-lg border border-ui-border/60 bg-ui-surface/40 p-3">
+      <div>
+        <div class="mb-1.5 text-xs text-neutral-400">{locale.t('generation.dimensions.aspect_ratio')}<InfoTip text={locale.t('generation.dimensions.aspect_ratio_tip')} /></div>
+        <div class="flex items-center gap-1.5">
+          <label class="min-w-0 flex-1 text-xs text-neutral-500">{locale.t('generation.dimensions.width')}<input type="text" inputmode="decimal" value={aspectWInput} oninput={(event) => onAspectInput('w', event.currentTarget.value)} class="ui-control mt-1 w-full rounded-lg border border-ui-border bg-ui-surface px-2 text-center text-sm text-neutral-200" /></label>
+          <span class="mt-5 text-neutral-500">:</span>
+          <label class="min-w-0 flex-1 text-xs text-neutral-500">{locale.t('generation.dimensions.height')}<input type="text" inputmode="decimal" value={aspectHInput} oninput={(event) => onAspectInput('h', event.currentTarget.value)} class="ui-control mt-1 w-full rounded-lg border border-ui-border bg-ui-surface px-2 text-center text-sm text-neutral-200" /></label>
+          <button type="button" onclick={swapAspect} aria-label={locale.t('generation.dimensions.swap')} class="ui-icon-button mt-5 rounded-lg text-neutral-400 hover:bg-neutral-800">⇄</button>
+        </div>
+        <p class="mt-1 text-xs text-neutral-500">{locale.t('generation.dimensions.ratio_hint')}</p>
       </div>
+      <div>
+        <label for={`${detailsId}-resolution`} class="text-xs text-neutral-400">{locale.t('generation.dimensions.resolution')}<InfoTip text={locale.t('generation.dimensions.resolution_tip')} /></label>
+        <div class="my-1.5 flex gap-1">
+          {#each sidePresets as side}
+            <button type="button" aria-pressed={sideLength === side} onclick={() => applySideLength(side)} class="min-h-8 flex-1 rounded-md border text-xs {sideLength === side ? 'border-ui-accent/50 bg-ui-selected text-ui-accent' : 'border-ui-border text-neutral-400 hover:bg-neutral-800'}">{side}</button>
+          {/each}
+        </div>
+        <input id={`${detailsId}-resolution`} type="number" bind:value={sideLength} oninput={recalc} min="64" max="2048" step={quantum} class="ui-control w-full rounded-lg border border-ui-border bg-ui-surface px-3 text-sm text-neutral-200" />
+        {#if recommended && familyLabel && !generation.hideRecommendedParams}<p class="mt-1 text-xs text-neutral-500">{locale.t('generation.dimensions.recommended', { model: familyLabel, res: recommendedLabel })}</p>{/if}
+      </div>
+      <button type="button" onclick={() => applySideLength(DEFAULT_SIDE)} class="ui-control w-full rounded-md text-xs text-neutral-400 hover:bg-neutral-800">{locale.t('generation.dimensions.reset', { res: DEFAULT_SIDE })}</button>
+      {#if freePresets.size > 0}<p class="text-xs text-green-400">{locale.t('generation.dimensions.free_opus')}<InfoTip text={locale.t('generation.dimensions.free_opus_tip')} /></p>{/if}
     </div>
-    <div class="flex items-center gap-1 flex-wrap mb-2">
-      {#each sidePresets as side (side)}
-        {@const isRecommended = recommended !== null && side >= recommended.min && side <= recommended.max}
-        <button
-          onclick={() => applySideLength(side)}
-          class="relative text-xs px-2 py-1 rounded transition-colors {sideLength === side
-            ? 'bg-indigo-600 text-white'
-            : 'bg-neutral-800 border border-neutral-700 text-neutral-400 hover:bg-neutral-700'}"
-          title={isRecommended && familyLabel && !generation.hideRecommendedParams
-            ? locale.t('generation.dimensions.recommended', { model: familyLabel, res: recommendedLabel })
-            : String(side)}
-        >
-          {side}
-          {#if isRecommended && !generation.hideRecommendedParams}
-            <span class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true"></span>
-          {/if}
-        </button>
-      {/each}
-    </div>
-    <input
-      type="number"
-      bind:value={sideLength}
-      oninput={recalc}
-      min="64"
-      max="2048"
-      step={quantum}
-      class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
-    />
-    {#if recommended && familyLabel && !generation.hideRecommendedParams}
-      <p class="text-[10px] text-neutral-500 mt-1">
-        <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 mr-1 align-middle" aria-hidden="true"></span>{locale.t('generation.dimensions.recommended', { model: familyLabel, res: recommendedLabel })}
-      </p>
-    {/if}
-  </div>
-
-  <!-- Resulting dimensions -->
-  <div class="flex items-center justify-between text-xs text-neutral-400">
-    <span>{locale.t('generation.dimensions.result')}</span>
-    <span class="text-neutral-200">{generation.width} &times; {generation.height}</span>
+  {/if}
   </div>
 </div>

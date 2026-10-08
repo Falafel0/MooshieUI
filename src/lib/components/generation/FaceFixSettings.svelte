@@ -39,11 +39,13 @@
       <div use:scrollCapture>
         <label class="flex items-center justify-between text-xs text-neutral-400 mb-1">
           <span>{locale.t('generation.facefix.denoise')}<InfoTip text={locale.t('generation.facefix.denoise_tip')} /></span>
-          <EditableValue value={generation.facefixDenoise} min={0} max={1} step={0.05} decimals={2} onchange={(v) => generation.facefixDenoise = v} />
+          <EditableValue value={generation.facefixDenoise} min={0} max={1} step={0.05} decimals={2} onchange={(v) => { generation.facefixDenoise = v; generation.saveSettings(); }} />
         </label>
         <input
           type="range"
           bind:value={generation.facefixDenoise}
+          onchange={() => generation.saveSettings()}
+          aria-label={locale.t('generation.facefix.denoise')}
           min="0"
           max="1"
           step="0.05"

@@ -37,8 +37,9 @@ test('scaling the box scales every shape about the box origin, stroke included',
   assert.equal(scaled.y, 120);
   assert.equal(scaled.scaleX, 2);
   assert.equal(scaled.scaleY, 3);
-  // A stroke keeps its weight relative to the shape: (2+3)/2.
-  assert.equal(scaled.strokeWidth, 30);
+  // The renderer applies node scale to this width; changing both would apply
+  // the resize twice and alter mask/eraser coverage relative to its shapes.
+  assert.equal(scaled.strokeWidth, 12);
 });
 
 test('turning the box turns the shapes with it, about the same origin', () => {

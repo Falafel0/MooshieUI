@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { generationModelContextKey } from "../../utils/controlnetState.js";
+  import { effectiveLayerVisibility } from "../../utils/layerRelations.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
   import { canvas } from "../../stores/canvas.svelte.js";
@@ -21,7 +23,8 @@
   import { isBrowserMode } from "../../utils/ipc.js";
   import type { GenerationParams, RegionalPromptSelection } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
-  import { getRegionalChainRegions, prepareConditioningRegions, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
+  import { prepareControlnetLayers } from "../../utils/prepareControlnetLayers.js";
+  import { getRegionalChainRegions, prepareConditioningRegions, captureInpaintLayerSnapshot, assertInpaintLayerRelations, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
     clearAllRegionalChainGallerySuppress,
@@ -146,6 +149,7 @@
   async function handleGenerate() {
     const initialCancellationEpoch = cancellationEpoch;
     const initialMode = generation.mode;
+    const initialModelContext = generationModelContextKey(generation);
     const initialSourceVersion = canvas.inpaintSourceVersion;
     // Keyboard shortcuts reach this handler even when the button is disabled.
     if (generation.mode === "video" && !generation.canGenerate) return;
@@ -186,7 +190,18 @@
     }
 
     try {
-      let inpaintConditioningRegions: RegionalPromptSelection[] = [];
+      let inpaintConditioningRegions: InpaintConditioningRegion[] = [];
+      const layerSnapshot = captureInpaintLayerSnapshot();
+      const preparationPaintRevision = canvas.paintRevision;
+      const stableDocument = () => JSON.stringify(captureInpaintLayerSnapshot(), (key, value) =>
+        key === 'controlnetPreviewUrl' || key === 'collapsed' || key === 'image' && value && typeof value === 'string' ? undefined : value);
+      const initialDocument = stableDocument();
+      const assertDocumentUnchanged = () => {
+        if (generationModelContextKey(generation) !== initialModelContext)
+          throw new Error(locale.t('generation.preparation_changed'));
+        if (canvas.paintRevision !== preparationPaintRevision || stableDocument() !== initialDocument)
+          throw new Error(locale.t('generation.controlnet.reference_changed'));
+      };
       // Continuing a paused run: the remaining steps sample from the paused
       // latent with the current prompt, CFG, sampler and LoRAs. Grid, ordered
       // wildcard and regional chains all start fresh images, so they do not
@@ -243,13 +258,15 @@
         return;
       }
 
-      const hasSpatialPromptLayers = canvas.layers.some((layer) => layer.visible && layer.type === "region");
+      const hasSpatialPromptLayers = canvas.layers.some((layer) => effectiveLayerVisibility(layer, canvas.groups) && layer.type === "region" && (layer.coverage ?? 1) > 0 && (layer.regionalStrength ?? 1) > 0);
       if (generation.mode === "inpainting" &&
           !generation.supportsRegionalConditioning &&
           !generation.supportsSequentialEditMasks &&
           hasSpatialPromptLayers) {
         throw new Error(locale.t("canvas.regions_supported"));
       }
+      if (generation.mode === 'inpainting' && canvas.isCanvasMode && !generation.isNovelAi) assertInpaintLayerRelations(layerSnapshot);
+      if (generation.mode === "inpainting" && !generation.isNovelAi) await prepareControlnetLayers();
       // If canvas mode is active, export canvas content before generating
       if (canvas.isCanvasMode) {
         if (!canvasEditorRef) {
@@ -263,7 +280,7 @@
           // Painted regions condition this run the same way they condition an
           // inpaint pass; in text-to-image they join the regions written in the
           // prompt bar instead of replacing them.
-          const paintedRegions = await prepareConditioningRegions();
+          const paintedRegions = await prepareConditioningRegions(layerSnapshot);
           inpaintConditioningRegions = generation.mode === "inpainting"
             ? paintedRegions
             : [...paintedRegions, ...generation.regionalPrompts];
@@ -330,11 +347,17 @@
       }
 
       const regionalPromptingSupported = generation.supportsRegionalPrompting;
+      if (generationModelContextKey(generation) !== initialModelContext) throw new Error(locale.t('generation.preparation_changed'));
       if (initialCancellationEpoch !== cancellationEpoch || generation.mode !== initialMode ||
           (initialMode === 'inpainting' && canvas.inpaintSourceVersion !== initialSourceVersion)) return;
-      const useRegionalInpaintChain = usesSequentialEditMasks();
+      if (generation.mode === 'inpainting' && canvas.isCanvasMode && !generation.isNovelAi) assertDocumentUnchanged();
+      // Preparation only changes server upload names; all durable inputs/scopes remain frozen.
+      for (const layer of layerSnapshot.layers) {
+        if (layer.controlnet) layer.controlnet.image = canvas.layers.find(current => current.id === layer.id)?.controlnet?.image ?? layer.controlnet.image;
+      }
+      const useRegionalInpaintChain = generation.supportsSequentialEditMasks && getRegionalChainRegions(layerSnapshot).length > 0;
       const validRegions = useRegionalInpaintChain
-        ? getRegionalChainRegions()
+        ? getRegionalChainRegions(layerSnapshot)
         : (generation.mode === "inpainting" ? [] : generation.regionalPrompts).filter(
             (r) => r.text.trim() && r.width > 0 && r.height > 0,
           );
@@ -379,6 +402,7 @@
         try {
           const chainResult = await runRegionalInpaintChain(validRegions, {
             conditioningRegions: inpaintConditioningRegions,
+            layerSnapshot,
             submit: async (chainParams, ctx) => {
               const result = await requestGeneration(chainParams);
               if (regionalChainCancelRequested || chainToken !== regionalChainToken || (inpaintSnapshot && !inpaintSnapshot.valid)) {
@@ -441,6 +465,9 @@
             ? inpaintConditioningRegions
             : undefined,
         });
+        if (params.mode === 'inpainting' && canvas.isCanvasMode && !generation.isNovelAi) {
+          params.inpaint_settings = { ...generation.inpaintSettings, density_denoise: false };
+        }
         const sentRegions = params.positive_regions?.length ?? 0;
         if (sentRegions > 0) {
           console.log("[regional] Sending", sentRegions, "region(s) via conditioning");
@@ -736,7 +763,7 @@
     {:else if orderedWildcardRunCount > 1}
       {locale.t('generation.generate_ordered', { count: orderedWildcardRunCount })}
     {:else}
-      {locale.t('generation.generate')}
+      {locale.t(generation.mode === 'inpainting' ? 'generation.inpaint.generate' : 'generation.generate')}
     {/if}
     {#if anlasEstimate !== null}
       <span class="ml-2 text-[11px] font-normal opacity-80" title={locale.t('generation.novelai.cost_tip')}>

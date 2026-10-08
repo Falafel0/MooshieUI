@@ -1,4 +1,6 @@
+import { controlnetLayerPayloads, controlnetPayload } from "../utils/controlnetState.js";
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
+import { effectiveGenerationDenoise, normalizeDenoise } from "../utils/denoising.js";
 import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
 import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js";
@@ -34,6 +36,7 @@ import { readModelSpec, type ModelSpec } from "../utils/api.js";
 import { BETA57_SCHEDULER, GENERIC_SAMPLING, recommendedSamplingFor } from "../utils/samplingRecommendation.js";
 import { H3_TURBO_LORA, h3TurboPreset } from "../utils/h3Models.js";
 import { artistTagPromptBody } from "../utils/artistTag.js";
+import { pickKrea2Encoder } from "../utils/krea2Encoder.js";
 import {
   NOVELAI_DEFAULTS,
   findNovelAiModel,
@@ -686,6 +689,13 @@ export const DEFAULT_NANOSAUR_NEGATIVE_QUALITY = appendMissingNegativeTags(
 );
 
 class GenerationStore {
+  // The app supplies document controls without making the generation hub
+  // depend on the canvas feature store (which already depends on generation).
+  private documentControlLayers: () => Parameters<typeof controlnetLayerPayloads>[0] = () => [];
+  setDocumentControlProvider(provider: () => Parameters<typeof controlnetLayerPayloads>[0]) {
+    this.documentControlLayers = provider;
+  }
+
   _mode = $state<GenerationMode>("txt2img");
   lastImageMode = $state<Exclude<GenerationMode, "video">>("txt2img");
   modeToggles = $state<ModeToggleStates>(createDefaultModeToggles());
@@ -800,7 +810,9 @@ class GenerationStore {
    * the paused run with the painted image instead of starting an inpaint.
    */
   pausedEditArmed = $state(false);
-  denoise = $state(0.7);
+  private _denoise = $state(0.7);
+  get denoise(): number { return this._denoise; }
+  set denoise(value: number) { this._denoise = normalizeDenoise(value, this._denoise); }
   // Input files belong to their editing workspace, not whichever tab is visible
   // when an asynchronous upload happens to finish. Kept in memory with previews.
   modeInputs = $state<Partial<Record<GenerationMode, {
@@ -878,6 +890,9 @@ class GenerationStore {
   int8FastEnabled = $state(false);
   /** Enable ConvRot within the INT8-Fast loader (default true). */
   int8FastConvrot = $state(true);
+  /** Krea 2: prefer an installed abliterated (uncensored) Qwen3-VL-4B text
+   *  encoder over the stock one. See utils/krea2Encoder.ts. */
+  krea2UncensoredEncoder = $state(false);
   useSplitModel = $state(false);
   diffusionModel = $state<string | null>(null);
   /**
@@ -901,6 +916,8 @@ class GenerationStore {
   controlnetModel = $state<string | null>(null);
   controlnetPreprocessor = $state<string | null>(null);
   controlnetImage = $state<string | null>(null);
+  /** Session-only preview; shared across section collapse and mode switches. */
+  controlnetPreviewUrl = $state<string | null>(null);
   controlnetStrength = $state(1.0);
   controlnetStartPercent = $state(0.0);
   controlnetEndPercent = $state(1.0);
@@ -1872,6 +1889,43 @@ class GenerationStore {
 
     const currentModel = this.clipModel?.trim() ?? "";
     const currentType = this.clipType?.trim() ?? "";
+
+    // Krea 2 has a stock and an uncensored encoder; honour the user's choice
+    // over the backend's first filename match. Null (none installed, or the
+    // inventory not loaded) falls through to the generic handling below.
+    if (recommendedType === "krea2") {
+      const picked = pickKrea2Encoder(encoders, this.clipModel, this.krea2UncensoredEncoder);
+      if (picked) {
+        if (currentModel !== picked || currentType !== recommendedType) {
+          this.clipModel = picked;
+          this.clipType = recommendedType;
+          if (save) this.saveSettings();
+        }
+        return;
+      }
+    }
+
+    // The backend knows the family's loader type but found no installed encoder
+    // whose filename it recognizes. Strict families (Anima, Z-Image, Krea 2,
+    // Ideogram 4) report it this way rather than guess, and a fine-tune that
+    // ships its own encoder (e.g. "pieModelsAnima_cottage_txt") always lands
+    // here. Before this branch existed, clipType stayed null and generation
+    // failed with "Split model text encoder type is still loading." (#725).
+    if (!recommendedModel) {
+      // The loader type belongs to the family, so apply it regardless. Keep the
+      // user's encoder file (it is often the fine-tune's own), dropping it only
+      // once it is no longer installed. An empty list means the inventory has
+      // not loaded yet, not that nothing is installed.
+      const staleModel =
+        !!currentModel && encoders.length > 0 && !encoders.includes(currentModel);
+      if (currentType !== recommendedType || staleModel) {
+        this.clipType = recommendedType;
+        if (staleModel) this.clipModel = null;
+        if (save) this.saveSettings();
+      }
+      return;
+    }
+
     const currentMissing = encoders.length > 0 && !!currentModel && !encoders.includes(currentModel);
     let changed = false;
     if (currentType !== recommendedType) {
@@ -2875,6 +2929,7 @@ class GenerationStore {
         if (saved.fluxGuidance !== undefined) this.fluxGuidance = saved.fluxGuidance;
         if (saved.int8FastEnabled !== undefined) this.int8FastEnabled = saved.int8FastEnabled;
         if (saved.int8FastConvrot !== undefined) this.int8FastConvrot = saved.int8FastConvrot;
+        if (saved.krea2UncensoredEncoder !== undefined) this.krea2UncensoredEncoder = saved.krea2UncensoredEncoder;
         if (saved.useSplitModel !== undefined) this.useSplitModel = saved.useSplitModel;
         if (saved.diffusionModel !== undefined) this.diffusionModel = saved.diffusionModel;
         if (saved.modelSourceCategory !== undefined)
@@ -3163,6 +3218,7 @@ class GenerationStore {
         fluxGuidance: this.fluxGuidance,
         int8FastEnabled: this.int8FastEnabled,
         int8FastConvrot: this.int8FastConvrot,
+        krea2UncensoredEncoder: this.krea2UncensoredEncoder,
         useSplitModel: this.useSplitModel,
         diffusionModel: this.diffusionModel,
         modelSourceCategory: this.modelSourceCategory,
@@ -3332,6 +3388,7 @@ class GenerationStore {
       fluxGuidance: this.fluxGuidance,
       int8FastEnabled: this.int8FastEnabled,
       int8FastConvrot: this.int8FastConvrot,
+      krea2UncensoredEncoder: this.krea2UncensoredEncoder,
       useSplitModel: this.useSplitModel,
       diffusionModel: this.diffusionModel,
       modelSourceCategory: this.modelSourceCategory,
@@ -3954,7 +4011,7 @@ class GenerationStore {
       width: this.width,
       height: this.height,
       batch_size: this.batchSize,
-      denoise: this.denoise,
+      denoise: effectiveGenerationDenoise(this.mode, this.denoise),
       differential_diffusion: this.differentialDiffusion,
       input_image: this.inputImage,
       mask_image: this.maskImage,
@@ -3995,19 +4052,8 @@ class GenerationStore {
       clip_model: this.clipModel,
       clip_type: this.clipType,
       model_source_category: this.modelSourceCategory,
-      controlnet: this.controlnetEnabled
-        ? {
-            enabled: true,
-            preset: this.controlnetMode === "preset" ? this.controlnetPreset : null,
-            controlnet_model: this.controlnetModel,
-            preprocessor:
-              this.controlnetMode === "preset" ? this.controlnetPreprocessor : null,
-            image: this.controlnetImage,
-            strength: this.controlnetStrength,
-            start_percent: this.controlnetStartPercent,
-            end_percent: this.controlnetEndPercent,
-          }
-        : null,
+      controlnet: this.mode === "inpainting" ? null : controlnetPayload(this),
+      controlnet_layers: this.mode === "inpainting" && !this.isNovelAi ? controlnetLayerPayloads(this.documentControlLayers()) : [],
       facefix_enabled: this.facefixEnabled,
       facefix_detector: this.facefixDetector,
       facefix_denoise: this.facefixDenoise,

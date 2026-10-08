@@ -65,6 +65,30 @@
 
 ---
 
+## What's New in v2.3.16
+
+### Krea 2
+- **Uncensored text encoder**: when a Krea 2 model is selected, an **Uncensored text encoder** panel appears under the Text Encoder picker. Krea 2 reads prompts through Qwen3-VL-4B, a chat model trained to refuse some requests, which can weaken or drop concepts in the image, not only NSFW ones. **Download and use** fetches an abliterated (Heretic) copy of the same encoder at the same fp8 precision (4.8 GB, DreamFast/Qwen3-VL-4b-Heretic-ComfyUI) and switches to it. Once installed, **Use uncensored encoder** and **Use standard encoder** switch between the two, and the choice is remembered across models and restarts. It cannot add concepts the image model itself never learned.
+
+---
+
+## What's New in v2.3.15
+
+### Fixes and maintenance
+- **Updates restart ComfyUI**: after an update, MooshieUI could reconnect to the ComfyUI still running from the previous version instead of starting a new one, so fixes to MooshieUI's own ComfyUI nodes only took effect after a manual restart. This is why the Krea 2 GGUF fix in v2.3.14 kept showing "Unexpected architecture type in GGUF file: 'krea2'" for some people. MooshieUI now restarts a ComfyUI left running by a different version.
+- **Int8 Krea 2 GGUF files**: some Krea 2 GGUF files (for example the Civitai "int8" Turbo GGUF conversion) store raw int8 weights with separate scales, which failed with "Dequantization for I8 is not yet implemented". MooshieUI now converts these to the standard Q8_0 format when loading, at the same size. Files whose scales cannot be converted exactly still show the error; a standard Q8_0 Krea 2 GGUF works in that case.
+
+---
+
+## What's New in v2.3.14
+
+v2.3.13 was tagged but never published (its macOS build failed), so this release carries its fix.
+
+### Fixes and maintenance
+- **Krea 2 GGUF files load**: Krea 2 GGUF files labelled `krea2` (for example the Civitai Turbo GGUF conversions and realrebelai/KREA-2_GGUFs) or `pig` (gguf-org/krea-2-gguf) failed with "Unexpected architecture type in GGUF file: 'krea2'". The ComfyUI-GGUF nodes only accept a fixed list of model types and Krea 2 is not on it, even though ComfyUI itself recognises the model. MooshieUI now adds Krea 2 to that list when ComfyUI starts, so these files generate normally. No reinstall needed.
+
+---
+
 ## What's New in v2.3.12
 
 ### Krea 2

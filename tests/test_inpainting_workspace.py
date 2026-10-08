@@ -141,4 +141,97 @@ class InpaintingTests(unittest.TestCase):
         result, = Encode.encode(torch.ones((1,1,2,3)), self.mask, Vae(), 1, '{}')
         self.assertEqual(result['samples'].shape, (1,4,8,12))
 
+    def test_density_policy_changes_sampling_not_final_transparency(self):
+        class Vae:
+            downscale_ratio = 8
+            def encode(self, pixels): return torch.ones((1,4,8,12))
+        self.mask.fill_(.25)
+        noise_masks = {}
+        for density in [False, True, None]:
+            options = dict(mask_blur=0)
+            if density is not None:
+                options['density_denoise'] = density
+            settings = json.dumps(options)
+            pixels, mask, context = Prepare.prepare(self.image,self.mask,96,64,0,settings)
+            encoded, = Encode.encode(pixels,mask,Vae(),123,settings)
+            noise_masks[density] = encoded['noise_mask']
+            result, = Composite.composite(torch.ones_like(pixels),context)
+            # Final blend remains 25%, independent of the sampling policy.
+            self.assertTrue(torch.allclose(result, torch.full_like(result, .4375)))
+            self.assertTrue(torch.equal(encoded['samples'], torch.ones_like(encoded['samples'])))
+        self.assertTrue(torch.equal(noise_masks[False],torch.ones_like(noise_masks[False])))
+        self.assertTrue(torch.allclose(noise_masks[True],torch.full_like(noise_masks[True],.25)))
+        self.assertTrue(torch.equal(noise_masks[True],noise_masks[None]), 'legacy workflows retain fractional sampling')
+
+    def test_uniform_density_keeps_zero_outside_the_painted_mask(self):
+        class Vae:
+            downscale_ratio = 8
+            def encode(self, pixels): return torch.ones((1,4,8,12))
+        self.mask *= .25
+        settings = json.dumps(dict(mask_blur=0,density_denoise=False))
+        pixels, mask, _ = Prepare.prepare(self.image,self.mask,96,64,0,settings)
+        encoded, = Encode.encode(pixels,mask,Vae(),123,settings)
+        values = encoded['noise_mask'].unique()
+        self.assertTrue(torch.equal(values,torch.tensor([0.,1.])))
+        self.assertEqual(float(encoded['noise_mask'][0,0,0]),0)
+        self.assertEqual(float(encoded['noise_mask'][0,3,5]),1)
+
+    def test_grow_and_blur_preserve_partial_mask_density(self):
+        self.mask *= .5
+        _, grown, context = Prepare.prepare(self.image,self.mask,96,64,2,
+            json.dumps(dict(mask_blur=2,density_denoise=True)))
+        self.assertGreater(float(grown[0,19,35]),0)
+        self.assertLessEqual(float(grown.max()),.500001)
+        result, = Composite.composite(torch.ones_like(self.image),context)
+        self.assertGreater(float(result[0,19,35,0]),.25)
+        self.assertLessEqual(float(result.max()),.625001)
+
+    def test_soft_schedule_only_scales_density_when_sampling_uses_it(self):
+        self.mask.fill_(.5)
+        _, uniform, _ = self.prepare(soft=True,schedule_bias=2,density_denoise=False)
+        _, varying, _ = self.prepare(soft=True,schedule_bias=2,density_denoise=True)
+        self.assertTrue(torch.equal(uniform,torch.full_like(uniform,.5)))
+        self.assertTrue(torch.equal(varying,torch.full_like(varying,.25)))
+
+    def test_linked_raster_area_limits_growth_blur_and_inversion_without_double_alpha(self):
+        limit = torch.zeros_like(self.mask)
+        limit[:,18:42,28:52] = .5
+        mask = self.mask * .5
+        _, processed, context = Prepare.prepare(self.image, mask, 96, 64, 8,
+            json.dumps(dict(mask_blur=2, density_denoise=False)), area_limit=limit)
+        self.assertEqual(float(processed[0,5,5]),0)
+        self.assertAlmostEqual(float(processed[0,30,40]),.5, places=5)
+        result, = Composite.composite(torch.ones_like(self.image),context)
+        self.assertTrue(torch.equal(result[0,5,5], self.image[0,5,5]))
+        self.assertAlmostEqual(float(result[0,30,40,0]),.625, places=5)
+        _, inverted, _ = Prepare.prepare(self.image, mask, 96, 64, 8,
+            json.dumps(dict(mask_blur=2,invert_mask=True)), area_limit=limit)
+        self.assertEqual(float(inverted[0,5,5]),0)
+        self.assertLessEqual(float(inverted.max()),.5)
+
+    def test_area_limit_tracks_resize_crop_fill_and_batch_geometry(self):
+        image = self.image.expand(2, -1, -1, -1).clone()
+        painted = torch.ones((2,64,96))
+        limit = torch.zeros((1,64,96)); limit[:,16:48,24:72] = .4
+        for mode in ['resize','crop','fill','latent']:
+            with self.subTest(mode=mode):
+                pixels, mask, context = Prepare.prepare(image, painted, 64,64,4,
+                    json.dumps(dict(resize_mode=mode,mask_blur=2)), area_limit=limit)
+                self.assertEqual(mask.shape,(2,64,64))
+                self.assertAlmostEqual(float(mask[0,32,32]),.4,places=5)
+                self.assertEqual(float(mask[0,0,0]),0)
+                self.assertTrue(torch.equal(mask[0],mask[1]))
+                result, = Composite.composite(torch.ones_like(pixels),context)
+                self.assertTrue(torch.equal(result[:,0,0],pixels[:,0,0]))
+
+    def test_area_limit_stays_in_document_coordinates_after_masked_high_resolution_sampling(self):
+        limit=torch.zeros_like(self.mask); limit[:,24:36,34:46]=.4
+        pixels, mask, context=Prepare.prepare(self.image,self.mask,96,64,8,
+            json.dumps(dict(area='masked',padding=4,mask_blur=2)),192,128,area_limit=limit)
+        self.assertLessEqual(float(mask.max()),.400001)
+        result, = Composite.composite(torch.ones_like(pixels),context)
+        self.assertEqual(result.shape,self.image.shape)
+        self.assertTrue(torch.equal(result[0,0,0],self.image[0,0,0]))
+        self.assertAlmostEqual(float(result[0,30,40,0]),.55,places=5)
+
 if __name__ == '__main__': unittest.main()

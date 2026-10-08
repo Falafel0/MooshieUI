@@ -29,6 +29,7 @@
     /** Preview src: an image URL the parent already holds, or an object URL of
      *  the bytes that were really read back. Never a synthetic URL. */
     previewUrl?: string | null;
+    largePreview?: boolean;
     /** Short localized status word shown in the card chip. */
     statusWord: string;
     /** Localized sentence under the payload: guidance, result, or error. */
@@ -48,6 +49,7 @@
     width,
     height,
     previewUrl,
+    largePreview = false,
     statusWord,
     statusText,
     statusRole,
@@ -117,12 +119,12 @@
   </p>
 
   <!-- The payload: what is actually moving. -->
-  <div class="flex items-center gap-2">
+  <div class={largePreview ? "flex flex-col gap-2" : "flex items-center gap-2"}>
     {#if previewUrl}
       <img
         src={previewUrl}
         alt={locale.t("preview.alt")}
-        class="h-10 w-10 shrink-0 rounded border border-neutral-800 object-cover"
+        class={largePreview ? "h-32 w-full rounded border border-ui-border bg-neutral-950 object-contain" : "h-10 w-10 shrink-0 rounded border border-neutral-800 object-cover"}
       />
     {:else}
       <span

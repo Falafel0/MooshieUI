@@ -14,6 +14,8 @@ export interface LoraPayloadEntry {
 }
 
 export interface ControlNetPayload {
+  /** Frontend document identity used to resolve per-mask conditioning scope. */
+  layer_id?: string;
   enabled: boolean;
   preset: string | null;
   controlnet_model: string | null;
@@ -421,6 +423,7 @@ export interface GenerationParams {
   /** Reuse the positive prompt for each detected face instead of a generic prompt. */
   facefix_auto_prompt: boolean;
   controlnet: ControlNetPayload | null;
+  controlnet_layers?: ControlNetPayload[];
   model_architecture: string;
   is_sdxl_like?: boolean;
   is_vpred_model?: boolean;
@@ -655,6 +658,9 @@ export interface OutputImage {
   gallery_filename?: string;
   /** In-memory bytes for this session-only image. Avoids fetching blob: URLs in browser mode. */
   sessionBlob?: Blob;
+  /** Session-only Patchy hand-off context; never persist in gallery metadata. */
+  patchySourceKind?: "base" | "raster" | "mask" | "region";
+  patchySourceVersion?: number;
   /** Server temp image filename for browser-mode generated images before they are persisted. */
   tempFilename?: string;
   /** Browser-display temp image filename when canonical output is not browser-decodable (for example JXL). */

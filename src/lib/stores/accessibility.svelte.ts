@@ -4,10 +4,19 @@ import { userScopedKey } from "../utils/ipc.js";
 const ACCESSIBILITY_SETTINGS_KEY = "mooshieui.accessibility.v1";
 
 export type VisionSimulatorMode = "none" | "protanopia" | "deuteranopia" | "tritanopia";
+export type UiDensity = "compact" | "comfortable" | "touch";
+export type MotionPreference = "system" | "reduced";
 
 class AccessibilityStore {
   visionSimulatorMode = $state<VisionSimulatorMode>("none");
   showInfoTips = $state(true);
+  density = $state<UiDensity>("comfortable");
+  motion = $state<MotionPreference>("system");
+
+  private applyInterfacePrefs(data: any) {
+    if (["compact", "comfortable", "touch"].includes(data?.density)) this.density = data.density;
+    if (["system", "reduced"].includes(data?.motion)) this.motion = data.motion;
+  }
 
   constructor() {
     this.loadSettings();
@@ -18,6 +27,7 @@ class AccessibilityStore {
       const raw = localStorage.getItem(userScopedKey(ACCESSIBILITY_SETTINGS_KEY));
       if (!raw) return;
       const parsed = JSON.parse(raw);
+      this.applyInterfacePrefs(parsed);
       if (parsed.visionSimulatorMode) {
         this.visionSimulatorMode = parsed.visionSimulatorMode;
       }
@@ -33,7 +43,9 @@ class AccessibilityStore {
     try {
       localStorage.setItem(userScopedKey(ACCESSIBILITY_SETTINGS_KEY), JSON.stringify({
         visionSimulatorMode: this.visionSimulatorMode,
-        showInfoTips: this.showInfoTips
+        showInfoTips: this.showInfoTips,
+        density: this.density,
+        motion: this.motion,
       }));
       triggerSync();
     } catch (e) {
@@ -45,11 +57,14 @@ class AccessibilityStore {
     return {
       visionSimulatorMode: this.visionSimulatorMode,
       showInfoTips: this.showInfoTips,
+      density: this.density,
+      motion: this.motion,
     };
   }
 
   applyServerPrefs(data: any): void {
     try {
+      this.applyInterfacePrefs(data);
       if (data?.visionSimulatorMode) this.visionSimulatorMode = data.visionSimulatorMode;
       if (data?.showInfoTips !== undefined) this.showInfoTips = data.showInfoTips;
       this.saveSettings();

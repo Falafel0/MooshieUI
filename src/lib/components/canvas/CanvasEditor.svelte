@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { prepareControlnetReference } from "../../utils/controlnetReference.js";
+  import { getImageFile } from "../../utils/metadataImport.js";
+  import { untrack, onDestroy } from "svelte";
   import { canvas, isMaskLayer } from "../../stores/canvas.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
@@ -24,6 +26,65 @@
   }
 
   let { showInpaintPreviewOverlay = true, oneditpatchy }: Props = $props();
+
+  let canvasDropZone: HTMLDivElement | undefined = $state();
+  let referenceUpload = $state(false);
+  let referenceRevision = 0;
+  onDestroy(() => { referenceRevision++; });
+
+  export async function setControlnetReference(file: File) {
+    const layer = canvas.activeLayer;
+    if (layer?.type !== 'controlnet' || layer.locked) return;
+    const sourceVersion = canvas.inpaintSourceVersion;
+    const revision = ++referenceRevision;
+    referenceUpload = true;
+    try {
+      const reference = await prepareControlnetReference(file);
+      if (revision !== referenceRevision || sourceVersion !== canvas.inpaintSourceVersion || canvas.activeLayerId !== layer.id || canvas.activeLayer?.locked) return;
+      canvas.updateControlnetLayer(layer.id, { image: reference.name, sourceData: reference.sourceData });
+      // Durable pixels are also the preview. No extra object URL to own/revoke.
+      const oldPreview = canvas.activeLayer?.controlnetPreviewUrl;
+      if (oldPreview?.startsWith('blob:')) URL.revokeObjectURL(oldPreview);
+      canvas.setControlnetPreview(layer.id, reference.sourceData);
+    } catch (error) {
+      if (revision === referenceRevision && canvas.activeLayerId === layer.id) gallery.showToast(locale.t('generation.controlnet.image_failed', {error:String(error)}), 'error');
+    } finally { if (revision === referenceRevision) referenceUpload = false; }
+  }
+
+  async function importCanvasFile(file: File) {
+    if (canvas.activeLayer?.type === 'controlnet') { await setControlnetReference(file); return; }
+    const url = URL.createObjectURL(file);
+    try { await canvas.addRasterImage(url, file.name); }
+    finally { URL.revokeObjectURL(url); }
+  }
+
+  async function handleCanvasDrop(event: DragEvent) {
+    if (!event.dataTransfer) return;
+    const file = getImageFile(event.dataTransfer);
+    if (!file) return;
+    event.preventDefault(); event.stopPropagation();
+    await importCanvasFile(file);
+  }
+
+  async function handleNativeCanvasDrop(event: Event) {
+    const {path, filename} = (event as CustomEvent<{path:string; filename:string}>).detail;
+    const layerId = canvas.activeLayerId, sourceVersion = canvas.inpaintSourceVersion;
+    try {
+      const {readFile} = await import('@tauri-apps/plugin-fs');
+      const bytes = await readFile(path);
+      if (sourceVersion !== canvas.inpaintSourceVersion || layerId !== canvas.activeLayerId) return;
+      const extension = filename.split('.').pop()?.toLowerCase();
+      const mime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'svg' ? 'image/svg+xml' : `image/${extension || 'png'}`;
+      await importCanvasFile(new File([bytes], filename, {type:mime}));
+    } catch (error) { gallery.showToast(locale.t('generation.toast.failed_drop'), 'error'); console.warn('Canvas drop failed', error); }
+  }
+
+  $effect(() => {
+    const zone = canvasDropZone;
+    if (!zone) return;
+    zone.addEventListener('tauri-file-drop', handleNativeCanvasDrop);
+    return () => zone.removeEventListener('tauri-file-drop', handleNativeCanvasDrop);
+  });
 
   let stageRef: CanvasStage | undefined = $state();
 
@@ -130,12 +191,13 @@
     !progress.isGenerating && (canvas.canApplyInpaintResult || inpaintResultStatus.visible),
   );
 
-  const activeContextLayer = $derived(isMaskLayer(canvas.activeLayer) ? canvas.activeLayer : null);
+  const activeContextLayer = $derived(isMaskLayer(canvas.activeLayer) || canvas.activeLayer?.type === 'controlnet' ? canvas.activeLayer : null);
   const activeContextSettings = $derived(activeContextLayer?.inpaintSettings ?? generation.inpaintSettings);
   const activeContextGrow = $derived(activeContextLayer?.maskGrow ?? generation.growMaskBy);
   const contextPreviewVisible = $derived(activeContextLayer ? activeContextLayer.showContext !== false : canvas.showLayerContext);
 
   untrack(() => {
+    if (canvas.selectedWorkspaceSection === 'control') canvas.selectedWorkspaceSection = 'layers';
     // Initialize before CanvasStage mounts and calculates its initial fit.
     if (canvas.layers.length === 0) {
       canvas.initCanvas(generation.width, generation.height);
@@ -179,15 +241,20 @@
 <div class="flex flex-col h-full rounded-xl border border-neutral-800 overflow-hidden">
   <ProjectBar />
   <CanvasToolbar />
-  <div class="flex-1 min-h-0 relative">
+  <div bind:this={canvasDropZone} data-drop-zone="canvas-layer-input" role="region" aria-label={locale.t('generation.inpaint.canvas_editor')} class="flex-1 min-h-0 relative" ondragover={event => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); }} ondrop={handleCanvasDrop}>
     <CanvasStage bind:this={stageRef} showLivePreview={false} />
+    {#if referenceUpload}<div role="status" class="pointer-events-none absolute right-3 top-3 z-10 rounded-md border border-ui-border bg-neutral-950/90 px-3 py-2 text-xs text-neutral-300">{locale.t('generation.controlnet.uploading')}</div>{/if}
 
-    {#if (canvas.selectedWorkspaceSection === 'layers' && activeContextLayer) || canvas.selectedWorkspaceSection === 'control'}
+    {#if canvas.selectedWorkspaceSection === 'layers' && activeContextLayer}
       <div class="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-md border border-neutral-700/70 bg-neutral-950/82 p-1 text-[10px] text-neutral-300 shadow-lg backdrop-blur-md">
         {#if activeContextLayer}
           <span class="h-2 w-2 shrink-0 rounded-full" style="background: {resolveTint(activeContextLayer)}"></span>
           <strong class="max-w-32 truncate px-0.5 font-medium text-neutral-100">{activeContextLayer.name}</strong>
-          {#if activeContextLayer.type === 'region'}
+          {#if activeContextLayer.type === 'controlnet'}
+            <span class="rounded bg-neutral-800 px-1.5 py-0.5">{locale.t(canvas.controlContextPreviewLayerId === activeContextLayer.id && canvas.controlContextPreviewKind === 'processed' ? 'generation.controlnet.processed_input' : 'generation.controlnet.source_image')}</span>
+            <span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">×{(activeContextLayer.controlnet?.strength ?? 1).toFixed(2)}</span>
+            <span class="tabular-nums text-neutral-400">{Math.round((activeContextLayer.controlnet?.startPercent ?? 0) * 100)}–{Math.round((activeContextLayer.controlnet?.endPercent ?? 1) * 100)}%</span>
+          {:else if activeContextLayer.type === 'region'}
             <span class="rounded px-1.5 py-0.5" style="background: color-mix(in srgb, {resolveTint(activeContextLayer)} 18%, transparent); color: {resolveTint(activeContextLayer)}">{locale.t('canvas.type_region')}</span>
             <span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">{(activeContextLayer.regionalStrength ?? 1).toFixed(2)}×</span>
           {:else}
@@ -197,16 +264,8 @@
             {#if activeContextSettings.area === 'masked'}<span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">↔ {activeContextSettings.context_padding_x ?? activeContextSettings.padding}px · ↕ {activeContextSettings.context_padding_y ?? activeContextSettings.padding}px</span>{/if}
           {/if}
           {#if activeContextLayer.type === 'mask'}<span class="rounded bg-neutral-800 px-1.5 py-0.5" title={locale.t('generation.image.denoise')}>{(activeContextLayer.denoise ?? generation.denoise).toFixed(2)}</span>{/if}
-        {:else}
-          <span class="h-2 w-2 shrink-0 rounded-full bg-cyan-400"></span>
-          <strong class="font-medium text-neutral-100">ControlNet</strong>
-          <span class="rounded bg-neutral-800 px-1.5 py-0.5">{generation.controlnetStrength.toFixed(2)}</span>
-          <span class="relative h-1.5 w-24 overflow-hidden rounded-full bg-neutral-700" title={`${Math.round(generation.controlnetStartPercent * 100)}–${Math.round(generation.controlnetEndPercent * 100)}%`}>
-            <span class="absolute inset-y-0 rounded-full bg-cyan-400" style={`left:${generation.controlnetStartPercent * 100}%;right:${100 - generation.controlnetEndPercent * 100}%`}></span>
-          </span>
-          <span class="tabular-nums text-neutral-400">{Math.round(generation.controlnetStartPercent * 100)}–{Math.round(generation.controlnetEndPercent * 100)}%</span>
         {/if}
-        <button type="button" class="pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-white" onclick={() => activeContextLayer ? canvas.toggleLayerContext(activeContextLayer.id) : canvas.showLayerContext = !canvas.showLayerContext} title={locale.t(contextPreviewVisible ? 'canvas.hide_context_preview' : 'canvas.show_context_preview')}>
+        <button type="button" class="pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-white" onclick={() => activeContextLayer ? canvas.toggleLayerContext(activeContextLayer.id) : canvas.showLayerContext = !canvas.showLayerContext} aria-label={locale.t(contextPreviewVisible ? 'canvas.hide_context_preview' : 'canvas.show_context_preview')} aria-pressed={contextPreviewVisible} title={locale.t(contextPreviewVisible ? 'canvas.hide_context_preview' : 'canvas.show_context_preview')}>
           {#if contextPreviewVisible}<Eye size={13} />{:else}<EyeOff size={13} />{/if}
         </button>
       </div>

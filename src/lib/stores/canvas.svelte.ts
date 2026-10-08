@@ -1,4 +1,7 @@
+import { newControlnetLayer, type ControlnetLayerSettings } from "../utils/controlnetState.js";
 import Konva from "konva";
+import { effectiveLayerVisibility, remapLayerRelations, type LayerRelations, type LayerGroup } from "../utils/layerRelations.js";
+import { restrictGenerationMaskToRasterAlpha, applySpatialMaskToRasterAlpha } from "../utils/layerAlpha.js";
 import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
@@ -12,22 +15,28 @@ import { canvasHistory } from "./canvasHistory.svelte.js";
 import { fittedCanvasViewport, viewportMatchesCanvasFit } from "../utils/canvasViewport.js";
 import {
   PROJECT_DOCUMENT_VERSION,
+  captureRasterPaint,
+  type RasterPaintCommand,
   emptyDocument,
   type ProjectDocument,
   type ProjectLayer,
 } from "../utils/projectDocument.js";
 
 export type ToolType = "brush" | "eraser" | "rectFill" | "ellipseFill" | "lasso" | "eyedropper" | "move" | "view" | "canvasResize";
-export type CanvasLayerType = "raster" | "mask" | "region";
+export type CanvasLayerType = "raster" | "mask" | "region" | "controlnet";
 
 export function isMaskLayer(layer: Pick<CanvasLayer, "type"> | null | undefined): boolean {
   return layer?.type === "mask" || layer?.type === "region";
 }
 
-export interface CanvasLayer {
+export interface CanvasLayer extends LayerRelations {
+  rasterPaint?: RasterPaintCommand[];
   id: string;
   name: string;
   type: CanvasLayerType;
+  controlnet?: ControlnetLayerSettings;
+  /** Session-only owned URL, excluded from project serialization. */
+  controlnetPreviewUrl?: string | null;
   visible: boolean;
   opacity: number;
   /** How much of this layer counts for a run, 0..1. A mask's painted area
@@ -113,9 +122,8 @@ export interface TransformState {
   deltaY: number;
 }
 
-let nextLayerId = 0;
 function genLayerId(): string {
-  return `layer_${++nextLayerId}`;
+  return `layer_${crypto.randomUUID()}`;
 }
 
 /**
@@ -153,7 +161,11 @@ class CanvasStore {
 
   // Layers
   layers = $state<CanvasLayer[]>([]);
+  groups = $state<LayerGroup[]>([]);
+  activeGroupId = $state<string | null>(null);
   activeLayerId = $state<string | null>(null);
+  /** A legacy global control is copied once; new/opened documents own their controls. */
+  legacyControlnetMigrated = false;
   /** Bumped whenever pixels change without the layer records changing: painted
    * strokes, a replaced image, an applied result. A project reads it to know it
    * has unsaved picture changes, not only metadata changes. */
@@ -168,7 +180,11 @@ class CanvasStore {
     for (const node of this.detachedLayers.values()) node.destroy();
     this.detachedLayers.clear();
     for (const node of this._stageRef?.getLayers() ?? []) {
-      if (this.layers.some((layer) => layer.id === node.id())) this.detachedLayers.set(node.id(), node.clone());
+      if (this.layers.some((layer) => layer.id === node.id())) {
+        const clone = node.clone();
+        clone.findOne('.raster-clip-mask')?.destroy();
+        this.detachedLayers.set(node.id(), clone);
+      }
     }
     this._stageRef = null;
   }
@@ -197,12 +213,13 @@ class CanvasStore {
 
   // Mask overlay
   /** Overlay strength for the canvas only: how strongly masks and regions are
-   * drawn over the picture. Display only — a layer's own opacity is what the
-   * run reads. */
+   * drawn over the picture. Display only — painted coverage determines the generation mask. */
   maskOverlayOpacity = $state(0.45);
   maskOverlayVisible = $state(true);
   showLayerContext = $state(true);
   controlContextPreviewUrl = $state<string | null>(null);
+  controlContextPreviewLayerId = $state<string | null>(null);
+  controlContextPreviewKind = $state<'source' | 'processed'>('source');
 
   // UI state
   isCanvasMode = $state(false);
@@ -274,11 +291,11 @@ class CanvasStore {
   }
 
   get visibleLayers(): CanvasLayer[] {
-    return this.layers.filter((l) => l.visible).sort((a, b) => a.order - b.order);
+    return this.layers.filter((l) => effectiveLayerVisibility(l, this.groups)).sort((a, b) => a.order - b.order);
   }
 
   get sortedLayers(): CanvasLayer[] {
-    const rank = (layer: CanvasLayer) => layer.type === 'raster' ? 0 : layer.type === 'region' ? 2 : 1;
+    const rank = (layer: CanvasLayer) => layer.type === 'raster' ? 0 : layer.type === 'region' ? 2 : layer.type === 'controlnet' ? 3 : 1;
     return [...this.layers].sort((a, b) => rank(b) - rank(a) || b.order - a.order);
   }
 
@@ -825,7 +842,7 @@ class CanvasStore {
     const stage = this._stageRef;
     if (!stage) return null;
 
-    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && layer.visible && (layer.coverage ?? 1) > 0);
+    const maskMetas = this.layers.filter((layer) => layer.type === "mask" && effectiveLayerVisibility(layer, this.groups) && (layer.coverage ?? 1) > 0);
     if (!maskMetas.length) return null;
 
     const stageLayers = stage.getLayers?.() ?? [];
@@ -918,10 +935,14 @@ class CanvasStore {
   documentShape(): ProjectDocument {
     const layers: ProjectLayer[] = [];
     for (const layer of [...this.layers].sort((a, b) => a.order - b.order)) {
-      const { id: _id, image, ...meta } = layer;
+      const { image, controlnetPreviewUrl: _preview, ...meta } = layer;
       const record: ProjectLayer = { ...meta };
       if (isMaskLayer(layer)) record.spatialPng = null;
-      else if (image) record.image = { ...image };
+      else if (layer.type === 'raster') {
+        if (image) record.image = { ...image };
+        const node = this._stageRef?.getLayers().find((node: any) => node.id() === layer.id) ?? this.detachedLayers.get(layer.id);
+        record.rasterPaint = node ? captureRasterPaint(node.getChildren()) : layer.rasterPaint ?? [];
+      }
       layers.push(record);
     }
     return {
@@ -931,6 +952,7 @@ class CanvasStore {
       baseColor: this.baseColor,
       backgroundColor: this.backgroundColor,
       viewport: { ...this.viewport },
+      groups: this.groups.map(group => ({ ...group })),
       layers,
     };
   }
@@ -953,12 +975,8 @@ class CanvasStore {
       if (!layer || !record) continue;
       if (isMaskLayer(layer)) {
         record.spatialPng = null;
-        if (!layer.visible) {
-          // A hidden mask keeps its records but not its pixels: it is not on the
-          // stage, and saving pixels of something the run will skip would be a
-          // document that changes the picture when it is opened.
-          continue;
-        }
+        // Hidden layers keep their pixels too. Visibility controls participation,
+        // not whether an undo, project save or later reveal can restore the drawing.
         const konva = stageLayers.find((candidate: any) => candidate.id?.() === layer.id);
         if (!konva) {
           // A mask with no stage layer behind it is an inconsistency the user
@@ -993,6 +1011,7 @@ class CanvasStore {
    * cleared: a loaded project starts from its own base, not the old one's.
    */
   loadDocument(doc: ProjectDocument) {
+    for (const layer of this.layers) if (layer.controlnetPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(layer.controlnetPreviewUrl);
     this.canvasWidth = doc.canvasWidth;
     this.canvasHeight = doc.canvasHeight;
     this.baseColor = doc.baseColor;
@@ -1015,10 +1034,15 @@ class CanvasStore {
     canvasHistory.clear();
 
     const spatial: SpatialLayerSnapshot[] = [];
-    this.layers = doc.layers.map((layer) => {
+    const ids = doc.layers.map(() => genLayerId());
+    const layerIds = new Map(doc.layers.flatMap((layer, index) => layer.id ? [[layer.id, ids[index]] as const] : []));
+    const groupIds = new Map((doc.groups ?? []).map(group => [group.id, `group_${genLayerId()}`]));
+    this.groups = (doc.groups ?? []).map(group => ({ ...group, id: groupIds.get(group.id)! }));
+    this.activeGroupId = null;
+    this.layers = doc.layers.map((layer, index) => {
       const { spatialPng, ...meta } = layer;
-      const id = genLayerId();
-      if (layer.type !== "raster") {
+      const id = ids[index];
+      if (layer.type === "mask" || layer.type === "region") {
         spatial.push({
           id,
           type: layer.type,
@@ -1028,7 +1052,7 @@ class CanvasStore {
           contentUrl: spatialPng ?? null,
         });
       }
-      return { ...meta, id } as CanvasLayer;
+      return { ...remapLayerRelations({ ...meta, id: layer.id ?? id }, layerIds, groupIds), id } as CanvasLayer;
     });
     this.activeLayerId = this.layers[0]?.id ?? null;
     // The stage re-hydrates mask and region pixels from these once it has built
@@ -1118,12 +1142,77 @@ class CanvasStore {
     };
   }
 
+  get activeGroup(): LayerGroup | null {
+    return this.groups.find(group => group.id === this.activeGroupId) ?? null;
+  }
+
+  createGroup(name?: string): string {
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    const id = `group_${genLayerId()}`;
+    this.groups = [...this.groups, { id, name: name ?? locale.t('canvas.group_default', { n: String(this.groups.length + 1) }), visible: true, collapsed: false }];
+    this.setActiveGroup(id);
+    return id;
+  }
+
+  setActiveGroup(id: string | null) {
+    if (id != null && !this.groups.some(group => group.id === id)) return;
+    this.activeGroupId = id;
+    if (id != null) this.activeLayerId = null;
+    this.selectedWorkspaceSection = 'layers';
+  }
+
+  renameGroup(id: string, name: string) {
+    if (!name.trim() || !this.groups.some(group => group.id === id && group.name !== name.trim())) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.groups = this.groups.map(group => group.id === id ? { ...group, name: name.trim() } : group);
+  }
+
+  toggleGroupVisibility(id: string) {
+    if (!this.groups.some(group => group.id === id)) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.groups = this.groups.map(group => group.id === id ? { ...group, visible: !group.visible } : group);
+  }
+
+  toggleGroupCollapsed(id: string) {
+    this.groups = this.groups.map(group => group.id === id ? { ...group, collapsed: !group.collapsed } : group);
+  }
+
+  private preserveGroupScope(layer: CanvasLayer): CanvasLayer {
+    if (!layer.groupId || (layer.type !== 'region' && layer.type !== 'controlnet') || (layer.modifierScope?.mode ?? 'auto') !== 'auto') return layer;
+    return { ...layer, modifierScope: { mode: 'masks', maskIds: this.layers.filter(mask => mask.type === 'mask' && mask.groupId === layer.groupId).map(mask => mask.id) } };
+  }
+
+  removeGroup(id: string) {
+    const group = this.groups.find(item => item.id === id);
+    if (!group) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map(layer => layer.groupId === id ? {
+      ...this.preserveGroupScope(layer), groupId: null,
+      visible: group.visible && layer.visible,
+      controlnet: layer.controlnet && !group.visible ? { ...layer.controlnet, enabled: false } : layer.controlnet,
+    } : layer);
+    this.groups = this.groups.filter(item => item.id !== id);
+    if (this.activeGroupId === id) this.activeGroupId = null;
+  }
+
+  setLayerRelations(id: string, patch: Partial<LayerRelations>) {
+    const layer = this.layers.find(item => item.id === id);
+    if (!layer || layer.locked) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    // Leaving a folder must not turn a local modifier into a global effect.
+    const prior = patch.groupId === null ? this.preserveGroupScope(layer) : layer;
+    this.layers = this.layers.map(item => item.id === id ? { ...prior, ...patch,
+      modifierScope: patch.modifierScope ? { ...patch.modifierScope, maskIds: patch.modifierScope.maskIds ? [...patch.modifierScope.maskIds] : undefined } : prior.modifierScope,
+    } : item);
+    this.bumpPaintRevision();
+  }
+
   // Layers
   addLayer(type: CanvasLayerType = "raster", name?: string): string {
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     const id = genLayerId();
     const maxOrder = this.layers.reduce((max, l) => Math.max(max, l.order), -1);
-    const layerName = name ?? (type === "mask"
+    const layerName = name ?? (type === "controlnet" ? locale.t("generation.controlnet.title") : type === "mask"
       ? locale.t("canvas.mask_name", { n: String(this.layers.filter((layer) => layer.type === "mask").length + 1) })
       : type === "region"
         ? locale.t("canvas.region_name", { n: String(this.layers.filter((layer) => layer.type === "region").length + 1) })
@@ -1133,13 +1222,15 @@ class CanvasStore {
       ...this.layers,
       {
         id,
+        groupId: this.activeGroupId ?? this.activeLayer?.groupId ?? null,
         name: layerName,
         type,
         visible: true,
-        opacity: 1,
+        opacity: type === 'controlnet' ? .4 : 1,
         // A mask or a region starts at full coverage: the sliders that dim the
         // overlay are display-only, so this is the one value a run reads.
-        coverage: type === "raster" ? undefined : 1,
+        coverage: type === "mask" || type === "region" ? 1 : undefined,
+        controlnet: type === "controlnet" ? newControlnetLayer() : undefined,
         locked: false,
         showContext: true,
         order: maxOrder + 1,
@@ -1162,6 +1253,30 @@ class CanvasStore {
     return id;
   }
 
+  private controlnetEditLayerId: string | null = null;
+  private controlnetBatchLayerId: string | null = null;
+  beginControlnetEdit(id: string) {
+    const layer = this.layers.find(item => item.id === id && item.type === 'controlnet');
+    if (!layer || layer.locked || this.controlnetEditLayerId === id) return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.controlnetEditLayerId = id;
+  }
+  endControlnetEdit() { this.controlnetEditLayerId = null; }
+
+  updateControlnetLayer(id: string, patch: Partial<ControlnetLayerSettings>) {
+    const layer = this.layers.find(item => item.id === id && item.type === 'controlnet');
+    if (!layer || layer.locked) return;
+    if (this.controlnetEditLayerId !== id && this.controlnetBatchLayerId !== id) {
+      canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+      this.controlnetBatchLayerId = id;
+      queueMicrotask(() => { if (this.controlnetBatchLayerId === id) this.controlnetBatchLayerId = null; });
+    }
+    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnet: { ...newControlnetLayer(), ...item.controlnet, ...patch } } : item);
+  }
+  setControlnetPreview(id: string, url: string | null) {
+    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnetPreviewUrl: url } : item);
+  }
+
   updateLayerRegion(id: string, patch: { regionalPrompt?: string; regionalNegativePrompt?: string; regionalStrength?: number }) {
     this.layers = this.layers.map((layer) => layer.id === id && layer.type === "region" ? { ...layer, ...patch } : layer);
   }
@@ -1177,6 +1292,7 @@ class CanvasStore {
     this.detachedLayers.get(id)?.destroy();
     this.detachedLayers.delete(id);
     const removed = this.layers.find((l) => l.id === id);
+    if (removed?.controlnetPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(removed.controlnetPreviewUrl);
     this.layers = this.layers.filter((l) => l.id !== id);
     this.clearLayerThumbnail(id);
     if (this.activeLayerId === id) {
@@ -1213,12 +1329,18 @@ class CanvasStore {
     const source = this._stageRef?.getLayers().find((node: any) => node.id() === id);
     // Clone actual canvas nodes, including eraser operations, before publishing metadata.
     // The stage adopts this node on its next sync instead of creating an empty layer.
-    if (source) this._stageRef.add(source.clone({ id: newId }));
+    if (source) {
+      const clone = source.clone({ id: newId });
+      clone.findOne('.raster-clip-mask')?.destroy();
+      this._stageRef.add(clone);
+    }
     this.layers = [
       ...this.layers.map((l) => l.order > layer.order ? { ...l, order: l.order + 1 } : l),
       {
         ...layer,
         id: newId,
+        controlnet: layer.controlnet ? { ...layer.controlnet } : undefined,
+        controlnetPreviewUrl: layer.controlnet?.sourceData ?? null,
         name: `${layer.name} copy`,
         order: layer.order + 1,
       },
@@ -1227,9 +1349,28 @@ class CanvasStore {
     return newId;
   }
 
+  /** Copy the painted shape without changing the original's role in generation. */
+  duplicateSpatialLayerAs(id: string, type: 'mask' | 'region'): string | null {
+    const source = this.layers.find(layer => layer.id === id);
+    if (!source || !isMaskLayer(source) || source.locked) return null;
+    const newId = this.duplicateLayer(id);
+    if (!newId) return null;
+    this.layers = this.layers.map(layer => layer.id === newId ? {
+      ...layer, type, locked: false, densityDenoise: false, denoise: undefined, maskGrow: undefined,
+      inpaintSettings: undefined, inpaintWidth: undefined, inpaintHeight: undefined,
+      modifierScope: type === 'region' ? layer.modifierScope : undefined,
+      regionalPrompt: type === 'region' ? source.regionalPrompt ?? generation.positivePrompt : undefined,
+      regionalNegativePrompt: type === 'region' ? source.regionalNegativePrompt ?? '' : undefined,
+      regionalStrength: type === 'region' ? source.regionalStrength ?? 1 : undefined,
+      name: locale.t(type === 'mask' ? 'canvas.mask_name' : 'canvas.region_name', { n: String(this.layers.filter(item => item.type === type).length + 1) }),
+    } : layer);
+    this.setActiveLayer(newId);
+    return newId;
+  }
+
   getLayerMoveTarget(id: string, direction: "up" | "down"): CanvasLayer | null {
     const layer = this.layers.find((l) => l.id === id);
-    if (!layer) return null;
+    if (!layer || layer.locked) return null;
     // Match the panel's top-to-bottom order and its mask/raster groups.
     const siblings = this.sortedLayers.filter((l) => l.type === layer.type);
     const index = siblings.findIndex((l) => l.id === id);
@@ -1248,10 +1389,40 @@ class CanvasStore {
     });
   }
 
+  /** Reorder within a layer role in one undo operation; roles never change. */
+  moveLayerTo(id: string, targetId: string, after: boolean): boolean {
+    const layer = this.layers.find(item => item.id === id);
+    const target = this.layers.find(item => item.id === targetId);
+    if (!layer || layer.locked || !target || layer.type !== target.type || id === targetId) return false;
+    const siblings = this.sortedLayers.filter(item => item.type === layer.type);
+    const remaining = siblings.filter(item => item.id !== id);
+    const index = remaining.findIndex(item => item.id === targetId) + (after ? 1 : 0);
+    const reordered = [...remaining.slice(0, index), layer, ...remaining.slice(index)];
+    if (reordered.every((item, index) => item.id === siblings[index].id) && (layer.groupId ?? null) === (target.groupId ?? null)) return false;
+    const orders = new Map(reordered.map((item, index) => [item.id, siblings[index].order]));
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map(item => {
+      const prior = item.id === id && !target.groupId ? this.preserveGroupScope(item) : item;
+      return orders.has(item.id) ? { ...prior, order: orders.get(item.id)!,
+        groupId: item.id === id ? target.groupId ?? null : item.groupId } : item;
+    });
+    this.setActiveLayer(id);
+    return true;
+  }
+
   renameLayer(id: string, name: string) {
     if (this.layers.find((layer) => layer.id === id)?.name === name) return;
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, name } : l));
+  }
+
+  /** Modifier participation is independent of its on-canvas guide visibility. */
+  toggleModifier(id: string) {
+    const layer = this.layers.find(item => item.id === id);
+    if (!layer || (layer.type !== 'region' && layer.type !== 'controlnet')) return;
+    const enabled = !(layer.visible && (layer.type !== 'controlnet' || layer.controlnet?.enabled));
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
+    this.layers = this.layers.map(item => item.id === id ? {...item, visible:enabled, controlnet:item.controlnet ? {...item.controlnet, enabled} : undefined} : item);
   }
 
   toggleLayerVisibility(id: string) {
@@ -1266,6 +1437,7 @@ class CanvasStore {
   setLayerOpacity(id: string, opacity: number, recordHistory = true) {
     const layer = this.layers.find((item) => item.id === id);
     // The slider stays inside 0..1; the store cannot assume its caller does.
+    if (!Number.isFinite(opacity)) return;
     const next = Math.max(0, Math.min(1, opacity));
     if (!layer || layer.opacity === next) return;
     if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
@@ -1276,6 +1448,7 @@ class CanvasStore {
    * it. This is the value the exported mask is scaled by. */
   setLayerCoverage(id: string, coverage: number, recordHistory = true) {
     const layer = this.layers.find((item) => item.id === id && item.type !== "raster");
+    if (!Number.isFinite(coverage)) return;
     const next = Math.max(0, Math.min(1, coverage));
     if (!layer || (layer.coverage ?? 1) === next) return;
     if (recordHistory) canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
@@ -1297,7 +1470,7 @@ class CanvasStore {
    * layer is the picture itself, so it has no overlay tint to choose. */
   setLayerTint(id: string, tint: string) {
     const layer = this.layers.find((item) => item.id === id);
-    if (!layer || layer.type === "raster" || layer.tint === tint) return;
+    if (!layer || !isMaskLayer(layer) || layer.tint === tint) return;
     canvasHistory.snapshotDocument(this.layers, this.activeLayerId);
     this.layers = this.layers.map((l) => (l.id === id ? { ...l, tint } : l));
   }
@@ -1309,7 +1482,7 @@ class CanvasStore {
   }
 
   toggleLayerContext(id: string) {
-    this.layers = this.layers.map((layer) => layer.id === id && isMaskLayer(layer)
+    this.layers = this.layers.map((layer) => layer.id === id && (isMaskLayer(layer) || layer.type === "controlnet")
       ? { ...layer, showContext: layer.showContext === false }
       : layer);
   }
@@ -1318,6 +1491,7 @@ class CanvasStore {
     const layer = this.layers.find((l) => l.id === id);
     if (!layer) return;
     this.activeLayerId = id;
+    this.activeGroupId = null;
     this.selectedWorkspaceSection = "layers";
     this.inpaintDrawMode = isMaskLayer(layer) ? "mask" : "regular";
   }
@@ -1325,7 +1499,9 @@ class CanvasStore {
   fillActiveLayer() {
     const meta = this.activeLayer;
     const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === meta?.id);
-    if (!meta || !node || meta.locked || !meta.visible || this.selectedWorkspaceSection !== 'layers') return;
+    if (!meta || !node || meta.type === 'controlnet' || meta.locked || !effectiveLayerVisibility(meta, this.groups) || this.selectedWorkspaceSection !== 'layers') return;
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId, [meta.id]);
+    this.bumpPaintRevision();
     node.add(new Konva.Rect({ x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight,
       fill: isMaskLayer(meta) ? resolveTint(meta) : this.foregroundColor,
       opacity: this.brushSettings.opacity, listening: false }));
@@ -1337,7 +1513,9 @@ class CanvasStore {
     if (!this._stageRef) return;
     const meta = this.layers.find((layer) => layer.id === id);
     if (!meta || meta.locked) return;
-    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image: undefined, initialRegion: undefined } : layer);
+    canvasHistory.snapshotDocument(this.layers, this.activeLayerId, [id]);
+    this.bumpPaintRevision();
+    this.layers = this.layers.map((layer) => layer.id === id ? { ...layer, image: undefined, initialRegion: undefined, rasterPaint: undefined } : layer);
     const layers = this._stageRef.getLayers();
     for (const kLayer of layers) {
       if (kLayer.id() === id) {
@@ -1367,7 +1545,16 @@ class CanvasStore {
   /** A mask defines the denoise and the mask settings. Prompts belong to regions
    * and to the document, never to a mask. */
   updateLayerGeneration(id: string, patch: { denoise?: number; maskGrow?: number }) {
-    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" ? { ...layer, ...patch } : layer);
+    const values = { ...patch };
+    if (values.denoise !== undefined) {
+      if (!Number.isFinite(values.denoise)) return;
+      values.denoise = Math.max(0, Math.min(1, values.denoise));
+    }
+    if (values.maskGrow !== undefined) {
+      if (!Number.isFinite(values.maskGrow)) return;
+      values.maskGrow = Math.max(0, Math.min(256, Math.round(values.maskGrow)));
+    }
+    this.layers = this.layers.map((layer) => layer.id === id && layer.type === "mask" && !layer.locked ? { ...layer, ...values } : layer);
   }
 
   setLayerInpaintSize(id: string, width: number, height: number) {
@@ -1471,22 +1658,56 @@ class CanvasStore {
     }
   }
 
-  exportMaskLayer(id: string): HTMLCanvasElement | null {
-    const meta = this.layers.find((layer) => layer.id === id && isMaskLayer(layer) && layer.visible && (layer.coverage ?? 1) > 0);
+  /** Intrinsic pixels ignore display opacity and clipping; rendered pixels include both. */
+  exportRasterLayer(id: string, options: { raw?: boolean } = {}): HTMLCanvasElement | null {
+    const meta = this.layers.find(layer => layer.id === id && layer.type === 'raster');
     const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === id);
     if (!meta || !node) return null;
-    const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight);
-    const result = maskToGrayscale(pixels);
+    const pixels = captureLayer(node, this.canvasWidth, this.canvasHeight, { includeClipping: false });
+    if (!options.raw && meta.clippingMaskId && meta.clippingEnabled !== false) {
+      const maskMeta = this.layers.find(layer => layer.id === meta.clippingMaskId && layer.type === 'mask');
+      const maskNode = maskMeta && this._stageRef?.getLayers().find((layer: any) => layer.id() === maskMeta.id);
+      const ctx = pixels.getContext('2d')!;
+      if (!maskNode) ctx.clearRect(0, 0, pixels.width, pixels.height);
+      else {
+        const mask = captureLayer(maskNode, this.canvasWidth, this.canvasHeight);
+        const rgba = ctx.getImageData(0, 0, pixels.width, pixels.height);
+        rgba.data.set(applySpatialMaskToRasterAlpha(rgba, mask.getContext('2d')!.getImageData(0, 0, mask.width, mask.height)));
+        ctx.putImageData(rgba, 0, 0);
+      }
+    }
+    if (options.raw || meta.opacity === 1) return pixels;
+    const output = document.createElement('canvas');
+    output.width = pixels.width; output.height = pixels.height;
+    const ctx = output.getContext('2d')!;
+    ctx.globalAlpha = meta.opacity;
+    ctx.drawImage(pixels, 0, 0);
+    return output;
+  }
+
+  exportMaskLayer(id: string): HTMLCanvasElement | null {
+    const meta = this.layers.find(layer => layer.id === id && isMaskLayer(layer)
+      && effectiveLayerVisibility(layer, this.groups) && (layer.coverage ?? 1) > 0);
+    const node = this._stageRef?.getLayers().find((layer: any) => layer.id() === id);
+    if (!meta || !node) return null;
+    const result = maskToGrayscale(captureLayer(node, this.canvasWidth, this.canvasHeight));
     if (!result) return null;
-    // Apply the layer's coverage once, independently of how the overlay is
-    // drawn: dimming what you see must not weaken what a run reads.
-    const ctx = result.getContext("2d")!;
-    ctx.globalCompositeOperation = "source-atop";
+    const ctx = result.getContext('2d')!;
+    if (meta.targetRasterId != null) {
+      const raster = this.exportRasterLayer(meta.targetRasterId, { raw: true });
+      // A lost explicit target cannot accidentally permit a full-canvas edit.
+      if (!raster) return null;
+      const maskData = ctx.getImageData(0, 0, result.width, result.height);
+      const rasterData = raster.getContext('2d')!.getImageData(0, 0, raster.width, raster.height);
+      maskData.data.set(restrictGenerationMaskToRasterAlpha(maskData, rasterData));
+      ctx.putImageData(maskData, 0, 0);
+    }
+    ctx.globalCompositeOperation = 'source-atop';
     ctx.globalAlpha = 1 - (meta.coverage ?? 1);
-    ctx.fillStyle = "black";
+    ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, result.width, result.height);
     ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
+    ctx.globalCompositeOperation = 'source-over';
     return result;
   }
 
@@ -1571,7 +1792,7 @@ class CanvasStore {
     const scaleLayerContents = (node: any) => {
       for (const child of node?.getChildren?.() ?? []) {
         // Raster assets are driven by their serializable layer metadata below.
-        if (child.name?.() === "raster-asset") continue;
+        if (child.name?.() === "raster-asset" || child.name?.() === "raster-clip-mask") continue;
         child.x?.(child.x() * scaleX);
         child.y?.(child.y() * scaleY);
         child.scaleX?.(child.scaleX() * scaleX);
@@ -1632,6 +1853,8 @@ class CanvasStore {
     this.canvasWidth = width;
     this.canvasHeight = height;
     this.layers = [];
+    this.groups = [];
+    this.activeGroupId = null;
     this.activeLayerId = null;
     this.layerThumbnails = {};
     this.viewportInitialized = false;
@@ -1663,7 +1886,11 @@ class CanvasStore {
       const values = Float32Array.from({ length: width * height }, (_, i) => pixels[i * 4] / 255);
       const grown = processMaskCoverage(values, width, height, layer.maskGrow ?? generation.growMaskBy, 0, settings.invert_mask);
       const affected = processMaskCoverage(grown, width, height, Math.floor(3 * settings.mask_blur), 0, false);
-      for (let i = 0; i < support.length; i++) if (affected[i] > 0) support[i] = 255;
+      const target = layer.targetRasterId ? this.exportRasterLayer(layer.targetRasterId, { raw: true }) : null;
+      const targetAlpha = target?.getContext('2d')!.getImageData(0, 0, width, height).data;
+      for (let i = 0; i < support.length; i++) {
+        if (affected[i] > 0 && (!layer.targetRasterId || (targetAlpha && targetAlpha[i * 4 + 3] > 0))) support[i] = 255;
+      }
     }
     let maskUrl = this.lastSubmittedMaskUrl;
     if (hasMask) {
@@ -1766,7 +1993,7 @@ class CanvasStore {
       }
     };
     const rasterCanvas = getRasterComposite();
-    this.lastSubmittedRasterLayerIds = this.layers.filter(layer => layer.type === 'raster' && layer.visible && layer.opacity > 0).map(layer => layer.id);
+    this.lastSubmittedRasterLayerIds = this.layers.filter(layer => layer.type === 'raster' && effectiveLayerVisibility(layer, this.groups) && layer.opacity > 0).map(layer => layer.id);
     let maskCanvas = getMaskCanvas();
     const isInpainting = generation.mode === "inpainting";
 
@@ -1854,11 +2081,15 @@ class CanvasStore {
 
 export const canvas = new CanvasStore();
 
-canvasHistory.setOnDocumentRestored((layers, activeLayerId) => {
+canvasHistory.setOnDocumentRestored((layers, activeLayerId, groups, activeGroupId) => {
   canvas.layers = layers;
+  canvas.groups = groups ?? [];
+  canvas.activeGroupId = activeGroupId ?? null;
   canvas.activeLayerId = activeLayerId;
 });
 canvasHistory.setDocumentStateProvider(() => ({
   layers: canvas.layers,
   activeLayerId: canvas.activeLayerId,
+  groups: canvas.groups,
+  activeGroupId: canvas.activeGroupId,
 }));

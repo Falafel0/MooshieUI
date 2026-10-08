@@ -40,7 +40,10 @@
   // switcher. Persisted (UI layout pref → localStorage, not generation
   // settings); the active tab itself is session-only.
   const COMBINED_KEY = "mooshieui.prompts.combined.v1";
-  let combinedMode = $state(localStorage.getItem(COMBINED_KEY) === "true");
+  function loadCombinedMode(): boolean {
+    try { return localStorage.getItem(COMBINED_KEY) !== "false"; } catch { return true; }
+  }
+  let combinedMode = $state(loadCombinedMode());
   let activeTab = $state<"positive" | "negative">("positive");
   $effect(() => {
     const val = String(combinedMode);
@@ -300,12 +303,12 @@
             <button
               type="button"
               class="px-2.5 py-0.5 text-xs rounded-md transition-colors {activeTab === 'positive' ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-              onclick={() => (activeTab = 'positive')}
+              aria-pressed={activeTab === 'positive'} onclick={() => (activeTab = 'positive')}
             >{locale.t('generation.prompts.tab_positive')}</button>
             <button
               type="button"
               class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs rounded-md transition-colors {activeTab === 'negative' ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200'}"
-              onclick={() => (activeTab = 'negative')}
+              aria-pressed={activeTab === 'negative'} onclick={() => (activeTab = 'negative')}
             >
               {locale.t('generation.prompts.tab_negative')}
               {#if generation.disablesNegativePrompt}
@@ -515,7 +518,7 @@
       bind:value={generation.positivePrompt}
       placeholder={generation.isAnima ? locale.t("generation.prompts.positive_placeholder_anima") : locale.t("generation.prompts.positive_placeholder")}
       rows={4}
-      minHeight="min-h-25"
+      minHeight="min-h-45"
       storageKey="mooshieui.promptHeight.positive"
       tagAssist={!isVideoMode}
       highlightLoraWords={true}
@@ -589,7 +592,7 @@
       bind:value={generation.negativePrompt}
       placeholder={locale.t('generation.prompts.negative_placeholder')}
       rows={3}
-      minHeight="min-h-18"
+      minHeight={combinedMode ? "min-h-45" : "min-h-18"}
       storageKey="mooshieui.promptHeight.negative"
       tagAssist={!isVideoMode}
     />

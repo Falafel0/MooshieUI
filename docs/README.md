@@ -1,6 +1,6 @@
 # MooshieUI documentation
 
-Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for **v2.3.9-fork.2**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
+Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for the current fork workspace. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
 
 ## Feature and technical references
 
@@ -16,6 +16,8 @@ Documentation for the current implementation, including the local Prompt Studio 
 | [Music studio guide](MUSIC.md) | Covers, reviewed scores, checked edits, MIDI, versions, comparisons and project exports |
 | [Prompt Assistant account sign-in](PROMPT-ASSISTANT-SIGN-IN.md) | ChatGPT and Gemini sign-in, automatic setup, account limits and audio support |
 | [Video generation methods](VIDEO.md) | Standard, Larryvrh/LightX2V/PDD Turbo, BF16/INT8 VDN and retained 2× drafts |
+| [INPAINT_LAYER_RELATIONSHIPS.md](INPAINT_LAYER_RELATIONSHIPS.md) | Grouping, explicit alpha links, modifier scope and project persistence |
+| [CANVAS_WORKFLOW.md](CANVAS_WORKFLOW.md) | Layer placement, all canvas tools, resize/crop alignment and rendering limits |
 | [PATCHY_INTEGRATION.md](PATCHY_INTEGRATION.md) | The Patchy hand-off that replaced Photopea, executable discovery and licence notes |
 
 The wiki also covers [music and playlists](https://github.com/Mooshieblob1/MooshieUI/wiki/Music-Generation), [video](https://github.com/Mooshieblob1/MooshieUI/wiki/Video-Generation), [pause and continue](https://github.com/Mooshieblob1/MooshieUI/wiki/Generation-Basics#pause-and-continue-a-generation), [Style Creator](https://github.com/Mooshieblob1/MooshieUI/wiki/Prompting-Guide#style-creator), [Image Edit](https://github.com/Mooshieblob1/MooshieUI/wiki/Image-Edit-Mode), and [hosted accounts](https://github.com/Mooshieblob1/MooshieUI/wiki/Server,-LAN-and-Multi-User).
@@ -40,6 +42,8 @@ These documents include proposals and historical evidence; they are not promises
 Local implementation plans and specs may also exist under `docs/superpowers/`. That directory is git-ignored and is not part of a fresh clone's published documentation.
 
 ## Elsewhere
+
+The first interface improvement stage is documented in [Interface comfort](UI_FOUNDATION.md), including density, reduced motion, and keyboard navigation in context menus.
 
 | Topic | Path |
 |-------|------|

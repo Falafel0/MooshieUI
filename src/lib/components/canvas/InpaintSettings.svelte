@@ -11,6 +11,7 @@
     { key: 'difference_contrast', min: 0.1, max: 16, step: 0.1 },
   ] as const;
   function update(patch: Partial<InpaintSettings>) { onchange({ ...settings, ...patch }); }
+  const scheduleDisabled = $derived(settings.density_denoise === false);
 </script>
 
 <div class="{compact ? 'space-y-2 text-[10px]' : 'space-y-3 text-xs'} text-neutral-300">
@@ -53,7 +54,8 @@
   {#if settings.soft}
     <div class="space-y-2 rounded border border-neutral-700 p-2">
       {#each numeric as field}
-        <label class="block text-[11px]">{locale.t('canvas.' + field.key)} <span class="float-right tabular-nums">{settings[field.key].toFixed(2)}</span><input type="range" min={field.min} max={field.max} step={field.step} value={settings[field.key]} oninput={(e) => update({ [field.key]: Number(e.currentTarget.value) })} class="w-full accent-indigo-500" /></label>
+        <label class="block text-[11px] {field.key === 'schedule_bias' && scheduleDisabled ? 'opacity-50' : ''}">{locale.t('canvas.' + field.key)} <span class="float-right tabular-nums">{settings[field.key].toFixed(2)}</span><input type="range" min={field.min} max={field.max} step={field.step} value={settings[field.key]} disabled={field.key === 'schedule_bias' && scheduleDisabled} oninput={(e) => update({ [field.key]: Number(e.currentTarget.value) })} class="w-full accent-indigo-500" /></label>
+        {#if field.key === 'schedule_bias' && scheduleDisabled}<p class="text-[10px] leading-snug text-neutral-500">{locale.t('canvas.schedule_density_required')}</p>{/if}
       {/each}
     </div>
   {/if}

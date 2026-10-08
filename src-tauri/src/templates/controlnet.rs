@@ -23,7 +23,7 @@ pub fn inject_controlnet(result: &mut WorkflowResult, params: &ControlNetParam) 
     );
     *next_id += 1;
 
-    // 2. Preprocessor (optional — only when a preset with preprocessing is selected)
+    // 2. Preprocessor (optional — preset and custom controls both support preprocessing)
     let image_source: (String, u32) = if let Some(ref preprocessor) = params.preprocessor {
         if !preprocessor.is_empty() {
             let preprocess_id = next_id.to_string();
@@ -67,6 +67,7 @@ pub fn inject_controlnet(result: &mut WorkflowResult, params: &ControlNetParam) 
                 "positive": [result.positive_source.0.clone(), result.positive_source.1],
                 "negative": [result.negative_source.0.clone(), result.negative_source.1],
                 "control_net": [cn_loader_id, 0],
+                "vae": [result.vae_source.0.clone(), result.vae_source.1],
                 "image": [image_source.0, image_source.1],
                 "strength": params.strength,
                 "start_percent": params.start_percent,

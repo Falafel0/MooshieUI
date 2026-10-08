@@ -5,7 +5,6 @@
   import MusicBottomPlayer from "../music/MusicBottomPlayer.svelte";
   import { music } from "../../stores/music.svelte.js";
   import { generation } from "../../stores/generation.svelte.js";
-  import { canvas } from "../../stores/canvas.svelte.js";
   import MobileSettingsPage from "./MobileSettingsPage.svelte";
   import GalleryPage from "../gallery/GalleryPage.svelte";
   import { ArtistGalleryPage } from "../../artist-gallery/index.js";
@@ -15,41 +14,29 @@
   import { characterInsert } from "../../stores/characterInsert.svelte.js";
   import CharacterInsertModal from "../../animadex/components/CharacterInsertModal.svelte";
   import type { AnimadexCharacter } from "../../animadex/types.js";
+  import PromptStudio from "../prompt-studio/PromptStudio.svelte";
+  import { workspace } from "../../stores/workspace.svelte.js";
+  import { commands } from "../../stores/commands.svelte.js";
+  import { locale } from "../../stores/locale.svelte.js";
+  import { Search } from "@lucide/svelte";
+  import { availableWorkspaces } from "../../utils/workspaces.js";
 
   interface Props {
     canUseModelhub?: boolean;
     userRole?: string;
-    navigationTarget?: MobileTab | null;
-    navigationVersion?: number;
-    onTabChange?: (tab: Exclude<MobileTab, "video">) => void;
+    onNavigate: (tab: MobileTab) => void;
   }
   let {
     canUseModelhub = false,
     userRole = "admin",
-    navigationTarget = null,
-    navigationVersion = 0,
-    onTabChange,
+    onNavigate,
   }: Props = $props();
 
-  let currentTab = $state<Exclude<MobileTab, "video">>("generate");
-  let lastNavigationVersion = $state(navigationVersion);
-
-  function go(tab: MobileTab) {
-    if (tab === "video") {
-      generation.setMode("video");
-      canvas.isCanvasMode = false;
-      openGeneration();
-      return;
-    }
-    if (tab === "generate") generation.setMode(generation.lastImageMode);
-    currentTab = tab;
-    onTabChange?.(tab);
-  }
+  const currentTitle = $derived(availableWorkspaces({ canUseModelhub, canUseVideo: !generation.isNovelAi }).find((entry) => entry.id === workspace.current)?.labelKey ?? "nav.generate");
 
   // Gallery actions and completion notifications have already selected a mode.
   function openGeneration() {
-    currentTab = "generate";
-    onTabChange?.("generate");
+    workspace.open("generate");
   }
 
   function handleCharacterInsert(character: AnimadexCharacter) {
@@ -64,28 +51,28 @@
     openGeneration();
   }
 
-  $effect(() => {
-    if (navigationVersion === lastNavigationVersion) return;
-    lastNavigationVersion = navigationVersion;
-    if (navigationTarget === "generate") openGeneration();
-    else if (navigationTarget) go(navigationTarget);
-  });
 </script>
 
 <div class="mobile-shell flex flex-col h-full w-full bg-neutral-950 text-neutral-100 overflow-hidden tap-highlight-none">
   <DownloadBanner />
+  <div class="flex shrink-0 items-center justify-between border-b border-ui-border px-3 py-1 safe-top">
+    <span class="text-xs font-medium text-neutral-300">{locale.t(currentTitle)}</span>
+    <button type="button" class="touch-target flex items-center justify-center rounded-lg text-neutral-400 hover:bg-ui-selected" onclick={() => commands.show()} aria-label={locale.t("commands.open")}><Search size={18} /></button>
+  </div>
   <main class="flex-1 min-h-0 overflow-hidden">
-    {#if currentTab === "generate"}
+    {#if workspace.current === "generate"}
       <MobileGeneratePage />
-    {:else if currentTab === "music"}
+    {:else if workspace.current === "studio"}
+      <PromptStudio onApply={openGeneration} />
+    {:else if workspace.current === "music"}
       <MusicPage {userRole} />
-    {:else if currentTab === "gallery"}
+    {:else if workspace.current === "gallery"}
       <GalleryPage onSwitchToGenerate={openGeneration} />
-    {:else if currentTab === "modelhub" && canUseModelhub}
+    {:else if workspace.current === "modelhub" && canUseModelhub}
       <div class="h-full overflow-hidden">
         <ModelHubPage />
       </div>
-    {:else if currentTab === "artists"}
+    {:else if workspace.current === "artists"}
       <div class="h-full overflow-hidden">
         <ArtistGalleryPage
           manifestUrl={connection.artistGalleryManifestUrl}
@@ -93,7 +80,7 @@
           oninsertCharacter={handleCharacterInsert}
         />
       </div>
-    {:else if currentTab === "characters"}
+    {:else if workspace.current === "characters"}
       <div class="h-full overflow-hidden">
         <ArtistGalleryPage
           manifestUrl={connection.artistGalleryManifestUrl}
@@ -101,15 +88,14 @@
           oninsertCharacter={handleCharacterInsert}
         />
       </div>
-    {:else if currentTab === "settings"}
+    {:else if workspace.current === "settings"}
       <MobileSettingsPage {userRole} />
     {/if}
   </main>
-  <MusicBottomPlayer onOpen={() => { music.view = "generate"; go("music"); }} />
+  <MusicBottomPlayer onOpen={() => { music.view = "generate"; onNavigate("music"); }} />
   <CharacterInsertModal onapplied={finishCharacterInsert} />
   <MobileTabBar
-    current={currentTab === "generate" && generation.mode === "video" ? "video" : currentTab}
-    onChange={go}
+    onChange={onNavigate}
     showModelhub={canUseModelhub}
     showVideo={!generation.isNovelAi}
   />

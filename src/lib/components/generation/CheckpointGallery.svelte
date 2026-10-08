@@ -1,4 +1,9 @@
 <script lang="ts">
+  import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
+  import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
+  import BottomPanelIcon from "./BottomPanelIcon.svelte";
+  import BottomPanelEmpty from "./BottomPanelEmpty.svelte";
+  import BottomPanelToolbar from "./BottomPanelToolbar.svelte";
   import { generation } from "../../stores/generation.svelte.js";
   import { models } from "../../stores/models.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
@@ -309,32 +314,43 @@
     if (n >= 1_000) return `${locale.formatDecimalTrimmed(n / 1_000, 1)}K`;
     return locale.formatInteger(n);
   }
+  let managementOpen = $state(false);
 </script>
 
 <div class="flex flex-col h-full">
-  <!-- Search bar -->
-  <div class="px-2 pt-1.5 pb-1 shrink-0 space-y-1">
-    <input
-      type="text"
-      bind:value={searchQuery}
-      placeholder={locale.t('checkpoint.search_placeholder')}
-      class="w-full bg-neutral-800 border border-neutral-700 rounded px-2.5 py-1 text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500 transition-colors"
-    />
-    <div class="flex gap-1 items-center">
+  <BottomPanelToolbar>
+    <button type="button" class="ui-control shrink-0 rounded-lg border border-ui-border px-3 text-xs text-neutral-300 hover:bg-ui-selected" aria-expanded={managementOpen} aria-controls="shelf-CheckpointGallery-management" onclick={() => { managementOpen = !managementOpen; }}>{locale.t(managementOpen ? "common.close" : "bottom_panel.manage_metadata")}</button>
+    {#if !managementOpen}
+
       <select
         bind:value={sortMode}
-        class="shrink-0 rounded border border-neutral-700 bg-neutral-800 px-1.5 py-1 text-[10px] text-neutral-200 focus:outline-none focus:border-indigo-500"
+        class="ui-control shrink-0 rounded-lg border border-ui-border bg-ui-surface px-2 text-xs text-neutral-200 focus:border-ui-accent"
         title={locale.t('model_gallery.sort_tip')}
       >
         <option value="name">{locale.t('model_gallery.sort_name')}</option>
         <option value="folder">{locale.t('model_gallery.sort_folder')}</option>
         <option value="family">{locale.t('model_gallery.sort_family')}</option>
       </select>
-      <input
+    <div class="relative min-w-40 flex-1">
+      <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-500"><BottomPanelIcon name="search" /></span>
+    <input
+      type="text"
+      bind:value={searchQuery}
+      aria-label={locale.t('checkpoint.search_placeholder')} placeholder={locale.t('checkpoint.search_placeholder')}
+      class="w-full ui-control min-w-0 bg-ui-surface border border-ui-border rounded-lg pl-9 pr-3 text-xs text-neutral-100 placeholder-neutral-500 focus:border-ui-accent transition-colors"
+    />
+    </div>
+
+    <BottomPanelCardLayout />
+    {/if}
+  </BottomPanelToolbar>
+  {#if managementOpen}
+    <div id="shelf-CheckpointGallery-management" class="min-h-0 flex-1 overflow-auto">
+    <div class="flex gap-2 border-t border-ui-border/60 p-3">      <input
         type="text"
         bind:value={civitaiImageRef}
-        placeholder={locale.t('checkpoint.civitai_image_ref_placeholder')}
-        class="min-w-0 flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
+        aria-label={locale.t('checkpoint.civitai_image_ref_placeholder')} placeholder={locale.t('checkpoint.civitai_image_ref_placeholder')}
+        class="min-w-0 flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-[10px] text-neutral-100 placeholder-neutral-500 focus:border-ui-accent"
       />
       <button
         type="button"
@@ -346,15 +362,16 @@
         {civitaiImportBusy ? "…" : locale.t('checkpoint.civitai_import_prompt')}
       </button>
     </div>
-  </div>
 
-  {#if filteredCheckpoints().length === 0}
-    <div class="flex items-center justify-center flex-1 text-neutral-500 text-xs">
-      <p>{locale.t('checkpoint.no_results')}</p>
     </div>
   {:else}
+
+
+  {#if filteredCheckpoints().length === 0}
+    <BottomPanelEmpty icon="checkpoints" messageKey="checkpoint.no_results" onreset={searchQuery ? () => { searchQuery = ""; } : undefined} />
+  {:else}
     <div class="flex-1 min-h-0 overflow-y-auto px-2 py-1.5">
-      <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));">
+      <div class="grid gap-2.5" style={bottomPanel.cardLayout === "strip" ? "grid-auto-flow: column; grid-auto-columns: 120px;" : "grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));"}>
       {#each filteredCheckpoints() as name (name)}
         {@const isActive = name === generation.checkpoint}
         {@const info = civitaiCache[name]?.data}
@@ -513,5 +530,7 @@
       {/each}
       </div>
     </div>
+  {/if}
+
   {/if}
 </div>
