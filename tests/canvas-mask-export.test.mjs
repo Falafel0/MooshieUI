@@ -38,6 +38,13 @@ test('blank mask does not produce a generation mask', () => {
   assert.equal(sandbox.exports.maskToGrayscale(source), null);
 });
 
+test('saved mask assets retain exact soft alpha independently of their display tint', () => {
+  const pixels = new Uint8ClampedArray([251,113,133,64, 20,180,90,128, 0,0,255,255, 40,50,60,0]);
+  assert.equal(sandbox.exports.maskAlphaToWhite(pixels), true);
+  assert.deepEqual(Array.from(pixels), [255,255,255,64, 255,255,255,128, 255,255,255,255, 255,255,255,0]);
+  assert.equal(sandbox.exports.maskAlphaToWhite(new Uint8ClampedArray([251,113,133,0])), false);
+});
+
 test('opaque external-editor masks use brightness as coverage, while transparent masks retain alpha', () => {
   const opaque = new Uint8ClampedArray([0,0,0,255, 128,128,128,255, 255,255,255,255]);
   assert.equal(sandbox.exports.opaqueMaskLuminanceToAlpha(opaque), true);
@@ -60,4 +67,19 @@ test('grayscale mask bounds follow the non-zero mask region', () => {
     JSON.parse(JSON.stringify(sandbox.exports.grayscaleMaskBounds(mask))),
     { x: 2, y: 1, width: 3, height: 3 },
   );
+});
+
+test('saving a cropped spatial layer captures outside pixels and restores clip/viewport state',()=>{
+ const attrs={x:40,y:20,scaleX:2,scaleY:2,visible:false,opacity:.3};let clip={x:0,y:0,width:128,height:96};let exported;
+ const layer={getClientRect:()=>({x:-64,y:-48,width:200,height:140}),
+  x:()=>attrs.x,y:()=>attrs.y,scaleX:()=>attrs.scaleX,scaleY:()=>attrs.scaleY,visible:()=>attrs.visible,opacity:()=>attrs.opacity,
+  setAttrs:patch=>Object.assign(attrs,patch),clipX:()=>clip.x,clipY:()=>clip.y,
+  clipWidth:value=>{if(value!==undefined)clip.width=value;return clip.width;},clipHeight:value=>{if(value!==undefined)clip.height=value;return clip.height;},clip:patch=>{clip={...patch};},
+  toCanvas:options=>{assert.deepEqual(clip,{x:-64,y:-48,width:200,height:144});assert.equal(attrs.x,0);exported={...options};return{pixels:'complete'};}};
+ const result=sandbox.exports.captureUnclippedSpatialLayer(layer,128,96);
+ assert.deepEqual({...result.placement},{x:-64,y:-48,width:200,height:144});
+ assert.deepEqual(exported,{pixelRatio:1,width:200,height:144,x:-64,y:-48});
+ assert.deepEqual(attrs,{x:40,y:20,scaleX:2,scaleY:2,visible:false,opacity:.3});assert.deepEqual(clip,{x:0,y:0,width:128,height:96});
+ layer.toCanvas=()=>{throw new Error('encode failed');};assert.throws(()=>sandbox.exports.captureUnclippedSpatialLayer(layer,128,96),/encode failed/);
+ assert.deepEqual(clip,{x:0,y:0,width:128,height:96});assert.equal(attrs.scaleX,2);
 });

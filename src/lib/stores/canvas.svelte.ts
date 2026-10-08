@@ -6,13 +6,15 @@ import { uploadImageBytes } from "../utils/api.js";
 import { generation } from "./generation.svelte.js";
 import { locale } from "./locale.svelte.js";
 import type { RegionalPromptSelection } from "../types/index.js";
-import { captureLayer, maskToGrayscale } from "../utils/canvasLayerExport.js";
+import { captureLayer, captureUnclippedSpatialLayer, maskToGrayscale, maskAlphaToWhite } from "../utils/canvasLayerExport.js";
 import { withMaskProcessingSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
 import { InpaintResultRegistry, type InpaintResultSnapshot } from "../utils/inpaintResultRegistry.js";
 import { processMaskCoverage } from "../utils/maskProcessing.js";
 import { resolveTint } from "../utils/layerTints.js";
 import { canvasHistory } from "./canvasHistory.svelte.js";
 import { fittedCanvasViewport, viewportMatchesCanvasFit } from "../utils/canvasViewport.js";
+import { documentResizeTransform, fittedImagePlacement, resizedPlacement, type CanvasImagePlacement, type CanvasResizeOptions } from '../utils/canvasResize.js';
+import type { CanvasDocumentGeometry } from './canvasHistory.svelte.js';
 import {
   PROJECT_DOCUMENT_VERSION,
   captureRasterPaint,
@@ -105,6 +107,7 @@ export interface InpaintBaseSnapshot {
   spatialLayers: SpatialLayerSnapshot[];
   rasterVisibility?: Record<string, boolean>;
   owned: boolean;
+  placement?: CanvasImagePlacement;
 }
 
 export interface CanvasViewport {
@@ -230,6 +233,9 @@ class CanvasStore {
   showCheckerboard = $state(true);
   cursorPos = $state<{ x: number; y: number } | null>(null);
   referenceImageUrl = $state<string | null>(null);
+  /** Explicit base geometry prevents a bounds resize from re-fitting the input. */
+  baseImagePlacement = $state<{ source: string; rect: CanvasImagePlacement } | null>(null);
+  resizeDialogOpen = $state(false);
   originalInpaintInputImageName = $state<string | null>(null);
   originalInpaintWidth = $state<number | null>(null);
   originalInpaintHeight = $state<number | null>(null);
@@ -412,6 +418,8 @@ class CanvasStore {
     height: number;
     uploadedInputName: string | null;
   } | null) {
+    canvasHistory.clear();
+    this.baseImagePlacement = null;
     this.clearPreparedInpaintOverride();
     this.clearPendingInpaintResult();
     this.clearInpaintBaseHistory();
@@ -436,6 +444,7 @@ class CanvasStore {
     generation.height = source.height;
     if (this.layers.length === 0) this.initCanvas(source.width, source.height);
     else this.resizeCanvas(source.width, source.height);
+    this.baseImagePlacement = { source: source.previewUrl, rect: { x: 0, y: 0, width: source.width, height: source.height } };
   }
 
   setPreparedInpaintOverride(source: {
@@ -459,6 +468,7 @@ class CanvasStore {
         width: generation.width,
         height: generation.height,
         spatialLayers,
+        placement: this.baseImagePlacement?.rect ? { ...this.baseImagePlacement.rect } : undefined,
         // Only a prepared preview is an owned object URL; the session-original
         // referenceImageUrl is owned elsewhere and must not be revoked here.
         owned: this.preparedInpaintPreviewUrl ? this.preparedInpaintOwned : false,
@@ -477,6 +487,7 @@ class CanvasStore {
     // masks, regions and raster layers, just like replacing a Photoshop base.
     this.persistedMaskPreviewUrl = null;
     this.resizeCanvas(source.width, source.height);
+    this.baseImagePlacement = { source: source.previewUrl, rect: { x: 0, y: 0, width: source.width, height: source.height } };
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
   }
@@ -548,6 +559,7 @@ class CanvasStore {
         height: generation.height,
         spatialLayers,
         rasterVisibility,
+        placement: this.baseImagePlacement?.rect ? { ...this.baseImagePlacement.rect } : undefined,
         // Only a prepared preview is an owned object URL; the session-original
         // referenceImageUrl is owned elsewhere and must not be revoked here.
         owned: this.preparedInpaintPreviewUrl ? this.preparedInpaintOwned : false,
@@ -580,6 +592,7 @@ class CanvasStore {
     // refined or disabled explicitly after inspecting the result.
     this.persistedMaskPreviewUrl = null;
     this.resizeCanvas(generation.width, generation.height);
+    if (this.preparedInpaintPreviewUrl) this.baseImagePlacement = { source: this.preparedInpaintPreviewUrl, rect: { x: 0, y: 0, width: generation.width, height: generation.height } };
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
   }
@@ -589,6 +602,8 @@ class CanvasStore {
   }
 
   restoreOriginalInpaintSource() {
+    canvasHistory.clear();
+    this.baseImagePlacement = null;
     this.bumpPaintRevision();
     if (!this.originalInpaintInputImageName || this.originalInpaintWidth == null || this.originalInpaintHeight == null) {
       // A Patchy/base import may start from an empty document. In that case
@@ -608,6 +623,7 @@ class CanvasStore {
     generation.width = this.originalInpaintWidth;
     generation.height = this.originalInpaintHeight;
     this.resizeCanvas(this.originalInpaintWidth, this.originalInpaintHeight);
+    if (this.referenceImageUrl) this.baseImagePlacement = { source: this.referenceImageUrl, rect: { x: 0, y: 0, width: this.originalInpaintWidth, height: this.originalInpaintHeight } };
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
   }
@@ -624,6 +640,7 @@ class CanvasStore {
     this.originalInpaintWidth = null;
     this.originalInpaintHeight = null;
     this.referenceImageUrl = null;
+    this.baseImagePlacement = null;
   }
 
   private clearInpaintBaseHistory() {
@@ -698,6 +715,7 @@ class CanvasStore {
 
     this.persistedMaskPreviewUrl = null;
     this.resizeCanvas(entry.width, entry.height);
+    this.baseImagePlacement = entry.previewUrl && entry.placement ? { source: entry.previewUrl, rect: { ...entry.placement } } : null;
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
   }
@@ -811,6 +829,13 @@ class CanvasStore {
 
   setReferenceImage(url: string | null) {
     this.referenceImageUrl = url;
+    this.baseImagePlacement = null;
+  }
+
+  getInpaintBasePlacement(source: string, imageWidth: number, imageHeight: number): CanvasImagePlacement {
+    return this.baseImagePlacement?.source === source
+      ? { ...this.baseImagePlacement.rect }
+      : fittedImagePlacement(imageWidth, imageHeight, this.canvasWidth, this.canvasHeight);
   }
 
   async setPersistedMaskPreview(url: string | null) {
@@ -954,6 +979,11 @@ class CanvasStore {
       viewport: { ...this.viewport },
       groups: this.groups.map(group => ({ ...group })),
       layers,
+      ...((this.preparedInpaintPreviewUrl ?? this.referenceImageUrl) ? { baseImage: {
+        src: (this.preparedInpaintPreviewUrl ?? this.referenceImageUrl)!,
+        ...(this.baseImagePlacement?.rect ?? { x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight }),
+        rotation: 0, flipX: false, flipY: false,
+      } } : {}),
     };
   }
 
@@ -967,6 +997,13 @@ class CanvasStore {
    */
   async captureDocument(): Promise<ProjectDocument> {
     const doc = this.documentShape();
+    if (doc.baseImage) {
+      const source = doc.baseImage.src;
+      const image = await this.loadImage(source);
+      doc.baseImage = { ...doc.baseImage,
+        ...this.getInpaintBasePlacement(source, image.naturalWidth, image.naturalHeight),
+        src: await inlineImageSource(source) };
+    }
     const ordered = [...this.layers].sort((a, b) => a.order - b.order);
     const stageLayers = this._stageRef?.getLayers?.() ?? [];
     for (let index = 0; index < ordered.length; index += 1) {
@@ -987,13 +1024,17 @@ class CanvasStore {
           continue;
         }
         try {
-          const pixels = captureLayer(konva, this.canvasWidth, this.canvasHeight);
-          const data = pixels.getContext("2d")?.getImageData(0, 0, pixels.width, pixels.height).data;
-          if (data?.some((value, i) => i % 4 === 3 && value > 0)) {
-            record.spatialPng = pixels.toDataURL("image/png");
+          const { pixels, placement } = captureUnclippedSpatialLayer(konva, this.canvasWidth, this.canvasHeight);
+          const context = pixels.getContext("2d")!;
+          const data = context.getImageData(0, 0, pixels.width, pixels.height);
+          if (maskAlphaToWhite(data.data)) {
+            context.putImageData(data, 0, 0);
+            record.image = { src: pixels.toDataURL("image/png"), ...placement, rotation: 0, flipX: false, flipY: false };
+            record.initialRegion = undefined;
           }
         } catch (error) {
           console.error("Failed to capture a layer's pixels:", error);
+          throw error;
         }
       } else if (layer.image) {
         record.image = { ...layer.image, src: await inlineImageSource(layer.image.src) };
@@ -1029,6 +1070,10 @@ class CanvasStore {
     this.clearStaging();
     this.clearMask();
     this.referenceImageUrl = null;
+    if (doc.baseImage) {
+      this.referenceImageUrl = doc.baseImage.src;
+      this.baseImagePlacement = { source: doc.baseImage.src, rect: { x: doc.baseImage.x, y: doc.baseImage.y, width: doc.baseImage.width, height: doc.baseImage.height } };
+    }
     this.lastSubmittedMaskUrl = null;
     this.persistedMaskPreviewUrl = null;
     canvasHistory.clear();
@@ -1042,7 +1087,7 @@ class CanvasStore {
     this.layers = doc.layers.map((layer, index) => {
       const { spatialPng, ...meta } = layer;
       const id = ids[index];
-      if (layer.type === "mask" || layer.type === "region") {
+      if ((layer.type === "mask" || layer.type === "region") && (!layer.image || spatialPng)) {
         spatial.push({
           id,
           type: layer.type,
@@ -1271,7 +1316,9 @@ class CanvasStore {
       this.controlnetBatchLayerId = id;
       queueMicrotask(() => { if (this.controlnetBatchLayerId === id) this.controlnetBatchLayerId = null; });
     }
-    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnet: { ...newControlnetLayer(), ...item.controlnet, ...patch } } : item);
+    const sourceChanged = Object.hasOwn(patch, 'sourceData') || Object.hasOwn(patch, 'image');
+    this.layers = this.layers.map(item => item.id === id ? { ...item, controlnet: { ...newControlnetLayer(), ...item.controlnet,
+      ...(sourceChanged ? { sourcePlacement: undefined } : {}), ...patch } } : item);
   }
   setControlnetPreview(id: string, url: string | null) {
     this.layers = this.layers.map(item => item.id === id ? { ...item, controlnetPreviewUrl: url } : item);
@@ -1768,7 +1815,60 @@ class CanvasStore {
     this.viewportHeight = height;
   }
 
-  resizeCanvas(width: number, height: number) {
+  /** User document operations keep all pixels and bindings in one undo step. */
+  async resizeDocument(width: number, height: number, options: CanvasResizeOptions): Promise<{ changed: boolean; error?: string }> {
+    if (![width, height].every(value => Number.isInteger(value) && value >= 64 && value <= 16384)) {
+      return { changed: false, error: locale.t('canvas.resize_invalid_size') };
+    }
+    if (width === this.canvasWidth && height === this.canvasHeight) return { changed: false };
+    // A backend-only filename has no locally editable pixels. Refuse bounds
+    // changes until re-imported; silently fitting it would change its geometry.
+    if (options.mode === 'bounds' && this.layers.some(layer => layer.type === 'controlnet' && !layer.referenceRasterId && layer.controlnet?.image && !layer.controlnet.sourceData)) {
+      return { changed: false, error: locale.t('canvas.resize_reference_pixels_missing') };
+    }
+    const sourceVersion = this.inpaintSourceVersion;
+    const baseUrl = this.preparedInpaintPreviewUrl ?? this.referenceImageUrl;
+    let historyEntry: ReturnType<typeof canvasHistory.snapshotDocument> | null = null;
+    try {
+      if (baseUrl && this.baseImagePlacement?.source !== baseUrl) {
+        const image = await this.loadImage(baseUrl);
+        if (sourceVersion !== this.inpaintSourceVersion) return { changed: false, error: locale.t('canvas.resize_document_changed') };
+        this.baseImagePlacement = { source: baseUrl, rect: this.getInpaintBasePlacement(baseUrl, image.naturalWidth, image.naturalHeight) };
+      }
+      historyEntry = canvasHistory.snapshotDocument(this.layers, this.activeLayerId, this.layers.filter(layer => layer.type !== 'controlnet').map(layer => layer.id));
+      // Unequal document scales shear a rotated layer. The image metadata has
+      // rotation but no shear, so resample those pixel layers in document space
+      // rather than independently stretching their rotated local axes.
+      if (options.mode === 'scale' && width / this.canvasWidth !== height / this.canvasHeight) {
+        const stageLayers = this._stageRef?.getLayers?.() ?? [];
+        this.layers = this.layers.map(layer => {
+          if (layer.type === 'controlnet') return layer;
+          const node = stageLayers.find((candidate: any) => candidate.id?.() === layer.id) ?? this.detachedLayers.get(layer.id);
+          const rotated = layer.image?.rotation || node?.getChildren?.().some((child: any) => child.rotation?.() || child.skewX?.() || child.skewY?.());
+          if (!node || !rotated) return layer;
+          const { pixels, placement } = captureUnclippedSpatialLayer(node, this.canvasWidth, this.canvasHeight, { includeClipping: false });
+          if (isMaskLayer(layer)) {
+            const context = pixels.getContext('2d')!;
+            const data = context.getImageData(0, 0, pixels.width, pixels.height);
+            maskAlphaToWhite(data.data); context.putImageData(data, 0, 0);
+          }
+          node.destroyChildren();
+          const image = new Konva.Image({ name: 'raster-asset', image: pixels, ...placement, listening: false });
+          image.setAttr('sourceImage', pixels);
+          node.add(image);
+          return { ...layer, initialRegion: undefined, rasterPaint: undefined, image: { src: pixels.toDataURL('image/png'), ...placement, rotation: 0, flipX: false, flipY: false } };
+        });
+      }
+      this.resizeCanvas(width, height, { ...options, preserveHistory: true });
+      return { changed: true };
+    } catch (error) {
+      if (historyEntry) canvasHistory.rollbackDocumentSnapshot(historyEntry);
+      console.warn('Canvas document resize failed', error);
+      return { changed: false, error: locale.t('canvas.resize_failed') };
+    }
+  }
+
+  resizeCanvas(width: number, height: number, options: CanvasResizeOptions & { preserveHistory?: boolean } = { mode: 'scale' }) {
     // Every caller eventually reaches this method (the transformer, a base
     // import, undo and image load). Normalize once here so a fractional or
     // non-finite intermediate value cannot leave node geometry and document
@@ -1776,6 +1876,7 @@ class CanvasStore {
     const nextWidth = Math.max(1, Math.round(Number.isFinite(width) ? width : this.canvasWidth));
     const nextHeight = Math.max(1, Math.round(Number.isFinite(height) ? height : this.canvasHeight));
     if (nextWidth === this.canvasWidth && nextHeight === this.canvasHeight) return;
+    if (!options.preserveHistory) canvasHistory.clear();
     const keepFitted = this.viewportIsFitted();
     // A completed preview belongs to the exact document geometry captured at
     // submission time. Keeping it after a manual resize would let Apply restore
@@ -1783,14 +1884,16 @@ class CanvasStore {
     this.clearPendingInpaintResult();
     this.inpaintSourceVersion += 1;
     this.invalidateInpaintPrompts();
-    const scaleX = this.canvasWidth > 0 ? nextWidth / this.canvasWidth : 1;
-    const scaleY = this.canvasHeight > 0 ? nextHeight / this.canvasHeight : 1;
+    const oldWidth = this.canvasWidth, oldHeight = this.canvasHeight;
+    const transform = documentResizeTransform(oldWidth, oldHeight, nextWidth, nextHeight, options);
+    const { scaleX, scaleY, offsetX, offsetY } = transform;
     const scaleLayerContents = (node: any) => {
+      const metadataImage = this.layers.find(layer => layer.id === node?.id?.())?.image;
       for (const child of node?.getChildren?.() ?? []) {
         // Raster assets are driven by their serializable layer metadata below.
-        if (child.name?.() === "raster-asset" || child.name?.() === "raster-clip-mask") continue;
-        child.x?.(child.x() * scaleX);
-        child.y?.(child.y() * scaleY);
+        if ((child.name?.() === "raster-asset" && metadataImage) || child.name?.() === "raster-clip-mask") continue;
+        child.x?.(child.x() * scaleX + offsetX);
+        child.y?.(child.y() * scaleY + offsetY);
         child.scaleX?.(child.scaleX() * scaleX);
         child.scaleY?.(child.scaleY() * scaleY);
       }
@@ -1800,16 +1903,25 @@ class CanvasStore {
       if (this.layers.some((layer) => layer.id === node.id?.())) scaleLayerContents(node);
     }
     for (const node of this.detachedLayers.values()) scaleLayerContents(node);
-    this.layers = this.layers.map((layer) => layer.image ? {
-      ...layer,
-      image: {
-        ...layer.image,
-        x: layer.image.x * scaleX,
-        y: layer.image.y * scaleY,
-        width: layer.image.width * scaleX,
-        height: layer.image.height * scaleY,
-      },
-    } : layer);
+    this.layers = this.layers.map((layer) => {
+      const region = layer.initialRegion;
+      const regionRect = region ? resizedPlacement({ x: region.x * oldWidth, y: region.y * oldHeight, width: region.width * oldWidth, height: region.height * oldHeight }, transform) : null;
+      const sourcePlacement = layer.type === 'controlnet' && !layer.referenceRasterId && layer.controlnet?.sourceData
+        ? resizedPlacement(layer.controlnet.sourcePlacement ?? { x: 0, y: 0, width: oldWidth, height: oldHeight }, transform) : null;
+      return { ...layer,
+        ...(layer.image ? { image: resizedPlacement(layer.image, transform) } : {}),
+        ...(region && regionRect ? { initialRegion: { ...region, x: regionRect.x / nextWidth, y: regionRect.y / nextHeight, width: regionRect.width / nextWidth, height: regionRect.height / nextHeight,
+          ...(region.points ? { points: region.points.map(point => ({ x: (point.x * oldWidth * scaleX + offsetX) / nextWidth, y: (point.y * oldHeight * scaleY + offsetY) / nextHeight })) } : {}) } } : {}),
+        ...(layer.rasterPaint ? { rasterPaint: layer.rasterPaint.map(command => ({ ...command, attrs: { ...command.attrs,
+          x: (command.attrs.x ?? 0) * scaleX + offsetX, y: (command.attrs.y ?? 0) * scaleY + offsetY,
+          scaleX: (command.attrs.scaleX ?? 1) * scaleX, scaleY: (command.attrs.scaleY ?? 1) * scaleY } })) } : {}),
+        ...(sourcePlacement ? { controlnet: { ...layer.controlnet!, sourcePlacement } } : {}),
+      };
+    });
+    if (this.baseImagePlacement) this.baseImagePlacement = { ...this.baseImagePlacement, rect: resizedPlacement(this.baseImagePlacement.rect, transform) };
+    this.controlContextPreviewUrl = null;
+    this.controlContextPreviewLayerId = null;
+    this.controlContextPreviewKind = 'source';
     // Every thumbnail represents the old coordinate system; let the stage
     // regenerate them after the scaled nodes have been drawn.
     this.layerThumbnails = {};
@@ -1824,13 +1936,10 @@ class CanvasStore {
           panX: centerX - nextWidth * this.viewport.zoom / 2,
           panY: centerY - nextHeight * this.viewport.zoom / 2,
         };
-    this.boundingBox = {
-      ...this.boundingBox,
-      x: Math.round(this.boundingBox.x * scaleX),
-      y: Math.round(this.boundingBox.y * scaleY),
-      width: Math.round(this.boundingBox.width * scaleX),
-      height: Math.round(this.boundingBox.height * scaleY),
-    };
+    // The generation frame covers the document; a crop/pad operation must not
+    // keep the old region size and subsequently resize the document back.
+    this.boundingBox = { ...this.boundingBox, x: 0, y: 0, width: nextWidth, height: nextHeight };
+    this.bumpPaintRevision();
     // The document frame is the inpainting Canvas size. Keep the generation
     // fields in lockstep so the dimensions panel, saved settings and backend
     // request cannot retain the previous size after an on-canvas resize.
@@ -1838,6 +1947,24 @@ class CanvasStore {
       generation.width = nextWidth;
       generation.height = nextHeight;
       void generation.saveSettings();
+    }
+  }
+
+  restoreDocumentGeometry(geometry: CanvasDocumentGeometry) {
+    const changed = this.canvasWidth !== geometry.width || this.canvasHeight !== geometry.height;
+    const keepFitted = this.viewportIsFitted();
+    this.canvasWidth = geometry.width; this.canvasHeight = geometry.height;
+    this.boundingBox = { ...geometry.boundingBox };
+    this.baseImagePlacement = geometry.baseImagePlacement ? { source: geometry.baseImagePlacement.source, rect: { ...geometry.baseImagePlacement.rect } } : null;
+    this.layerThumbnails = {};
+    this.controlContextPreviewUrl = null; this.controlContextPreviewLayerId = null;
+    if (changed) {
+      this.clearPendingInpaintResult(); this.inpaintSourceVersion++; this.invalidateInpaintPrompts();
+      if (keepFitted) this.viewport = fittedCanvasViewport(this.viewportWidth, this.viewportHeight, geometry.width, geometry.height);
+      if (generation.mode === 'inpainting') {
+        generation.width = geometry.width; generation.height = geometry.height;
+        void generation.saveSettings();
+      }
     }
   }
 
@@ -2008,9 +2135,8 @@ class CanvasStore {
       if (baseUrl) {
         const image = await this.loadImage(baseUrl);
         ensureCurrentDocument();
-        const scale = Math.min(composite.width / image.naturalWidth, composite.height / image.naturalHeight);
-        const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
-        ctx.drawImage(image, (composite.width-w)/2, (composite.height-h)/2, w, h);
+        const placement = this.getInpaintBasePlacement(baseUrl, image.naturalWidth, image.naturalHeight);
+        ctx.drawImage(image, placement.x, placement.y, placement.width, placement.height);
       }
       if (rasterCanvas) ctx.drawImage(rasterCanvas, 0, 0);
       if (baseUrl || emptyBase) {
@@ -2077,15 +2203,18 @@ class CanvasStore {
 
 export const canvas = new CanvasStore();
 
-canvasHistory.setOnDocumentRestored((layers, activeLayerId, groups, activeGroupId) => {
+canvasHistory.setOnDocumentRestored((layers, activeLayerId, groups, activeGroupId, geometry) => {
   canvas.layers = layers;
   canvas.groups = groups ?? [];
   canvas.activeGroupId = activeGroupId ?? null;
   canvas.activeLayerId = activeLayerId;
+  if (geometry) canvas.restoreDocumentGeometry(geometry);
 });
 canvasHistory.setDocumentStateProvider(() => ({
   layers: canvas.layers,
   activeLayerId: canvas.activeLayerId,
   groups: canvas.groups,
   activeGroupId: canvas.activeGroupId,
+  geometry: { width: canvas.canvasWidth, height: canvas.canvasHeight, boundingBox: { ...canvas.boundingBox },
+    baseImagePlacement: canvas.baseImagePlacement ? { source: canvas.baseImagePlacement.source, rect: { ...canvas.baseImagePlacement.rect } } : null },
 }));

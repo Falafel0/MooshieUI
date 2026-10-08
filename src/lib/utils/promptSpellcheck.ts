@@ -1,4 +1,4 @@
-import { getPromptClickableSegments } from "./promptClickableRanges.js";
+import { getPromptClickableSegments, type PromptClickableSegment } from "./promptClickableRanges.js";
 
 export interface UnknownTagRange {
   start: number;
@@ -125,10 +125,11 @@ export function getUnknownTagRanges(
   raw: string,
   isKnown: (name: string) => boolean,
   caretOffset: number,
+  segments: readonly PromptClickableSegment[] = getPromptClickableSegments(raw),
 ): UnknownTagRange[] {
   if (!raw) return [];
   const out: UnknownTagRange[] = [];
-  for (const seg of getPromptClickableSegments(raw)) {
+  for (const seg of segments) {
     if (seg.kind !== "tag" && seg.kind !== "weighted") continue;
     if (caretOffset >= seg.start && caretOffset <= seg.end) continue;
     const name = extractName(raw, seg.start, seg.end, seg.kind === "weighted");

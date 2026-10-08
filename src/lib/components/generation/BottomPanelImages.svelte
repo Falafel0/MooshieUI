@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import ShelfMore from './ShelfMore.svelte';
   import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
   import BottomPanelIcon from "./BottomPanelIcon.svelte";
   import BottomPanelEmpty from "./BottomPanelEmpty.svelte";
@@ -32,6 +33,8 @@
   });
   onMount(() => { if (source === "references") void gallery.loadFromDisk(); });
   const searchText = $derived(source === "references" ? bottomPanel.referencesSearch : bottomPanel.imageSearch);
+  let visibleCount = $state(64);
+  $effect(() => { void searchText; void source; visibleCount = 64; });
   function setSearch(value: string) { if (source === "references") bottomPanel.referencesSearch = value; else bottomPanel.imageSearch = value; }
   function clearSearch() { setSearch(""); }
   const filteredSessionImages = $derived.by(() => {
@@ -262,7 +265,7 @@
           {:else}
             <div bind:clientHeight={cardViewportHeight} class="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] px-2 py-2">
               <div class="grid gap-2" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${displayCardSize}px; align-content: start;` : `grid-template-columns: repeat(auto-fill, minmax(min(${bottomPanel.imageCardSize}px, 100%), 1fr)); align-content: start;`}>
-              {#each filteredSessionImages as image (imageId(image))}
+              {#each filteredSessionImages.slice(0, visibleCount) as image (imageId(image))}
                 <div
                   class="relative w-full rounded-lg overflow-hidden border bg-ui-surface transition-colors {selectedImage !== null && imageId(selectedImage) === imageId(image) ? 'border-ui-accent ring-2 ring-ui-accent/25' : 'border-ui-border/60 hover:border-neutral-500'}"
                   style="aspect-ratio: 1 / 1;"
@@ -306,6 +309,7 @@
                   {/if}
                 </div>
               {/each}
+              <ShelfMore shown={Math.min(visibleCount, filteredSessionImages.length)} total={filteredSessionImages.length} onmore={() => visibleCount += 64} />
               </div>
             </div>
           {/if}

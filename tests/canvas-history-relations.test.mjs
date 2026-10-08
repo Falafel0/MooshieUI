@@ -21,9 +21,12 @@ class MockLayer {
   batchDraw() {}
 }
 globalThis.__historyKonva = { Layer: MockLayer };
+const snapshotCode = ts.transpileModule(await readFile('src/lib/utils/inpaintLayerSnapshot.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+globalThis.__historySnapshot = await import('data:text/javascript;base64,' + Buffer.from(snapshotCode).toString('base64'));
 globalThis.$state = { raw: value => value };
 const source = (await readFile('src/lib/stores/canvasHistory.svelte.ts', 'utf8'))
-  .replace('import Konva from "konva";', 'const Konva = globalThis.__historyKonva;');
+  .replace('import Konva from "konva";', 'const Konva = globalThis.__historyKonva;')
+  .replace("import { copyInpaintLayerSnapshot } from '../utils/inpaintLayerSnapshot.js';", 'const { copyInpaintLayerSnapshot } = globalThis.__historySnapshot;');
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
@@ -38,8 +41,8 @@ function connect(state, pixelLayers = new Map()) {
   history.clear();
   history.setRefs(pixelLayers, 1024, 768);
   history.setDocumentStateProvider(() => state);
-  history.setOnDocumentRestored((layers, activeLayerId, groups, activeGroupId) => {
-    Object.assign(state, { layers, activeLayerId, groups, activeGroupId });
+  history.setOnDocumentRestored((layers, activeLayerId, groups, activeGroupId, geometry) => {
+    Object.assign(state, { layers, activeLayerId, groups, activeGroupId, geometry });
   });
   history.setOnRestored(null);
 }
@@ -128,4 +131,25 @@ test('ephemeral raster clipping nodes are excluded from pixel and removed-layer 
   assert.deepEqual(pixels.get('pixels').getChildren().map(node => node.value), ['original raster']);
   assert.equal(state.layers[0].clippingMaskId, 'mask', 'clipping remains metadata for renderer rebuild');
   assert.equal(state.layers[0].clippingEnabled, true);
+});
+
+test('document resize undo and redo restore geometry and surviving pixel layers together', () => {
+  const geometry={width:256,height:192,boundingBox:{x:0,y:0,width:256,height:192,locked:false},baseImagePlacement:{source:'data:image/png;base64,AAAA',rect:{x:0,y:0,width:256,height:192}}};
+  const state={layers:[{id:'pixels',type:'raster',image:{src:'data:AAAA',x:8,y:12,width:64,height:64}},baseControl()],activeLayerId:'pixels',groups:[],activeGroupId:null,geometry};
+  const pixels=new Map([['pixels',new MockLayer({id:'pixels',nodes:[new MockNode('original pixels')]})]]);
+  connect(state,pixels);history.snapshotDocument(state.layers,state.activeLayerId,['pixels']);
+  state.geometry={...geometry,width:512,height:384,baseImagePlacement:{...geometry.baseImagePlacement,rect:{x:128,y:96,width:256,height:192}}};
+  state.layers=state.layers.map(layer=>layer.image?{...layer,image:{...layer.image,x:136,y:108}}:layer);
+  pixels.get('pixels').getChildren()[0].value='resized pixels';
+  history.undo();assert.equal(state.geometry.width,256);assert.equal(state.layers[0].image.x,8);assert.equal(pixels.get('pixels').getChildren()[0].value,'original pixels');
+  history.redo();assert.equal(state.geometry.width,512);assert.equal(state.geometry.baseImagePlacement.rect.x,128);assert.equal(state.layers[0].image.x,136);assert.equal(pixels.get('pixels').getChildren()[0].value,'resized pixels');
+});
+
+test('a failed resize rolls back its surviving pixels without creating a partial redo',()=>{
+  const state={layers:[{id:'pixels',type:'raster',name:'Original'}],activeLayerId:'pixels',groups:[],activeGroupId:null};
+  const pixels=new Map([['pixels',new MockLayer({id:'pixels',nodes:[new MockNode('original')]})]]);connect(state,pixels);
+  const entry=history.snapshotDocument(state.layers,state.activeLayerId,['pixels']);
+  state.layers[0].name='Partial';pixels.get('pixels').getChildren()[0].value='partial';
+  history.rollbackDocumentSnapshot(entry);
+  assert.equal(state.layers[0].name,'Original');assert.equal(pixels.get('pixels').getChildren()[0].value,'original');assert.equal(history.canRedo,false);assert.equal(history.canUndo,false);
 });

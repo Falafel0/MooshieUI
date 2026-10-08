@@ -46,3 +46,11 @@ Every-step `[a|b]` alternation works with RES multistep, its ancestral and CFG++
 Focused tests cover mask processing, regional ordering, final-only upscaling, frozen layer settings, cancellation, stale result rejection and the inpainting nodes. Browser interaction checks cover drawing, duplication, rename cancellation, hidden-layer protection, per-layer properties, resizing and viewport preservation.
 
 The Windows library test harness can lack the common-controls v6 activation manifest required by desktop dialogs. In that case it fails before running tests with `STATUS_ENTRYPOINT_NOT_FOUND`; embedding a common-controls v6 manifest in the generated test executable allows the tests to run. Production installers already receive their manifest from Tauri.
+
+## Preparation and responsiveness
+
+Generate immediately shows preparation status before a task ID is available. Cancel during preparation prevents submission; if ComfyUI accepts the job late, cancellation targets that job. Accepted tasks already in the queue remain intact. Preparation timings are recorded in diagnostic logs separately from sampling time.
+
+Long prompt editors keep the complete native editable text while measuring interactive tags and spelling marks near the visible lines. The Shelf initially renders a batch of LoRAs, models or images and loads more when scrolling or pressing Show more. Search covers the entire library, including cards not yet rendered.
+
+Use the project dimensions or C over the canvas to open Resize canvas. Choose Canvas bounds to pad/crop around an anchor without scaling, or Scale document to resize artwork and spatial layers together. Undo restores the previous document size and content.

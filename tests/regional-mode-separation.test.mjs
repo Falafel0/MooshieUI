@@ -98,6 +98,8 @@ const fixture = (globalThis.__regionalSeparationTest = {
 const relationCode = ts.transpileModule(fs.readFileSync(new URL('../src/lib/utils/layerRelations.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const relationFunctions = await import('data:text/javascript;base64,' + Buffer.from(relationCode).toString('base64'));
 Object.assign(fixture, relationFunctions);
+const snapshotCode = ts.transpileModule(fs.readFileSync(new URL('../src/lib/utils/inpaintLayerSnapshot.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+Object.assign(fixture, await import('data:text/javascript;base64,' + Buffer.from(snapshotCode).toString('base64')));
 const regionsSource = fs.readFileSync(new URL('../src/lib/utils/inpaintingRegions.ts', import.meta.url), 'utf8');
 let regionsCode = ts.transpileModule(regionsSource, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { prepareControlnetReference } from "../../utils/controlnetReference.js";
   import { canvasPngBytes, matteControlnetReference } from "../../utils/canvasLayerExport.js";
+  import { documentControlnetSourceBytes } from '../../utils/documentControlnetReference.js';
+  import { createValueRevision } from '../../utils/valueRevision.js';
   import { controlnetEditor as generation, controlnetEditorContext, setControlnetSourceData } from "../../stores/controlnetEditor.svelte.js";
   import { canvas } from "../../stores/canvas.svelte.js";
   import { models } from "../../stores/models.svelte.js";
@@ -54,21 +56,38 @@
   let linkedPreviewUrl = $state<string | null>(null);
   const imagePreviewUrl = $derived(linkedReferenceId ? linkedPreviewUrl : generation.controlnetPreviewUrl);
   const displayedPreviewUrl = $derived(previewKind === 'processed' && preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl);
+  const referenceRevision = createValueRevision();
+  const referenceRenderRevision = $derived.by(() => {
+    const context = controlnetEditorContext();
+    if (!context) return referenceRevision([]);
+    const reference = linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null;
+    const image = reference?.image, placement = canvas.activeLayer?.controlnet?.sourcePlacement;
+    return referenceRevision([context, linkedReferenceId, canvas.inpaintSourceVersion, canvas.canvasWidth, canvas.canvasHeight,
+      linkedReferenceId ? canvas.paintRevision : 0, image?.src, image?.x, image?.y, image?.width, image?.height,
+      image?.rotation, image?.flipX, image?.flipY, reference?.opacity, reference?.clippingMaskId, reference?.clippingEnabled,
+      canvas.activeLayer?.controlnet?.sourceData, placement?.x, placement?.y, placement?.width, placement?.height]);
+  });
   $effect(() => {
     const id = linkedReferenceId;
-    void canvas.paintRevision;
-    void canvas.layers;
+    void referenceRenderRevision;
+    let cancelled = false, ownedUrl: string | null = null;
     untrack(() => {
-      const pixels = id ? canvas.exportRasterLayer(id) : null;
-      linkedPreviewUrl = pixels ? matteControlnetReference(pixels).toDataURL('image/png') : null;
+      if (!id) { linkedPreviewUrl = null; return; }
+      void (async () => {
+        const pixels = canvas.exportRasterLayer(id);
+        const blob = pixels ? await new Promise<Blob | null>(resolve => matteControlnetReference(pixels).toBlob(resolve, 'image/png')) : null;
+        if (cancelled) return;
+        linkedPreviewUrl = ownedUrl = blob ? URL.createObjectURL(blob) : null;
+      })().catch(error => { if (!cancelled) linkedPreviewUrl = null; console.warn('ControlNet source preview failed', error); });
     });
+    return () => { cancelled = true; if (ownedUrl) { URL.revokeObjectURL(ownedUrl); if (linkedPreviewUrl === ownedUrl) linkedPreviewUrl = null; } };
   });
   const imageRequests = new LatestControlnetRequest();
   const previewRequests = new LatestControlnetRequest();
   let previewRequest: ReturnType<LatestControlnetRequest['begin']> | null = null;
   let mounted = false;
   let imageError = $state<string | null>(null);
-  const requestKey = (previewOnly = false) => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, linkedReferenceId, linkedReferenceId ? canvas.paintRevision : 0, linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null, controlnetRequestKey(generation, previewOnly)]);
+  const requestKey = (previewOnly = false) => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, referenceRenderRevision, controlnetRequestKey(generation, previewOnly)]);
   const previewPreprocessor = $derived(generation.controlnetPreprocessor?.trim() || null);
   const sourceImage = $derived(generation.mode === 'image_edit' ? generation.editReferenceImages[0] ?? null : generation.mode === 'img2img' || generation.mode === 'inpainting' ? generation.inputImage : null);
   let readyWait: Awaited<ReturnType<typeof createComfyReadyWait>> | null = null;
@@ -422,6 +441,13 @@
         const reference = canvas.exportRasterLayer(linkedReferenceId);
         if (!reference) throw new Error(locale.t('canvas.missing_connection'));
         const bytes = await canvasPngBytes(matteControlnetReference(reference));
+        const uploaded = await uploadImageBytes(bytes, `control-preview-${controlnetEditorContext()}.png`);
+        if (!mounted || !previewRequests.current(request, requestKey(true))) return;
+        image = uploaded.name;
+      } else if (controlnetEditorContext() && canvas.activeLayer?.controlnet?.sourceData) {
+        const source = canvas.activeLayer.controlnet;
+        const bytes = await documentControlnetSourceBytes(source.sourceData!, source.sourcePlacement, canvas.canvasWidth, canvas.canvasHeight);
+        if (!mounted || !previewRequests.current(request, requestKey(true))) return;
         const uploaded = await uploadImageBytes(bytes, `control-preview-${controlnetEditorContext()}.png`);
         if (!mounted || !previewRequests.current(request, requestKey(true))) return;
         image = uploaded.name;

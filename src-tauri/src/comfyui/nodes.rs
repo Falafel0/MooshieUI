@@ -9,6 +9,11 @@ use sha2::{Digest, Sha256};
 use super::process::tokio_command_no_window;
 use super::types::GenerationParams;
 
+// Schema checks run before a prompt reaches ComfyUI's queue. The shared HTTP
+// client deliberately has no default deadline (downloads can take much longer),
+// so bound these small requests including their response bodies explicitly.
+const NODE_SCHEMA_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Copy)]
 struct RequiredCustomNodePackage {
     name: &'static str,
@@ -1485,6 +1490,7 @@ pub async fn verify_required_h3_nodes_for_generation(
     if params.video_save_draft || crate::templates::video::acceleration(params) != "standard" {
         let info: serde_json::Value = http_client
             .get(format!("{base_url}/object_info"))
+            .timeout(NODE_SCHEMA_TIMEOUT)
             .send()
             .await
             .map_err(|e| e.to_string())?
@@ -1592,7 +1598,18 @@ pub async fn verify_required_inpaint_nodes_for_generation(
     ) {
         return Ok(());
     }
-    if node_declares_input(http_client, base_url, "MooshieInpaintPrepare", "area_limit").await {
+    if node_declares_input_checked(
+        http_client,
+        base_url,
+        "MooshieInpaintPrepare",
+        "area_limit",
+    )
+    .await
+    .map_err(|error| {
+        format!(
+            "Could not verify inpainting support on the connected ComfyUI server: {error}. Check the server connection and retry."
+        )
+    })? {
         return Ok(());
     }
     Err("Update the MooshieUI custom nodes on the connected ComfyUI server and restart it. This inpainting request needs the current mask density and raster alpha support.".into())
@@ -2057,7 +2074,12 @@ async fn object_info_has_node_class(
 ) -> Result<bool, String> {
     let base_url = base_url.trim_end_matches('/');
     let url = format!("{}/object_info/{}", base_url, node_class);
-    match http_client.get(&url).send().await {
+    match http_client
+        .get(&url)
+        .timeout(NODE_SCHEMA_TIMEOUT)
+        .send()
+        .await
+    {
         Ok(response) if response.status().is_success() => {
             let value = response
                 .json::<serde_json::Value>()
@@ -2072,33 +2094,58 @@ async fn object_info_has_node_class(
 /// Whether `/object_info/{node_class}` declares `input_name` in either its
 /// required or optional section.
 ///
-/// Returns false on any error rather than propagating one. The only caller uses
-/// this to decide whether to set an optional input, and a probe that cannot
-/// reach the server should degrade to omitting it, not to a failed generation.
+/// Optional-input callers degrade to omitting the input on a connection error.
+/// Required inpainting support uses the checked form below so a stalled server
+/// is not mistaken for an outdated node installation.
 pub async fn node_declares_input(
     http_client: &reqwest::Client,
     base_url: &str,
     node_class: &str,
     input_name: &str,
 ) -> bool {
+    node_declares_input_checked(http_client, base_url, node_class, input_name)
+        .await
+        .unwrap_or(false)
+}
+
+async fn node_declares_input_checked(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    node_class: &str,
+    input_name: &str,
+) -> Result<bool, String> {
     let base_url = base_url.trim_end_matches('/');
     let url = format!("{}/object_info/{}", base_url, node_class);
-    let Ok(response) = http_client.get(&url).send().await else {
-        return false;
-    };
-    if !response.status().is_success() {
-        return false;
-    }
-    let Ok(value) = response.json::<serde_json::Value>().await else {
-        return false;
-    };
+    let response = http_client
+        .get(&url)
+        .timeout(NODE_SCHEMA_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| describe_schema_error(node_class, &error))?
+        .error_for_status()
+        .map_err(|error| describe_schema_error(node_class, &error))?;
+    let value = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| describe_schema_error(node_class, &error))?;
     let Some(input) = value.get(node_class).and_then(|n| n.get("input")) else {
-        return false;
+        return Ok(false);
     };
-    ["required", "optional"]
+    Ok(["required", "optional"]
         .iter()
         .filter_map(|section| input.get(section))
-        .any(|section| section.get(input_name).is_some())
+        .any(|section| section.get(input_name).is_some()))
+}
+
+fn describe_schema_error(node_class: &str, error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        format!(
+            "{node_class} schema request timed out after {} seconds",
+            NODE_SCHEMA_TIMEOUT.as_secs(),
+        )
+    } else {
+        format!("{node_class} schema request failed: {error}")
+    }
 }
 
 #[cfg(test)]
@@ -2616,6 +2663,113 @@ mod inpaint_schema_tests {
                 .await,
                 current
             );
+            server.await.unwrap();
+        }
+    }
+
+    async fn stalled_schema_server(send_headers: bool) -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            if send_headers {
+                // Headers succeed, but the JSON body never arrives. The same
+                // request deadline must cover response parsing too.
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+            std::future::pending::<()>().await;
+            drop(socket);
+        });
+        (url, server)
+    }
+
+    async fn assert_stalled_schema_is_bounded(send_headers: bool) {
+        let (url, server) = stalled_schema_server(send_headers).await;
+        let params = GenerationParams {
+            mode: "inpainting".into(),
+            denoise: 0.5,
+            inpaint_settings: Some(json!({"density_denoise": false})),
+            ..GenerationParams::default()
+        };
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(
+            NODE_SCHEMA_TIMEOUT + Duration::from_secs(3),
+            verify_required_inpaint_nodes_for_generation(&reqwest::Client::new(), &url, &params),
+        )
+        .await;
+        server.abort();
+        let error = result
+            .expect("schema probe must terminate without an external timeout")
+            .unwrap_err();
+        assert!(error.contains("timed out after 5 seconds"), "{error}");
+        assert!(error.contains("Check the server connection"), "{error}");
+        assert!(!error.starts_with("Update the MooshieUI custom nodes"));
+        assert!(started.elapsed() < NODE_SCHEMA_TIMEOUT + Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn hanging_schema_headers_fail_before_prompt_submission() {
+        assert_stalled_schema_is_bounded(false).await;
+    }
+
+    #[tokio::test]
+    async fn hanging_schema_json_body_uses_the_same_deadline() {
+        assert_stalled_schema_is_bounded(true).await;
+    }
+
+    #[tokio::test]
+    async fn slow_valid_schema_is_accepted_and_stale_schema_has_update_guidance() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for current in [true, false] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let body = json!({
+                "MooshieInpaintPrepare": {
+                    "input": {
+                        "optional": if current { json!({"area_limit": ["MASK"]}) } else { json!({}) },
+                    },
+                },
+            })
+            .to_string();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let count = socket.read(&mut request).await.unwrap();
+                assert!(String::from_utf8_lossy(&request[..count])
+                    .contains("/object_info/MooshieInpaintPrepare"));
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                socket
+                    .write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                    .await
+                    .unwrap();
+            });
+            let params = GenerationParams {
+                mode: "inpainting".into(),
+                denoise: 0.5,
+                inpaint_settings: Some(json!({"density_denoise": true})),
+                ..GenerationParams::default()
+            };
+            let result = verify_required_inpaint_nodes_for_generation(
+                &reqwest::Client::new(),
+                &url,
+                &params,
+            )
+            .await;
+            if current {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    error.starts_with("Update the MooshieUI custom nodes"),
+                    "{error}"
+                );
+            }
             server.await.unwrap();
         }
     }

@@ -11,6 +11,7 @@
   import { resolveTint } from "../../utils/layerTints.js";
   import { formatGenerationTime } from "../../utils/localeFormat.js";
   import CanvasToolbar from "./CanvasToolbar.svelte";
+  import CanvasResizeDialog from './CanvasResizeDialog.svelte';
   import ProjectBar from "./ProjectBar.svelte";
   import CanvasStage from "./CanvasStage.svelte";
   import CanvasStatusBar from "./CanvasStatusBar.svelte";
@@ -463,3 +464,5 @@
     />
   {/if}
 </div>
+
+{#if canvas.resizeDialogOpen}<CanvasResizeDialog />{/if}
