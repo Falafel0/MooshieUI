@@ -1,3 +1,26 @@
+## What's New in v2.3.9-fork.8
+
+### Responsive prompt and resource panels
+- Measure and render prompt tag hit targets and spelling marks near the visible text, while retaining the complete editable prompt, selection and scrolling.
+- Browse LoRAs, models and image results in progressive batches instead of mounting the entire library when opening the Shelf. Search still covers the full library, and Show more remains available for keyboard use.
+- Compare project changes without repeatedly serializing embedded image payloads. Copy document preparation and undo metadata without duplicating image strings through JSON.
+
+### Generation preparation
+- Show preparation status immediately, prevent duplicate submission shortcuts and allow cancellation before ComfyUI accepts the job. Cancel a late accepted job by its prompt ID without interrupting unrelated queued jobs.
+- Share detector dependency verification within a run. Upload shared ControlNet sources once per run with bounded concurrency and apply upload names only after all sources are ready and unchanged.
+- Limit the inpainting schema probe to five seconds, including response decoding, and move LoRA filesystem validation off the async executor. Record preparation stage timings separately from sampling.
+
+### Canvas bounds and document scaling
+- Open Resize canvas from the project dimensions or the C shortcut. Pad or crop without scaling using a nine-position anchor, or scale the document and its spatial layers together with an optional aspect lock.
+- Keep base, rasters, masks, regions and placed ControlNet sources aligned. Restore document geometry with undo/redo and preserve cropped mask pixels and soft coverage when saving and reopening a project.
+- Refresh ControlNet source previews when pixels or geometry change, without encoding again for strength changes. Preprocessor preview uses the same placed full-document source as generation and leaves the original source intact.
+
+### Upstream integration
+- Merge upstream main through `f146cf4` (v2.3.17 plus the NovelAI upscale fix), including Model Hub sorting/filtering, install location picker ordering and current RFInversion inputs.
+- Preserve the fork identity, signed Windows installer/update channel and shared desktop generation workspace.
+
+---
+
 ## What's New in v2.3.9-fork.7
 
 ### Desktop generation workspace
@@ -125,6 +148,17 @@
 - Merges the exact upstream v2.3.9 tag, including persistent prompt-enhancer sessions, local-model context improvements, model/encoder recognition and config recovery guards.
 - Preserves the fork's inpainting workspace, asynchronous process cleanup, updater identity and Windows-only NSIS packaging.
 - Signs updater installers in a separate job, following upstream's separation of signing keys from build scripts.
+
+---
+
+## What's New in v2.3.17
+
+### Model Hub
+- **Sorting and filters work again**: sorting a CivitAI search by Most Downloaded, Highest Rated or Newest now actually reorders the results (CivitAI's text search ignored the sort, so results are now sorted in the app). The type, base model and format filters apply again, and a slow earlier search can no longer replace the results of a newer one.
+- **Install location picker shows on top**: choosing where to install a model from the model details card opened the location picker behind the card, so it looked like nothing happened. It now opens above it.
+
+### Style Transfer
+- **Style Transfer runs again**: Style Transfer failed with a prompt validation error on current installs because the RFInversion node now requires two extra inputs. MooshieUI sends them with guidance left off, so results look the same as before (#763).
 
 ---
 

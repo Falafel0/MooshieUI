@@ -3441,6 +3441,10 @@ async fn dispatch_command(
 
         // --- Generation ---
         "generate" => {
+            let mut timing = crate::generation_timing::GenerationTiming::new(
+                "browser",
+                args["params"]["mode"].as_str().unwrap_or("unknown"),
+            );
             crate::comfyui::process::mark_legacy_worker_idle(&state).await;
             let mut params: crate::comfyui::types::GenerationParams =
                 serde_json::from_value(args["params"].clone())
@@ -3449,12 +3453,12 @@ async fn dispatch_command(
             // Tauri command, so it needs the same NovelAI -> local model swap.
             crate::templates::upscale_standalone::rewrite_novelai_request(&mut params)?;
             crate::templates::validate_generation_params(&params)?;
-            {
-                // Skipped for a remote ComfyUI, whose LoRAs live on that server.
-                let config = state.config.read().await;
-                crate::commands::api::validate_generation_loras(&config, &params.loras)
-                    .map_err(|e| e.to_string())?;
-            }
+            timing.stage("lora_validation");
+            // Skipped for a remote ComfyUI, whose LoRAs live on that server.
+            crate::commands::api::validate_generation_loras_async(&state, &params.loras)
+                .await
+                .map_err(|e| e.to_string())?;
+            timing.stage("node_schema");
             // Mirrors the same check in the Tauri `generate` command: catches a
             // missing MiniMax H3 node before submission instead of surfacing
             // ComfyUI's raw `missing_node_type` prompt-validation error.
@@ -3481,6 +3485,7 @@ async fn dispatch_command(
             } else {
                 params.seed
             };
+            timing.stage("video_metadata_schema");
             let video_metadata_supported = if params.mode == "video" {
                 let base_url = state.base_url().await;
                 crate::comfyui::nodes::node_declares_input(
@@ -3493,6 +3498,7 @@ async fn dispatch_command(
             } else {
                 false
             };
+            timing.stage("workflow_build");
             let workflow =
                 crate::templates::build_workflow(&params, seed, video_metadata_supported);
             let user = username.map(|s| s.to_string());
@@ -3533,12 +3539,15 @@ async fn dispatch_command(
             // Spawn background task to do the actual ComfyUI submission.
             let bg_state = Arc::clone(&state);
             let bg_placeholder = placeholder_id.clone();
+            timing.stage("background_dispatch");
             tokio::spawn(async move {
                 // Release the prompt-assistant LLM's VRAM so it doesn't starve
                 // ComfyUI's diffusion model during this generation. Done inside
                 // the spawned task so it never delays the HTTP acknowledgment.
+                timing.stage("release_assistant_vram");
                 bg_state.free_llm_vram_for_generation().await;
                 if needs_hold {
+                    timing.stage("fair_queue_wait");
                     // Fair queue: hold this prompt until a slot opens for this user.
                     let submitted = Arc::new(tokio::sync::Notify::new());
                     let result_slot: crate::state::HeldPromptResult =
@@ -3570,6 +3579,7 @@ async fn dispatch_command(
 
                     match res {
                         Ok(_) => {
+                            timing.finish();
                             bg_state.broadcast_queue_positions();
                         }
                         Err(e) => {
@@ -3591,6 +3601,7 @@ async fn dispatch_command(
                         }
                     }
                 } else {
+                    timing.stage("comfyui_submission");
                     // Direct submission (admin or user's first prompt)
                     log::info!(
                         "[gen] submitting placeholder={}",
@@ -3603,6 +3614,7 @@ async fn dispatch_command(
                         .await
                     {
                         Ok((worker_id, response)) => {
+                            timing.finish();
                             let was_deferred =
                                 bg_state.bind_prompt_alias(&bg_placeholder, &response.prompt_id);
                             if was_deferred {

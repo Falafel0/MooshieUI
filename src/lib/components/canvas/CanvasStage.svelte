@@ -19,6 +19,7 @@
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { progress } from "../../stores/progress.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { gallery } from '../../stores/gallery.svelte.js';
   import ColorTooltip from "../ui/ColorTooltip.svelte";
 
   let { showLivePreview = true }: { showLivePreview?: boolean } = $props();
@@ -473,7 +474,9 @@
       const width = Math.max(64, Math.round(canvasBoundsNode.width() * canvasBoundsNode.scaleX() / 8) * 8);
       const height = Math.max(64, Math.round(canvasBoundsNode.height() * canvasBoundsNode.scaleY() / 8) * 8);
       canvasBoundsNode.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, width, height });
-      canvas.resizeCanvas(width, height);
+      void canvas.resizeDocument(width, height, { mode: 'bounds', anchor: { x: 0, y: 0 } }).then(result => {
+        if (result.error) gallery.showToast(result.error, 'error');
+      });
       transformBase = null;
       isTransformingRaster = false;
       refreshSelectionTransformer();
@@ -689,8 +692,12 @@
         const image = previewUrl ? await loadImageEl(previewUrl) : reference ? matteControlnetReference(reference) : control.controlnet?.sourceData ? await loadImageEl(control.controlnet.sourceData) : null;
         if (!contextLayer || revision !== contextRevision || canvas.activeLayerId !== control.id) return;
         if (image) {
-          contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: control.opacity, listening: false, name: 'controlnet-guide' }));
-          contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: resolveTint(control), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
+          const processed = previewUrl && canvas.controlContextPreviewKind === 'processed';
+          const placement = !reference && !processed && control.controlnet?.sourcePlacement
+            ? control.controlnet.sourcePlacement : { x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight };
+          contextLayer.clip({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight });
+          contextLayer.add(new Konva.Image({ image, ...placement, opacity: control.opacity, listening: false, name: 'controlnet-guide' }));
+          contextLayer.add(new Konva.Rect({ ...placement, stroke: resolveTint(control), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
         }
       } catch { /* The source preview can disappear while a blob URL is replaced. */ }
       if (!contextLayer || revision !== contextRevision || canvas.activeLayerId !== control.id) return;
@@ -750,19 +757,8 @@
     img.onload = () => {
       if (!refLayer || lastRefSource !== url) return;
 
-      const imageRatio = img.naturalWidth / img.naturalHeight;
-      const canvasRatio = canvas.canvasWidth / canvas.canvasHeight;
-
-      let drawWidth = canvas.canvasWidth;
-      let drawHeight = canvas.canvasHeight;
-      if (imageRatio > canvasRatio) {
-        drawHeight = canvas.canvasWidth / imageRatio;
-      } else {
-        drawWidth = canvas.canvasHeight * imageRatio;
-      }
-
-      const offsetX = (canvas.canvasWidth - drawWidth) / 2;
-      const offsetY = (canvas.canvasHeight - drawHeight) / 2;
+      const { x: offsetX, y: offsetY, width: drawWidth, height: drawHeight } = canvas.getInpaintBasePlacement(url, img.naturalWidth, img.naturalHeight);
+      refLayer.clip({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight });
 
       if (!refImageNode) {
         refImageNode = new Konva.Image({
@@ -1206,15 +1202,15 @@
    * region, or as itself for a raster layer. The tint it was painted with is
    * remembered on the node, so a later colour change can repaint from the same
    * source instead of waiting for the next load. */
-  function paintLayerAsset(node: Konva.Image, image: HTMLImageElement, layer: CanvasLayer) {
+  function paintLayerAsset(node: Konva.Image, image: HTMLImageElement | HTMLCanvasElement, layer: CanvasLayer) {
     if (layer.type === "raster") {
       node.image(image);
       node.setAttr("tintKey", undefined);
       return;
     }
     const pixels = document.createElement("canvas");
-    pixels.width = image.naturalWidth;
-    pixels.height = image.naturalHeight;
+    pixels.width = 'naturalWidth' in image ? image.naturalWidth : image.width;
+    pixels.height = 'naturalHeight' in image ? image.naturalHeight : image.height;
     const ctx = pixels.getContext("2d")!;
     ctx.drawImage(image, 0, 0);
     const data = ctx.getImageData(0, 0, pixels.width, pixels.height);
@@ -2046,19 +2042,12 @@
     }
   });
 
-  let historyDims = { w: 0, h: 0 };
   $effect(() => {
-    // Keep undo/redo snapshot dimensions in sync with the canvas. When the
-    // canvas is resized (e.g. a new image is loaded) existing snapshots no
-    // longer match the new dimensions, so discard them rather than restoring
-    // stretched or clipped pixels.
+    // Document history owns dimensions and pixel geometry together. Keeping
+    // refs current must not discard the undo entry for a user resize.
     const w = canvas.canvasWidth;
     const h = canvas.canvasHeight;
-    if (w === historyDims.w && h === historyDims.h) return;
-    const hadDims = historyDims.w !== 0 || historyDims.h !== 0;
-    historyDims = { w, h };
     canvasHistory.setRefs(konvaLayers, w, h);
-    if (hadDims) canvasHistory.clear();
   });
 
   $effect(() => {
@@ -2082,6 +2071,7 @@
 
   $effect(() => {
     void canvas.effectiveReferenceImage;
+    void canvas.baseImagePlacement;
     void canvas.canvasWidth;
     void canvas.canvasHeight;
     updateReferenceImage(canvas.effectiveReferenceImage);

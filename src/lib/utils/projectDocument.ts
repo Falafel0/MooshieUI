@@ -166,6 +166,8 @@ export interface ProjectDocument {
   canvasHeight: number;
   baseColor: string;
   backgroundColor: string;
+  /** Durable imported/prepared base and its document-space placement. */
+  baseImage?: ProjectRasterImage;
   /** Where the view was, so reopening a document shows it as it was left.
    * Not part of the signature: moving the view is not an edit. */
   viewport: { zoom: number; panX: number; panY: number };
@@ -255,6 +257,7 @@ export function isProjectDocument(value: unknown): value is ProjectDocument {
   if (doc.canvasWidth > DOCUMENT_MAX_SIZE || doc.canvasHeight > DOCUMENT_MAX_SIZE) return false;
   if (typeof doc.baseColor !== "string" || !COLOUR.test(doc.baseColor)) return false;
   if (typeof doc.backgroundColor !== "string" || !COLOUR.test(doc.backgroundColor)) return false;
+  if (doc.baseImage !== undefined && (!validImagePlacement(doc.baseImage) || !isDurableUrl(doc.baseImage.src))) return false;
   if (!Array.isArray(doc.layers)) return false;
   if (doc.version === 2 && !validGroups(doc.groups)) return false;
   if (doc.groups !== undefined && !validGroups(doc.groups)) return false;
@@ -276,19 +279,28 @@ export function isProjectDocument(value: unknown): value is ProjectDocument {
           || !Number.isFinite(c.strength) || c.strength < 0 || !Number.isFinite(c.startPercent)
           || !Number.isFinite(c.endPercent) || c.startPercent < 0 || c.endPercent > 1 || c.startPercent >= c.endPercent
           || (c.sourceData != null && !/^data:image\//.test(c.sourceData))) return false;
+      if (c.sourcePlacement !== undefined && !validImagePlacement(c.sourcePlacement)) return false;
     }
     if (typeof candidate.name !== "string" || typeof candidate.order !== "number") return false;
     if (!validRelations(candidate)) return false;
     if (candidate.rasterPaint !== undefined && (candidate.type !== "raster" || !isRasterPaint(candidate.rasterPaint))) return false;
-    if (candidate.type === "raster" && candidate.image) {
+    if (candidate.image) {
       const image = candidate.image as Partial<ProjectRasterImage>;
       if (typeof image.src !== "string" || typeof image.width !== "number") return false;
       // A stored raster must be able to reach its pixels after a restart; a
       // document naming a session-only URL would open with an empty layer.
       if (!isDurableUrl(image.src)) return false;
+      if (!validImagePlacement(image)) return false;
     }
     return true;
   });
+}
+
+function validImagePlacement(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const image = value as { x?: number; y?: number; width?: number; height?: number };
+  return [image.x, image.y, image.width, image.height].every(value => typeof value === 'number' && Number.isFinite(value))
+    && image.width! > 0 && image.height! > 0;
 }
 
 /**
@@ -361,6 +373,79 @@ function layerSignature(layer: ProjectLayer): string {
   ].join("\u0001");
 }
 
+/** A comparison snapshot keeps immutable image strings without serialising their pixels. */
+export type ProjectChangeSnapshot = unknown;
+
+function copyChangeData(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value);
+  const copy: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
+  seen.set(value, copy);
+  for (const key of Object.keys(value)) {
+    (copy as Record<string, unknown>)[key] = copyChangeData((value as Record<string, unknown>)[key], seen);
+  }
+  return copy;
+}
+
+/**
+ * The save guard compares this shape, rather than repeatedly encoding all
+ * embedded references and style thumbnails on the UI thread. Nested settings
+ * are copied because stores may mutate them after the saved snapshot is taken.
+ */
+export function documentChangeSnapshot(doc: ProjectDocument | null, paintRevision = 0): ProjectChangeSnapshot {
+  if (!doc) return null;
+  return copyChangeData([
+    doc.version, doc.canvasWidth, doc.canvasHeight, doc.baseColor, doc.backgroundColor,
+    doc.baseImage ?? null, paintRevision,
+    (doc.groups ?? []).map(group => [group.id, group.name, group.visible]),
+    doc.layers.map(layer => [
+      layer.type, layer.id ?? null, layer.name, layer.visible,
+      layer.type === "raster" ? layer.opacity : 0,
+      layer.coverage ?? 1, layer.locked, layer.order, layer.groupId ?? null,
+      layer.targetRasterId ?? null, layer.clippingMaskId ?? null,
+      layer.clippingEnabled !== false, layer.referenceRasterId ?? null,
+      layer.modifierScope ?? { mode: "auto" }, layer.denoise ?? null,
+      Boolean(layer.densityDenoise), layer.maskGrow ?? null,
+      layer.inpaintWidth ?? null, layer.inpaintHeight ?? null,
+      layer.inpaintAspectLocked !== false, layer.regionalPrompt ?? "",
+      layer.regionalNegativePrompt ?? "", layer.regionalStrength ?? null,
+      layer.positivePrompt ?? "", layer.negativePrompt ?? "",
+      layer.inpaintSettings ?? null,
+      layer.controlnet ? {
+        ...layer.controlnet,
+        image: layer.controlnet.sourceData || layer.referenceRasterId ? null : layer.controlnet.image,
+      } : null,
+      layer.initialRegion ?? null, layer.image ?? null,
+      layer.rasterPaint ?? [], layer.spatialPng ?? null,
+    ]),
+  ]);
+}
+
+export function settingsChangeSnapshot(state: unknown): ProjectChangeSnapshot {
+  return copyChangeData(state);
+}
+
+/** Exact values, including equal-length image replacements; no lossy pixel hash. */
+export function sameChangeSnapshot(
+  expected: ProjectChangeSnapshot,
+  current: ProjectChangeSnapshot,
+  seen = new WeakMap<object, WeakSet<object>>(),
+): boolean {
+  if (Object.is(expected, current)) return true;
+  if (expected === null || current === null || typeof expected !== "object" || typeof current !== "object") return false;
+  if (Array.isArray(expected) !== Array.isArray(current)) return false;
+  if (Array.isArray(expected) && Array.isArray(current) && expected.length !== current.length) return false;
+  let compared = seen.get(expected);
+  if (compared?.has(current)) return true;
+  if (!compared) { compared = new WeakSet(); seen.set(expected, compared); }
+  compared.add(current);
+  const before = expected as Record<string, unknown>;
+  const after = current as Record<string, unknown>;
+  const keys = Object.keys(before);
+  return keys.length === Object.keys(after).length
+    && keys.every(key => Object.hasOwn(after, key) && sameChangeSnapshot(before[key], after[key], seen));
+}
+
 /**
  * A cheap digest of everything that makes the document what it is.
  *
@@ -376,6 +461,7 @@ export function documentSignature(doc: ProjectDocument | null, paintRevision = 0
     doc.canvasHeight,
     doc.baseColor,
     doc.backgroundColor,
+    imageSignature(doc.baseImage),
     paintRevision,
     doc.layers.length,
     doc.groups?.length ?? 0,

@@ -279,3 +279,32 @@ test('unsupported nodes or malformed paint cannot be quietly omitted from a save
     assert.equal(docs.decodeRasterPaint(paint), null);
   }
 });
+
+test('change snapshots detect nested edits without serializing embedded pixels', () => {
+  const doc=document_(); doc.layers.push({ ...maskLayer({id:'control',type:'controlnet'}),controlnet:{enabled:true,model:'depth',image:'old.png',sourceData:'data:image/png;base64,'+'A'.repeat(8*1024*1024),sourcePlacement:{x:0,y:0,width:1024,height:768}} });
+  Object.defineProperty(doc.layers[1].controlnet,'toJSON',{value(){throw new Error('pixel serialization is forbidden');}});
+  const saved=docs.documentChangeSnapshot(doc,1);
+  assert(docs.sameChangeSnapshot(saved,docs.documentChangeSnapshot(doc,1)));
+  doc.layers[1].controlnet.image='new-session.png';doc.groups[0] = {id:'group',name:'Group',visible:true,collapsed:false};
+  // Organization changes matter; session upload names alone do not.
+  assert(!docs.sameChangeSnapshot(saved,docs.documentChangeSnapshot(doc,1)));
+  doc.groups=[];
+  assert(docs.sameChangeSnapshot(saved,docs.documentChangeSnapshot(doc,1)));
+  doc.layers[1].controlnet.sourcePlacement.x=12;
+  assert(!docs.sameChangeSnapshot(saved,docs.documentChangeSnapshot(doc,1)));
+});
+
+test('settings snapshots retain nested values and detect equal-length image replacements', () => {
+  const settings={prompt:'forest',styles:[{thumbnail:'data:AAAA',artists:[{weight:.8}]}]};
+  const before=docs.settingsChangeSnapshot(settings);
+  settings.styles[0].artists[0].weight=.9;
+  assert(!docs.sameChangeSnapshot(before,settings));settings.styles[0].artists[0].weight=.8;
+  assert(docs.sameChangeSnapshot(before,settings));settings.styles[0].thumbnail='data:BBBB';
+  assert(!docs.sameChangeSnapshot(before,settings));
+});
+
+test('resized document base and ControlNet placement must be durable and finite', () => {
+  const base={src:'data:image/png;base64,AAAA',x:-32,y:48,width:1024,height:768,rotation:0,flipX:false,flipY:false};
+  assert(docs.isProjectDocument(document_({baseImage:base})));
+  for(const patch of [{src:'blob:expired'},{width:0},{height:Infinity},{x:NaN}])assert(!docs.isProjectDocument(document_({baseImage:{...base,...patch}})));
+});

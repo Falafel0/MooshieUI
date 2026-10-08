@@ -7,6 +7,7 @@ import type { InpaintSettings } from "./inpaintSettings.js";
 import { canvasPngBytes } from "./canvasLayerExport.js";
 import { uploadImageBytes } from "./api.js";
 import { effectiveVisibility, hasUsableLayerBindings, modifierAppliesToMask, validateLayerRelations, type LayerGroup } from "./layerRelations.js";
+import { copyInpaintLayerSnapshot } from './inpaintLayerSnapshot.js';
 
 export type InpaintConditioningRegion = RegionalPromptSelection & {
   negativeText?: string;
@@ -20,12 +21,12 @@ export interface InpaintLayerSnapshot {
   groups: LayerGroup[];
 }
 
-/** Rune proxies cannot be structuredClone'd; JSON copies keep submission state independent. */
+/** Retain independent submission metadata without serializing image payloads. */
 export function captureInpaintLayerSnapshot(
   layers: readonly CanvasLayer[] = canvas.sortedLayers ?? canvas.layers,
   groups: readonly LayerGroup[] = canvas.groups ?? [],
 ): InpaintLayerSnapshot {
-  return JSON.parse(JSON.stringify({ layers, groups })) as InpaintLayerSnapshot;
+  return copyInpaintLayerSnapshot(layers, groups);
 }
 
 /** Reject active broken connections before an upload or generation can broaden their scope. */

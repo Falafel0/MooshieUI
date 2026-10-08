@@ -1,18 +1,36 @@
 import type Konva from "konva";
 
 /** Export document pixels without viewport transforms or preview-only visibility. */
-export function captureLayer(layer: Konva.Layer, width: number, height: number, options: { includeClipping?: boolean } = {}): HTMLCanvasElement {
+export function captureLayer(layer: Konva.Layer, width: number, height: number, options: { includeClipping?: boolean; x?: number; y?: number } = {}): HTMLCanvasElement {
   const saved = { x: layer.x(), y: layer.y(), scaleX: layer.scaleX(), scaleY: layer.scaleY(), visible: layer.visible(), opacity: layer.opacity() };
   const clip = options.includeClipping === false ? layer.findOne('.raster-clip-mask') : undefined;
   const clipVisible = clip?.visible();
   try {
     clip?.visible(false);
     layer.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, visible: true, opacity: 1 });
-    return layer.toCanvas({ pixelRatio: 1, width, height });
+    return layer.toCanvas({ pixelRatio: 1, width, height, x: options.x ?? 0, y: options.y ?? 0 });
   } finally {
     if (clip && clipVisible !== undefined) clip.visible(clipVisible);
     layer.setAttrs(saved);
   }
+}
+
+/** Project saves retain spatial pixels outside a cropped document, so enlarging
+ * the bounds after reopening reveals them again. Generation exports stay clipped. */
+export function captureUnclippedSpatialLayer(layer: Konva.Layer, width: number, height: number, options: { includeClipping?: boolean } = {}) {
+  const bounds = layer.getClientRect({ skipTransform: true, skipShadow: true });
+  const x = Math.floor(Math.min(0, bounds.x)), y = Math.floor(Math.min(0, bounds.y));
+  const right = Math.ceil(Math.max(width, bounds.x + bounds.width));
+  const bottom = Math.ceil(Math.max(height, bounds.y + bounds.height));
+  const placement = { x, y, width: right - x, height: bottom - y };
+  if (placement.width > 16384 || placement.height > 16384) throw new Error('Spatial layer extent exceeds the project pixel limit');
+  const clip = { x: layer.clipX(), y: layer.clipY(), width: layer.clipWidth(), height: layer.clipHeight() };
+  try {
+    // Konva treats zero-sized clip dimensions as an empty clipping rectangle,
+    // rather than disabling clipping. Extend it to the complete saved extent.
+    layer.clip(placement);
+    return { placement, pixels: captureLayer(layer, placement.width, placement.height, { ...options, x, y }) };
+  } finally { layer.clip(clip); }
 }
 
 /** Convert the mask layer's alpha coverage into a grayscale generation mask. */
@@ -32,6 +50,17 @@ export function maskToGrayscale(source: HTMLCanvasElement): HTMLCanvasElement | 
   if (!hasPixels) return null;
   ctx.putImageData(pixels, 0, 0);
   return output;
+}
+
+/** Durable mask assets encode coverage in alpha. Their RGB must be white so
+ * the image importer cannot interpret a presentation tint as extra coverage. */
+export function maskAlphaToWhite(pixels: Uint8ClampedArray): boolean {
+  let hasPixels = false;
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] > 0) hasPixels = true;
+    pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
+  }
+  return hasPixels;
 }
 
 /** An external editor can export a black-on-white mask without transparency.

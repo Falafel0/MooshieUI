@@ -3,6 +3,7 @@
   import { isTypingTarget } from "../../utils/keyboardTarget.js";
   import { canvasHistory } from "../../stores/canvasHistory.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { progress } from '../../stores/progress.svelte.js';
   import BrushSettings from "./controls/BrushSettings.svelte";
   import ColorPicker from "./controls/ColorPicker.svelte";
   import { Undo2, Redo2 } from "@lucide/svelte";
@@ -34,7 +35,8 @@
   })) : [
     { label: locale.t('canvas.fill_layer'), action: () => canvas.fillActiveLayer(), disabled: !editable },
     { label: locale.t('canvas.clear_pixels'), action: () => { if (canvas.activeLayerId) canvas.clearLayer(canvas.activeLayerId); }, disabled: !editable, destructive: true },
-    { label: `${locale.t('canvas.resize_document')} (C)`, action: () => canvas.setTool('canvasResize'), separator: true },
+    { label: `${locale.t('canvas.resize_document')} (C)`, action: () => canvas.resizeDialogOpen = true, disabled: progress.isGenerating, separator: true },
+    { label: locale.t('canvas.resize_document_on_canvas'), action: () => canvas.setTool('canvasResize'), disabled: progress.isGenerating },
   ]);
   function openMenu(event: MouseEvent, kind: 'shapes' | 'actions') {
     if (menu === kind) { menu = null; return; }
@@ -53,6 +55,7 @@
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.defaultPrevented) return;
+    if (canvas.resizeDialogOpen) return;
     if (!canvas.isPointerOverStage) return;
 
     // Don't trigger if typing in a field — including a rich-text editor.
@@ -95,7 +98,7 @@
       case "q": canvas.setTool("lasso"); break;
       case "i": if (canvas.canPickColor) canvas.setTool("eyedropper"); break;
       case "v": canvas.setTool("move"); break;
-      case "c": canvas.setTool("canvasResize"); break;
+      case "c": if (!progress.isGenerating) canvas.resizeDialogOpen = true; break;
       case "h": canvas.setTool("view"); break;
       case "x": canvas.swapColors(); break;
       case "d": canvas.resetColors(); break;

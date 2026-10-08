@@ -11,6 +11,8 @@
   import { onDestroy, onMount } from "svelte";
   import { projects } from "../../stores/projects.svelte.js";
   import { locale } from "../../stores/locale.svelte.js";
+  import { canvas } from '../../stores/canvas.svelte.js';
+  import { progress } from '../../stores/progress.svelte.js';
   import { isTypingTarget } from "../../utils/keyboardTarget.js";
   import { DOCUMENT_MAX_SIZE, DOCUMENT_MIN_SIZE } from "../../utils/projectDocument.js";
   import { ChevronDown, FilePlus2, FolderOpen, Save, SaveAll, X } from "@lucide/svelte";
@@ -117,7 +119,8 @@
     <ChevronDown size={12} class="shrink-0 text-neutral-500" />
   </button>
 
-  <span class="truncate text-neutral-500">{projects.dirty ? locale.t("projects.dirty") : locale.t("projects.saved_state")}</span>
+  <span class="min-w-0 truncate text-neutral-500">{projects.dirty ? locale.t("projects.dirty") : locale.t("projects.saved_state")}</span>
+  <button type="button" aria-label={locale.t('canvas.resize_document')} title={locale.t('canvas.resize_document')} disabled={progress.isGenerating} onclick={() => canvas.resizeDialogOpen = true} class="ui-focus shrink-0 rounded border border-ui-border px-2 py-0.5 tabular-nums text-neutral-300 hover:bg-ui-hover disabled:opacity-40">{canvas.canvasWidth} × {canvas.canvasHeight} <span class="text-neutral-500">px</span></button>
   <span class="ml-auto flex shrink-0 items-center gap-1">
     {#if projects.saving}
       <span class="text-indigo-300">{locale.t("projects.saving")}</span>

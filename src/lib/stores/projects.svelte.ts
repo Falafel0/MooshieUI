@@ -21,9 +21,11 @@ import {
   type ProjectRecord,
 } from "../utils/api.js";
 import {
-  documentSignature,
+  documentChangeSnapshot,
   isProjectDocument,
-  settingsSignature,
+  sameChangeSnapshot,
+  settingsChangeSnapshot,
+  type ProjectChangeSnapshot,
   type ProjectDocument,
 } from "../utils/projectDocument.js";
 import { projectIdFromName } from "../utils/projectId.js";
@@ -59,8 +61,8 @@ class ProjectsStore {
   /** The project row whose action is running, if any. */
   busyId = $state<string | null>(null);
 
-  private savedDocument = "none";
-  private savedSettings = "none";
+  private savedDocument: ProjectChangeSnapshot = null;
+  private savedSettings: ProjectChangeSnapshot = null;
   private poll: ReturnType<typeof setInterval> | null = null;
 
   /** What the bar calls the open document. */
@@ -85,14 +87,14 @@ class ProjectsStore {
   refreshDirty() {
     if (this.saving || this.loading) return;
     this.dirty =
-      documentSignature(canvas.documentShape(), canvas.paintRevision) !== this.savedDocument ||
-      settingsSignature(prefsSync.collectAll()) !== this.savedSettings;
+      !sameChangeSnapshot(this.savedDocument, documentChangeSnapshot(canvas.documentShape(), canvas.paintRevision)) ||
+      !sameChangeSnapshot(this.savedSettings, prefsSync.collectAll());
   }
 
   /** Take the current state as "what the stored project holds". */
   private markSaved() {
-    this.savedDocument = documentSignature(canvas.documentShape(), canvas.paintRevision);
-    this.savedSettings = settingsSignature(prefsSync.collectAll());
+    this.savedDocument = documentChangeSnapshot(canvas.documentShape(), canvas.paintRevision);
+    this.savedSettings = settingsChangeSnapshot(prefsSync.collectAll());
     this.dirty = false;
   }
 

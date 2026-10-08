@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
+  import ShelfMore from "./ShelfMore.svelte";
   import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
   import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
   import BottomPanelIcon from "./BottomPanelIcon.svelte";
@@ -85,7 +87,13 @@
     } catch {}
   }
 
-  const filteredCheckpoints = $derived(() => {
+  let visibleCount = $state(64);
+  $effect(() => { void searchQuery; void sortMode; visibleCount = 64; });
+  function showMore() { visibleCount += 64; }
+  let destroyed = false;
+  onDestroy(() => { destroyed = true; fetchQueue = []; });
+
+  const filteredCheckpoints = $derived.by(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = models.checkpoints;
     if (q) {
@@ -138,7 +146,7 @@
   async function processFetchQueue() {
     if (fetching) return;
     fetching = true;
-    while (fetchQueue.length > 0) {
+    while (!destroyed && fetchQueue.length > 0) {
       const filename = fetchQueue.shift()!;
       await fetchInfo(filename);
     }
@@ -367,12 +375,12 @@
   {:else}
 
 
-  {#if filteredCheckpoints().length === 0}
+  {#if filteredCheckpoints.length === 0}
     <BottomPanelEmpty icon="checkpoints" messageKey="checkpoint.no_results" onreset={searchQuery ? () => { searchQuery = ""; } : undefined} />
   {:else}
     <div class="flex-1 min-h-0 overflow-y-auto px-2 py-1.5">
       <div class="grid gap-2.5" style={bottomPanel.cardLayout === "strip" ? "grid-auto-flow: column; grid-auto-columns: 120px;" : "grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));"}>
-      {#each filteredCheckpoints() as name (name)}
+      {#each filteredCheckpoints.slice(0, visibleCount) as name (name)}
         {@const isActive = name === generation.checkpoint}
         {@const info = civitaiCache[name]?.data}
         {@const isLoading = loading[name]}
@@ -528,6 +536,7 @@
           </div>
         </div>
       {/each}
+      <ShelfMore shown={Math.min(visibleCount, filteredCheckpoints.length)} total={filteredCheckpoints.length} onmore={showMore} />
       </div>
     </div>
   {/if}

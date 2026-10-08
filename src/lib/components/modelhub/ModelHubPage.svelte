@@ -24,6 +24,7 @@
   import { locale } from "../../stores/locale.svelte.js";
   import { showError } from "../../stores/errorModal.svelte.js";
   import { portal } from "../../utils/portal.js";
+  import { sortCivitaiModels } from "../../utils/civitaiSort.js";
 
   const CIVITAI_API_KEY_KEY = "mooshieui.civitai.apiKey.v1";
   const CIVITAI_COLUMNS_KEY = "mooshieui.civitai.columns.v1";
@@ -648,6 +649,8 @@
       ? searchRequestGeneration
       : ++searchRequestGeneration;
 
+    const searchQuery = query.trim();
+    const searchSort = sort;
     if (append) {
       loadingMore = true;
     } else {
@@ -667,11 +670,11 @@
 
     try {
       const response = await searchCivitaiModels({
-        query: query.trim() || undefined,
+        query: searchQuery || undefined,
         type: selectedType || undefined,
         baseModel: selectedArchitecture || undefined,
         fileFormat: selectedFileFormat || undefined,
-        sort,
+        sort: searchSort,
         period,
         nsfw: includeNsfw,
         page: cursorParam ? undefined : (append ? nextPage : page),
@@ -682,13 +685,14 @@
 
       if (requestGeneration !== searchRequestGeneration) return;
 
+      let merged = response.items;
       if (append) {
         const existing = new Set(items.map((item) => item.id));
         const incoming = response.items.filter((item) => !existing.has(item.id));
-        items = [...items, ...incoming];
-      } else {
-        items = response.items;
+        merged = [...items, ...incoming];
       }
+      // CivitAI's text search ignores `sort`, so order those results here.
+      items = searchQuery ? sortCivitaiModels(merged, searchSort) : merged;
 
       if (response.metadata.currentPage) {
         page = response.metadata.currentPage;
@@ -1008,6 +1012,7 @@
   async function openModelFromUrl(modelId: number, versionId: number | null) {
     const requestGeneration = searchRequestGeneration;
     loading = true;
+    loadingMore = false;
     error = null;
     try {
       const model = await getCivitaiModel(modelId, apiKey.trim() || undefined);
@@ -1657,8 +1662,11 @@
 
 {#if dirPickerOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- Portaled and raised above the detail modal (also portaled, z-50), which
+       opens this picker from its install button. -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+    use:portal
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
     onkeydown={(e) => { if (e.key === "Escape") confirmDirPick(null); }}
   >
     <div class="bg-neutral-900 border border-neutral-700 rounded-xl p-5 w-105 max-w-[92vw] space-y-3">

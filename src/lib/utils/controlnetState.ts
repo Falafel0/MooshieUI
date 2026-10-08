@@ -1,4 +1,5 @@
 import type { ControlNetPayload } from "../types/index.js";
+import type { CanvasImagePlacement } from './canvasResize.js';
 export interface ControlNetState {
   controlnetEnabled: boolean;
   controlnetMode: "preset" | "custom";
@@ -46,6 +47,8 @@ export interface ControlnetLayerSettings {
   endPercent: number;
   /** Durable reference pixels travel with the project, unlike a ComfyUI filename. */
   sourceData?: string | null;
+  /** Document-space placement of an imported reference, retained across canvas bounds changes. */
+  sourcePlacement?: CanvasImagePlacement;
 }
 export function newControlnetLayer(): ControlnetLayerSettings {
   return { enabled: true, mode: "custom", preset: null, model: null, preprocessor: null,

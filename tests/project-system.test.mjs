@@ -56,9 +56,9 @@ test('nothing throws a document away without asking about unsaved changes', () =
 
 test('dirty is decided by comparing signatures, not by a flag a caller sets', () => {
   const store = read('src/lib/stores/projects.svelte.ts');
-  assert.match(store, /documentSignature\(canvas\.documentShape\(\), canvas\.paintRevision\)/);
-  assert.match(store, /settingsSignature\(prefsSync\.collectAll\(\)\)/);
-  assert.match(store, /this\.savedDocument = documentSignature/);
+  assert.match(store, /documentChangeSnapshot\(canvas\.documentShape\(\), canvas\.paintRevision\)/);
+  assert.match(store, /sameChangeSnapshot\(this\.savedSettings, prefsSync\.collectAll\(\)\)/);
+  assert.match(store, /this\.savedDocument = documentChangeSnapshot/);
   assert.match(store, /this\.dirty = false/);
   // Painted pixels move the revision; a structural digest alone cannot see them.
   const stage = read('src/lib/components/canvas/CanvasStage.svelte');

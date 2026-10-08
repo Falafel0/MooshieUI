@@ -16,6 +16,7 @@
     getPromptClickableSegments,
     type PromptClickableSegment,
   } from "../../utils/promptClickableRanges.js";
+  import { visiblePromptSegmentRange } from '../../utils/promptOverlayViewport.js';
   import { adjustWeightText, isNonNumericWeightSelection } from "../../utils/promptWeightAdjust.js";
   import {
     getUnknownTagRanges,
@@ -585,12 +586,15 @@
   const highlightedHtml = $derived(
     showBackdrop ? renderHighlightedPrompt(value, promptPresets.slugs, activeLoraWords) : "",
   );
-  const clickableSegments = $derived(
-    tagAssist && autocomplete.clickableOverlayEnabled ? getPromptClickableSegments(value) : [],
+  const parsedSegments = $derived(
+    tagAssist && (autocomplete.clickableOverlayEnabled || autocomplete.spellcheckEnabled) ? getPromptClickableSegments(value) : [],
   );
+  const clickableSegments = $derived(autocomplete.clickableOverlayEnabled ? parsedSegments.filter(segment => segment.clickable) : []);
   const showClickableOverlay = $derived(
     tagAssist && autocomplete.clickableOverlayEnabled && clickableSegments.length > 0,
   );
+  const showMeasurementMirror = $derived(tagAssist && parsedSegments.length > 0);
+  let visibleTextStart = $state(0), visibleTextEnd = $state(0);
 
   /** One painted box. Coordinates are relative to the mirror's border box, unscrolled. */
   interface HighlightRect {
@@ -610,14 +614,14 @@
   const spellcheckCaret = $derived(selectionStart === selectionEnd ? selectionStart : -1);
   const spellcheckRanges = $derived(
     tagAssist && autocomplete.spellcheckEnabled
-      ? getUnknownTagRanges(value, (n) => autocomplete.isKnownTag(n), spellcheckCaret)
+      ? getUnknownTagRanges(value, (n) => autocomplete.isKnownTag(n), spellcheckCaret, parsedSegments)
       : [],
   );
   const showSpellcheckOverlay = $derived(
     tagAssist && autocomplete.spellcheckEnabled && spellcheckRanges.length > 0,
   );
   const spellcheckPieces = $derived(
-    showSpellcheckOverlay ? buildSpellcheckPieces(value.length, spellcheckRanges) : [],
+    showSpellcheckOverlay ? buildSpellcheckPieces(value.length, spellcheckRanges.filter(range => range.end >= visibleTextStart && range.start <= visibleTextEnd)) : [],
   );
 
   // Dismiss the right-click suggestion menu on any prompt edit: its items close over
@@ -661,14 +665,26 @@
     const dy = clickMirrorEl.scrollTop - origin.top;
     const range = document.createRange();
     const groups: HighlightGroup[] = [];
-    for (const segment of clickableSegments) {
+    const visibleTop = origin.top + overlayScrollTop - 20;
+    const visibleBottom = visibleTop + (textareaEl?.clientHeight ?? clickMirrorEl.clientHeight) + 40;
+    const candidates = parsedSegments.filter(segment => segment.clickable && segment.end <= node.length);
+    const viewport = visiblePromptSegmentRange(candidates, visibleTop, visibleBottom, (segment, side) => {
+      const offset = side === 'start' ? segment.start : segment.end - 1;
+      range.setStart(node, offset); range.setEnd(node, offset + 1);
+      const box = range.getBoundingClientRect();
+      return side === 'start' ? box.top : box.bottom;
+    });
+    visibleTextStart = candidates[viewport.start]?.start ?? node.length;
+    visibleTextEnd = candidates[viewport.end - 1]?.end ?? visibleTextStart;
+    for (let index = viewport.start; autocomplete.clickableOverlayEnabled && index < viewport.end; index++) {
+      const segment = candidates[index];
       // The mirror can still hold the previous value for a frame after an edit.
       if (!segment.clickable || segment.end > node.length) continue;
       range.setStart(node, segment.start);
       range.setEnd(node, segment.end);
       const rects: HighlightRect[] = [];
       for (const box of range.getClientRects()) {
-        if (box.width <= 0 || box.height <= 0) continue;
+        if (box.width <= 0 || box.height <= 0 || box.bottom < visibleTop || box.top > visibleBottom) continue;
         rects.push({
           left: box.left + dx,
           top: box.top + dy,
@@ -679,6 +695,16 @@
       if (rects.length > 0) groups.push({ segment, rects });
     }
     highlightGroups = groups;
+  }
+
+  let highlightFrame: number | null = null;
+  function scheduleHighlightMeasurement() {
+    if (highlightFrame !== null) return;
+    highlightFrame = requestAnimationFrame(() => {
+      highlightFrame = null;
+      updateScrollbarWidth();
+      measureHighlights();
+    });
   }
 
   function handleClickableSegmentMouseDown(event: MouseEvent, segment: PromptClickableSegment) {
@@ -833,8 +859,10 @@
       spellcheckOverlayEl.scrollLeft = textareaEl.scrollLeft;
     }
     // The highlight boxes hold unscrolled coordinates, so the layer translates instead.
+    const changed = overlayScrollTop !== textareaEl.scrollTop || overlayScrollLeft !== textareaEl.scrollLeft;
     overlayScrollTop = textareaEl.scrollTop;
     overlayScrollLeft = textareaEl.scrollLeft;
+    if (changed) scheduleHighlightMeasurement();
   }
 
   // Restore saved height and persist future resize changes via ResizeObserver.
@@ -863,7 +891,7 @@
         }
       }
       updateScrollbarWidth();
-      measureHighlights();
+      scheduleHighlightMeasurement();
     });
     resizeObserver.observe(textareaEl);
   });
@@ -874,12 +902,9 @@
   $effect(() => {
     void value;
     void clickableSegments;
+    void parsedSegments;
     void clickMirrorEl;
-    requestAnimationFrame(() => {
-      updateScrollbarWidth();
-      syncScroll();
-      measureHighlights();
-    });
+    untrack(() => { syncScroll(); scheduleHighlightMeasurement(); });
   });
 
   // Text metrics also change when the webfont swaps in and when the UI font scale is
@@ -888,9 +913,9 @@
   $effect(() => {
     let cancelled = false;
     void document.fonts?.ready.then(() => {
-      if (!cancelled) measureHighlights();
+      if (!cancelled) scheduleHighlightMeasurement();
     });
-    const rootObserver = new MutationObserver(() => measureHighlights());
+    const rootObserver = new MutationObserver(scheduleHighlightMeasurement);
     rootObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["style"],
@@ -907,6 +932,7 @@
       suggestionTimer = null;
     }
     resizeObserver?.disconnect();
+    if (highlightFrame !== null) cancelAnimationFrame(highlightFrame);
   });
 
   /** Teleport overlays to body so fixed positioning escapes panel overflow/transform containers. */
@@ -1069,7 +1095,7 @@
       oncontextmenu={handleTextareaContextMenu}
     ></textarea>
 
-    {#if showClickableOverlay}
+    {#if showMeasurementMirror}
       <!--
         Measurement mirror. One unbroken text node, so it cannot pick different line
         breaks than the textarea (per-segment spans could, and did). Nothing is drawn
@@ -1083,7 +1109,7 @@
         style="pointer-events: none; color: transparent; z-index: 2; {gutterStyle}"
       >{value}</div>
 
-      <div
+      {#if showClickableOverlay}<div
         aria-hidden="true"
         class="absolute inset-0 overflow-hidden rounded-lg"
         style="pointer-events: none; z-index: 2;"
@@ -1115,7 +1141,7 @@
             </div>
           {/each}
         </div>
-      </div>
+      </div>{/if}
     {/if}
 
     {#if showSpellcheckOverlay}

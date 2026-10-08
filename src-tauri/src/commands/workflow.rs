@@ -25,6 +25,7 @@ pub async fn generate(
     state: State<'_, Arc<AppState>>,
     params: GenerationParams,
 ) -> Result<GenerateResponse, AppError> {
+    let mut timing = crate::generation_timing::GenerationTiming::new("desktop", &params.mode);
     // Clean up temp images from previous generations (> 5 min old).
     // temp_images::init() already wipes the dir on startup; this handles
     // accumulation within a long session.
@@ -45,11 +46,11 @@ pub async fn generate(
     templates::validate_generation_params(&params).map_err(AppError::InvalidWorkflow)?;
     // A remote ComfyUI lists and loads its own model files, so the local
     // install is only consulted when the app launched the server itself.
-    let models_are_local = {
-        let config = state.config.read().await;
-        crate::commands::api::validate_generation_loras(&config, &params.loras)?;
-        crate::commands::api::generation_models_are_local(&config)
-    };
+    timing.stage("lora_validation");
+    let models_are_local =
+        crate::commands::api::validate_generation_loras_async(state.inner(), &params.loras).await?;
+
+    timing.stage("node_schema");
 
     // The MiniMax H3 nodes are verified here rather than at startup: they are
     // video-only and need ComfyUI >= 0.30, so an older or external server can be
@@ -94,6 +95,7 @@ pub async fn generate(
         .model_source_category
         .clone()
         .filter(|_| models_are_local);
+    timing.stage("model_path");
     if let Some(source_category) = local_source_category {
         let active_model = if params.use_split_model {
             params.diffusion_model.clone()
@@ -101,24 +103,30 @@ pub async fn generate(
             Some(params.checkpoint.clone())
         };
         if let Some(filename) = active_model.filter(|f| !f.is_empty()) {
-            let resolved = {
+            let (comfyui_path, extra_model_paths) = {
                 let config = state.config.read().await;
+                (
+                    config.comfyui_path.clone(),
+                    config.extra_model_paths.clone(),
+                )
+            };
+            let missing_model = format!("Model file not found: {}/{}", source_category, filename);
+            let resolved = tokio::task::spawn_blocking(move || {
                 crate::commands::api::resolve_model_path(
-                    &config.comfyui_path,
-                    config.extra_model_paths.as_deref(),
+                    &comfyui_path,
+                    extra_model_paths.as_deref(),
                     &source_category,
                     &filename,
                 )
-            };
+            })
+            .await
+            .map_err(|error| AppError::Other(format!("Model lookup task failed: {error}")))?;
             match resolved {
                 Some(path) => {
                     params.resolved_model_path = Some(path.to_string_lossy().to_string());
                 }
                 None => {
-                    return Err(AppError::InvalidWorkflow(format!(
-                        "Model file not found: {}/{}",
-                        source_category, filename
-                    )));
+                    return Err(AppError::InvalidWorkflow(missing_model));
                 }
             }
         }
@@ -134,6 +142,7 @@ pub async fn generate(
     // `ensure_mooshie_nodes()`, so its node file can predate `metadata_json`, and
     // setting an input a node does not declare fails prompt validation. This
     // mirrors the H3 Director check above, which is the same shape of problem.
+    timing.stage("video_metadata_schema");
     let video_metadata_supported = if params.mode == "video" {
         let base_url = state.base_url().await;
         crate::comfyui::nodes::node_declares_input(
@@ -147,6 +156,7 @@ pub async fn generate(
         false
     };
 
+    timing.stage("workflow_build");
     let workflow = templates::build_workflow(&params, seed, video_metadata_supported);
     crate::comfyui::process::mark_legacy_worker_idle(state.inner()).await;
     log::info!(
@@ -173,16 +183,19 @@ pub async fn generate(
 
     // Release the prompt-assistant LLM's VRAM so it doesn't starve ComfyUI's
     // diffusion model (which would otherwise spill into shared system memory).
+    timing.stage("release_assistant_vram");
     state.free_llm_vram_for_generation().await;
 
     // Route through GPU manager for multi-GPU distribution. A resumed run
     // prefers the worker whose execution cache holds the paused latent.
     let timeout = std::time::Duration::from_secs(300);
     let preferred_worker = params.resume_stages.last().and_then(|s| s.worker_id);
+    timing.stage("comfyui_submission");
     let (worker_id, response) = state
         .gpu_manager
         .submit_prompt_preferring(preferred_worker, workflow, &state.client_id, timeout)
         .await?;
+    timing.finish();
 
     // Track the Tauri (host) prompt in the shared queue so LAN users see
     // an accurate queue position.  None = admin / host user.

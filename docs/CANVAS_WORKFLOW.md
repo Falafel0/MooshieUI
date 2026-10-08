@@ -21,6 +21,8 @@ submitted image. The renderer is Konva over Canvas 2D, not a GPU inference engin
   document. To place, scale or rotate its source precisely, link a raster and
   transform that raster. The guide itself is not a paintable raster layer.
 
+The project dimensions open Resize canvas. Cropping hides content outside the document; enlarging the bounds reveals it again, including mask pixels saved in a named project. Canvas background fills new space. ControlNet references with only a session filename must be re-imported before changing bounds.
+
 ## Tools
 
 | Tool/action | Behavior |
@@ -33,7 +35,7 @@ submitted image. The renderer is Konva over Canvas 2D, not a GPU inference engin
 | Pipette (I) | Sample the visible image color for raster painting. |
 | Fill layer | Fill the active layer; one undo action. |
 | Clear pixels | Empty the layer while retaining its identity and relationships. |
-| Resize document (C) | Change document dimensions and scale raster placement and painted layer content together. This is not canvas extension with empty margins. |
+| Resize canvas (C) | Open document dimensions. **Canvas bounds** pads or crops without scaling the artwork, using a nine-position anchor. **Scale document** resizes the base, raster placement, masks, regions and ControlNet sources together; the aspect lock is optional. Both operations use one undo step. |
 | Undo/redo | Restore gesture-level edits; metadata links and pixel snapshots retain their respective state. |
 | Ctrl+click | Select a visible layer by its actual on-canvas pixels. |
 

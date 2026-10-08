@@ -99,6 +99,9 @@ jobs:
       - name: Inpainting lifecycle and mask regression checks
         run: node --test tests/patchy-return-script.test.mjs tests/live-preview-source.test.mjs tests/generation-submit.test.mjs tests/inpaint-result-registry.test.mjs tests/inpainting-chain.test.mjs tests/mask-processing.test.mjs tests/inpaint-compare-pair.test.mjs tests/patchy-mask-import.test.mjs tests/patchy-ux-copy.test.mjs tests/patchy-handoff-effect.test.mjs tests/tauri-wrapper.test.mjs tests/projects-ui.test.mjs tests/regional-mode-separation.test.mjs tests/layer-visualization.test.mjs tests/canvas-transform.test.mjs tests/canvas-render-hotpaths.test.mjs tests/thumbnail-caching.test.mjs tests/denoising.test.mjs tests/inpaint-settings.test.mjs tests/canvas-history-relations.test.mjs tests/layer-relations.test.mjs tests/layer-alpha.test.mjs tests/prepare-controlnet-layers.test.mjs tests/project-guard-reach.test.mjs tests/project-document.test.mjs tests/project-system.test.mjs
 
+      - name: Generation preparation and responsive document regressions
+        run: node --test tests/generation-preparation.test.mjs tests/inpaint-layer-snapshot.test.mjs tests/canvas-resize.test.mjs tests/prompt-overlay-viewport.test.mjs tests/value-revision.test.mjs tests/canvas-mask-export.test.mjs
+
       - name: Compute changed files
         run: |
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt

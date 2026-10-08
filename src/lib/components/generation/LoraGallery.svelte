@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
+  import ShelfMore from "./ShelfMore.svelte";
   import { bottomPanel } from "../../stores/bottomPanel.svelte.js";
   import BottomPanelCardLayout from "./BottomPanelCardLayout.svelte";
   import BottomPanelIcon from "./BottomPanelIcon.svelte";
@@ -125,7 +127,13 @@
   });
 
   // All available LoRAs, filtered by search
-  const filteredLoras = $derived(() => {
+  let visibleCount = $state(64);
+  $effect(() => { void searchQuery; void sortMode; visibleCount = 64; });
+  function showMore() { visibleCount += 64; }
+  let destroyed = false;
+  onDestroy(() => { destroyed = true; fetchQueue = []; });
+
+  const filteredLoras = $derived.by(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = models.loras;
     if (q) {
@@ -151,7 +159,7 @@
   // Folder tree for the "tree" sort mode, built from the already-filtered and
   // enabled-first list so grouping and ordering stay consistent with the grid.
   const loraTree = $derived(
-    sortMode === "tree" ? buildFilenameTree(filteredLoras()) : null,
+    sortMode === "tree" ? buildFilenameTree(filteredLoras) : null,
   );
 
   function toggleFolder(path: string) {
@@ -275,7 +283,7 @@
   async function processFetchQueue() {
     if (fetching) return;
     fetching = true;
-    while (fetchQueue.length > 0) {
+    while (!destroyed && fetchQueue.length > 0) {
       const filename = fetchQueue.shift()!;
       await fetchLoraInfo(filename);
     }
@@ -758,7 +766,7 @@
 
   {#if models.loras.length === 0}
     <BottomPanelEmpty icon="loras" messageKey="lora.no_loras" />
-  {:else if filteredLoras().length === 0}
+  {:else if filteredLoras.length === 0}
     <BottomPanelEmpty icon="loras" messageKey="lora.no_results" params={{ query: searchQuery }} onreset={() => { searchQuery = ""; }} />
   {:else}
     {#snippet loraCard(loraName: string)}
@@ -1005,9 +1013,10 @@
         </div>
       {:else}
         <div class="grid gap-2.5" style={bottomPanel.cardLayout === "strip" ? `grid-auto-flow: column; grid-auto-columns: ${cardSize}px;` : `grid-template-columns: repeat(auto-fill, minmax(${cardSize}px, 1fr));`}>
-          {#each filteredLoras() as loraName (loraName)}
+          {#each filteredLoras.slice(0, visibleCount) as loraName (loraName)}
             {@render loraCard(loraName)}
           {/each}
+          <ShelfMore shown={Math.min(visibleCount, filteredLoras.length)} total={filteredLoras.length} onmore={showMore} />
         </div>
       {/if}
     </div>

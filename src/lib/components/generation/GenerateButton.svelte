@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { generationModelContextKey } from "../../utils/controlnetState.js";
   import { effectiveLayerVisibility } from "../../utils/layerRelations.js";
   import { generation } from "../../stores/generation.svelte.js";
@@ -24,6 +25,8 @@
   import type { GenerationParams, RegionalPromptSelection } from "../../types/index.js";
   import { runRegionalInpaintChain } from "../../utils/regionalInpaintChain.js";
   import { prepareControlnetLayers } from "../../utils/prepareControlnetLayers.js";
+  import { sameInpaintPreparationSnapshot } from "../../utils/inpaintLayerSnapshot.js";
+  import { createGenerationPreparation, GenerationPreparationCancelled, onceWithinGenerationRun, type GenerationPreparationPhase } from "../../utils/generationPreparation.js";
   import { getRegionalChainRegions, prepareConditioningRegions, captureInpaintLayerSnapshot, assertInpaintLayerRelations, type InpaintConditioningRegion } from "../../utils/inpaintingRegions.js";
   import {
     suppressRegionalChainGallerySave,
@@ -44,6 +47,7 @@
   let { canvasEditorRef }: Props = $props();
   let errorMsg = $state<string | null>(null);
   let isSubmitting = $state(false);
+  let preparationPhase = $state<GenerationPreparationPhase | null>(null);
   let orderedRunPromptIds = $state<string[]>([]);
   let orderedRunCancelRequested = $state(false);
   let regionalChainCancelRequested = $state(false);
@@ -68,11 +72,16 @@
     return locale.t("generation.generate_tip");
   });
 
-  async function ensureFacefixPythonDependency() {
+  async function ensureFacefixPythonDependency(assertActive: () => void) {
+    assertActive();
     if (isBrowserMode) return;
-    if (await checkPythonImport("ultralytics")) return;
+    const installed = await checkPythonImport("ultralytics");
+    assertActive();
+    if (installed) return;
     await installPipPackage("ultralytics==8.4.34");
+    assertActive();
     const importOk = await checkPythonImport("ultralytics");
+    assertActive();
     if (!importOk) {
       throw new Error(locale.t("generation.facefix.dep_check_failed"));
     }
@@ -86,20 +95,24 @@
   };
 
   /** Download a YOLO detector into models/ultralytics if missing, then ensure the python dep. */
-  async function ensureUltralyticsDetector(detector: string, toastKey: string): Promise<void> {
+  async function ensureUltralyticsDetector(detector: string, toastKey: string, ensurePython: () => Promise<void>, assertActive: () => void): Promise<void> {
+    assertActive();
     if (!models.ultralyticsModels.includes(detector)) {
       gallery.showToast(locale.t(toastKey), "info");
       const meta = DETECTOR_META[detector];
       const url = meta?.url ?? `https://huggingface.co/Bingsu/adetailer/resolve/main/${detector}`;
       await downloadModel(url, "ultralytics", detector, undefined, meta?.sha256);
+      assertActive();
       await models.refresh();
+      assertActive();
     }
-    await ensureFacefixPythonDependency();
+    await ensurePython();
   }
 
   function finishSubmitRun(runToken: number) {
     if (runToken === submitRunToken) {
       isSubmitting = false;
+      preparationPhase = null;
       progress.setRegionalChainStatus(null);
     }
   }
@@ -128,12 +141,6 @@
     return generation.supportsSequentialEditMasks && getRegionalChainRegions().length > 0;
   }
 
-  function isSequentialGenerateRun(): boolean {
-    if (compare.active && compare.cellCount > 1) return true;
-    if (orderedWildcardRunCount > 1) return true;
-    return usesSequentialEditMasks();
-  }
-
   async function handleEditPausedImage() {
     errorMsg = null;
     try {
@@ -151,55 +158,72 @@
     const initialMode = generation.mode;
     const initialModelContext = generationModelContextKey(generation);
     const initialSourceVersion = canvas.inpaintSourceVersion;
+    const initialCanvasMode = canvas.isCanvasMode;
     // Keyboard shortcuts reach this handler even when the button is disabled.
     if (generation.mode === "video" && !generation.canGenerate) return;
 
-    const sequential = isSequentialGenerateRun();
-    if (sequential && isSubmitting) return;
+    // Queueing another job is available as soon as this request is accepted,
+    // but clicks/shortcuts during preparation must not duplicate downloads or submissions.
+    if (isSubmitting) return;
     const runToken = ++submitRunToken;
-    if (sequential) isSubmitting = true;
+    isSubmitting = true;
     errorMsg = null;
-
-    if (generation.mode !== "video" && !generation.checkpoint) {
-      errorMsg = locale.t('generation.error_no_checkpoint');
-      if (sequential) finishSubmitRun(runToken);
-      return;
-    }
-
-    // Check style transfer only when it will actually be sent: an armed or
-    // paused run clears it in toParams(), except the regional inpaint chain,
-    // which builds its params outside the paused run and keeps it on the base
-    // pass (a paused run is continued instead, so the chain never runs then).
-    const styleTransferWillRun =
-      generation.styleTransferEnabled &&
-      (!generation.pauseResumeActive || (!generation.isPaused && usesSequentialEditMasks()));
-    if (styleTransferWillRun) {
-      if (!generation.styleReferenceImage?.trim()) {
-        errorMsg = locale.t("generation.style_transfer.no_reference");
-        gallery.showToast(locale.t("generation.style_transfer.no_reference"), "error");
-        if (sequential) finishSubmitRun(runToken);
-        return;
-      }
-      const nodesReady = await checkStyleTransferNodesReady();
-      if (!nodesReady) {
-        errorMsg = locale.t("generation.style_transfer.nodes_missing_generate");
-        gallery.showToast(locale.t("generation.style_transfer.nodes_missing_generate"), "error");
-        if (sequential) finishSubmitRun(runToken);
-        return;
-      }
-    }
+    const preparation = createGenerationPreparation(
+      () => initialCancellationEpoch !== cancellationEpoch,
+      phase => { if (runToken === submitRunToken) preparationPhase = phase; },
+    );
+    const ensurePython = onceWithinGenerationRun(() => ensureFacefixPythonDependency(preparation.assertActive));
+    const submitPrepared = async (params: GenerationParams, options?: Parameters<typeof submitGeneration>[1]) => {
+      const promptId = await preparation.wait("submitting", () => submitGeneration(params, {
+        ...options,
+        isCancelled: () => initialCancellationEpoch !== cancellationEpoch || (options?.isCancelled?.() ?? false),
+      }));
+      preparation.phase(null);
+      return promptId;
+    };
 
     try {
+      preparation.phase("inputs");
+      // Commit the busy label before starting synchronous canvas/prompt work.
+      await tick();
+      preparation.assertActive();
+      if (generation.mode !== "video" && !generation.checkpoint) {
+        errorMsg = locale.t('generation.error_no_checkpoint');
+        return;
+      }
+
+      // Check style transfer only when it will actually be sent: an armed or
+      // paused run clears it in toParams(), except the regional inpaint chain,
+      // which builds its params outside the paused run and keeps it on the base
+      // pass (a paused run is continued instead, so the chain never runs then).
+      const styleTransferWillRun =
+        generation.styleTransferEnabled &&
+        (!generation.pauseResumeActive || (!generation.isPaused && usesSequentialEditMasks()));
+      if (styleTransferWillRun) {
+        if (!generation.styleReferenceImage?.trim()) {
+          errorMsg = locale.t("generation.style_transfer.no_reference");
+          gallery.showToast(locale.t("generation.style_transfer.no_reference"), "error");
+          return;
+        }
+        const nodesReady = await preparation.wait("style_nodes", checkStyleTransferNodesReady);
+        if (!nodesReady) {
+          errorMsg = locale.t("generation.style_transfer.nodes_missing_generate");
+          gallery.showToast(locale.t("generation.style_transfer.nodes_missing_generate"), "error");
+          return;
+        }
+      }
+
+      preparation.phase("inputs");
       let inpaintConditioningRegions: InpaintConditioningRegion[] = [];
-      const layerSnapshot = captureInpaintLayerSnapshot();
+      if (canvas.isCanvasMode !== initialCanvasMode) throw new Error(locale.t('generation.controlnet.reference_changed'));
+      const preparationCanvasMode = initialCanvasMode;
+      const layerSnapshot = preparationCanvasMode ? captureInpaintLayerSnapshot() : { layers: [], groups: [] };
       const preparationPaintRevision = canvas.paintRevision;
-      const stableDocument = () => JSON.stringify(captureInpaintLayerSnapshot(), (key, value) =>
-        key === 'controlnetPreviewUrl' || key === 'collapsed' || key === 'image' && value && typeof value === 'string' ? undefined : value);
-      const initialDocument = stableDocument();
       const assertDocumentUnchanged = () => {
         if (generationModelContextKey(generation) !== initialModelContext)
           throw new Error(locale.t('generation.preparation_changed'));
-        if (canvas.paintRevision !== preparationPaintRevision || stableDocument() !== initialDocument)
+        if (canvas.isCanvasMode !== preparationCanvasMode || (preparationCanvasMode &&
+            (canvas.paintRevision !== preparationPaintRevision || !sameInpaintPreparationSnapshot(layerSnapshot, canvas.sortedLayers ?? canvas.layers, canvas.groups))))
           throw new Error(locale.t('generation.controlnet.reference_changed'));
       };
       // Continuing a paused run: the remaining steps sample from the paused
@@ -208,7 +232,7 @@
       // apply here.
       if (generation.resumeAppliesToMode && generation.isPaused && generation.mode === "txt2img") {
         generation.saveCurrentPromptToHistory();
-        await submitGeneration(generation.toParams());
+        await submitPrepared(generation.toParams());
         generation.saveSettings();
         return;
       }
@@ -221,21 +245,21 @@
         if (!canvasEditorRef) {
           throw new Error(locale.t("canvas.editor_not_ready"));
         }
-        await canvas.syncToGeneration(
+        await preparation.wait("inputs", () => canvas.syncToGeneration(
           () => canvasEditorRef.getRasterComposite(),
           () => canvasEditorRef.getMaskCanvas()
-        );
+        ));
         if (!generation.maskImage) {
           errorMsg = locale.t("generation.pause.edit_needs_mask");
           return;
         }
-        const editImage = await uploadPausedEditImage(canvasEditorRef.getRasterComposite());
+        const editImage = await preparation.wait("inputs", () => uploadPausedEditImage(canvasEditorRef.getRasterComposite()));
         if (!editImage) {
           errorMsg = locale.t("generation.error_no_image");
           return;
         }
         generation.saveCurrentPromptToHistory();
-        await submitGeneration(
+        await submitPrepared(
           generation.toParams({
             overrides: {
               mode: "txt2img",
@@ -254,7 +278,7 @@
 
       // If compare grid has multiple cells, generate all cells
       if (compare.active && compare.cellCount > 1) {
-        await handleGridGenerate();
+        await handleGridGenerate(preparation);
         return;
       }
 
@@ -266,21 +290,21 @@
         throw new Error(locale.t("canvas.regions_supported"));
       }
       if (generation.mode === 'inpainting' && canvas.isCanvasMode && !generation.isNovelAi) assertInpaintLayerRelations(layerSnapshot);
-      if (generation.mode === "inpainting" && !generation.isNovelAi) await prepareControlnetLayers();
+      if (generation.mode === "inpainting" && !generation.isNovelAi) await preparation.wait("inputs", prepareControlnetLayers);
       // If canvas mode is active, export canvas content before generating
       if (canvas.isCanvasMode) {
         if (!canvasEditorRef) {
           throw new Error(locale.t("canvas.editor_not_ready"));
         }
-        await canvas.syncToGeneration(
+        await preparation.wait("inputs", () => canvas.syncToGeneration(
           () => canvasEditorRef.getRasterComposite(),
           () => canvasEditorRef.getMaskCanvas()
-        );
+        ));
         if (generation.supportsRegionalConditioning && canvas.isCanvasMode) {
           // Painted regions condition this run the same way they condition an
           // inpaint pass; in text-to-image they join the regions written in the
           // prompt bar instead of replacing them.
-          const paintedRegions = await prepareConditioningRegions(layerSnapshot);
+          const paintedRegions = await preparation.wait("inputs", () => prepareConditioningRegions(layerSnapshot));
           inpaintConditioningRegions = generation.mode === "inpainting"
             ? paintedRegions
             : [...paintedRegions, ...generation.regionalPrompts];
@@ -308,7 +332,7 @@
       // Ensure face fix dependencies are ready when enabled
       if (generation.facefixEnabled) {
         const detector = generation.facefixDetector || "Anzhc Face seg 640 v4 y11n.pt";
-        await ensureUltralyticsDetector(detector, "generation.downloading_facefix");
+        await preparation.wait("dependencies", () => ensureUltralyticsDetector(detector, "generation.downloading_facefix", ensurePython, preparation.assertActive));
         generation.facefixDetector = detector;
       }
 
@@ -323,8 +347,9 @@
       );
       for (const detector of segmentDetectors) {
         try {
-          await ensureUltralyticsDetector(detector, "generation.segment.downloading_detector");
+          await preparation.wait("dependencies", () => ensureUltralyticsDetector(detector, "generation.segment.downloading_detector", ensurePython, preparation.assertActive));
         } catch (e) {
+          if (e instanceof GenerationPreparationCancelled) throw e;
           console.warn("[segment] detector unavailable:", detector, e);
           gallery.showToast(
             locale.t("generation.segment.detector_unavailable", { name: detector }),
@@ -332,6 +357,7 @@
           );
         }
       }
+      preparation.phase("inputs");
 
       // Anima models produce poor results below 1024 — clamp to 1024² area preserving aspect ratio
       if (generation.mode === "txt2img" && generation.isAnima && (generation.width < 1024 || generation.height < 1024)) {
@@ -342,7 +368,7 @@
       }
 
       if (orderedWildcardRunCount > 1) {
-        await handleOrderedWildcardGenerate(orderedWildcardRunCount);
+        await handleOrderedWildcardGenerate(orderedWildcardRunCount, preparation);
         return;
       }
 
@@ -350,6 +376,7 @@
       if (generationModelContextKey(generation) !== initialModelContext) throw new Error(locale.t('generation.preparation_changed'));
       if (initialCancellationEpoch !== cancellationEpoch || generation.mode !== initialMode ||
           (initialMode === 'inpainting' && canvas.inpaintSourceVersion !== initialSourceVersion)) return;
+      if (canvas.isCanvasMode !== preparationCanvasMode) return;
       if (generation.mode === 'inpainting' && canvas.isCanvasMode && !generation.isNovelAi) assertDocumentUnchanged();
       // Preparation only changes server upload names; all durable inputs/scopes remain frozen.
       for (const layer of layerSnapshot.layers) {
@@ -404,11 +431,14 @@
             conditioningRegions: inpaintConditioningRegions,
             layerSnapshot,
             submit: async (chainParams, ctx) => {
+              preparation.assertActive();
+              preparation.phase("submitting");
               const result = await requestGeneration(chainParams);
-              if (regionalChainCancelRequested || chainToken !== regionalChainToken || (inpaintSnapshot && !inpaintSnapshot.valid)) {
+              if (initialCancellationEpoch !== cancellationEpoch || regionalChainCancelRequested || chainToken !== regionalChainToken || (inpaintSnapshot && !inpaintSnapshot.valid)) {
                 await interruptGeneration(result.prompt_id);
                 throw new Error("Regional inpaint chain cancelled");
               }
+              preparation.phase(null);
               if (!ctx.isFinalOutput) {
                 suppressRegionalChainGallerySave(result.prompt_id);
               } else if (inpaintSnapshot) {
@@ -474,7 +504,7 @@
         }
         const snapshot = params.mode === 'inpainting' ? canvas.captureInpaintSubmission() : null;
         try {
-          await submitGeneration(params, {
+          await submitPrepared(params, {
             isCancelled: () => initialCancellationEpoch !== cancellationEpoch || (!!snapshot && !snapshot.valid),
             beforeTrack: promptId => { if (snapshot) canvas.registerInpaintPrompt(promptId, snapshot); },
           });
@@ -499,11 +529,13 @@
             : locale.t(classified.messageKey, classified.params);
       }
     } finally {
-      if (sequential) finishSubmitRun(runToken);
+      preparation.finish();
+      finishSubmitRun(runToken);
     }
   }
 
-  async function handleOrderedWildcardGenerate(count: number) {
+  async function handleOrderedWildcardGenerate(count: number, preparation: ReturnType<typeof createGenerationPreparation>) {
+    preparation.assertActive();
     const run = orderedWildcardRun;
     if (!run) return;
     const choices = promptPresets.wildcardChoices(run.presetId);
@@ -514,7 +546,7 @@
     orderedRunPromptIds = [];
     orderedRunCancelRequested = false;
     for (let i = 0; i < count; i++) {
-      if (orderedRunCancelRequested || runToken !== orderedRunToken) break;
+      if (preparation.isCancelled() || orderedRunCancelRequested || runToken !== orderedRunToken) break;
       const choiceIndex = (run.nextIndex + i) % choices.length;
       const fixedPresetChoices = new Map([[run.presetId, choices[choiceIndex]]]);
       const params = generation.toParams({ fixedPresetChoices });
@@ -528,16 +560,18 @@
       );
       let result: Awaited<ReturnType<typeof requestGeneration>>;
       try {
+        preparation.phase("submitting");
         result = await requestGeneration(params);
       } catch (e) {
-        if (orderedRunCancelRequested || runToken !== orderedRunToken) break;
+        if (preparation.isCancelled() || orderedRunCancelRequested || runToken !== orderedRunToken) break;
         throw e;
       }
-      if (orderedRunCancelRequested || runToken !== orderedRunToken) {
+      if (preparation.isCancelled() || orderedRunCancelRequested || runToken !== orderedRunToken) {
         try { await interruptGeneration(result.prompt_id); } catch { /* already gone */ }
         break;
       }
       const promptId = trackGeneration(params, result);
+      preparation.phase(null);
       orderedRunPromptIds = [...orderedRunPromptIds, promptId];
       if (orderedRunCancelRequested || runToken !== orderedRunToken) {
         await cancelPromptIds([promptId], true);
@@ -552,6 +586,19 @@
 
   /** Left-click: skip the current ordered item, otherwise cancel the current generation. */
   async function handleCancelCurrent() {
+    // This request has not been accepted yet. Cancel only its continuation;
+    // a response arriving later is cancelled by its actual prompt ID.
+    if (preparationPhase !== null) {
+      cancellationEpoch++;
+      submitRunToken++;
+      regionalChainCancelRequested = true;
+      regionalChainToken++;
+      orderedRunCancelRequested = true;
+      orderedRunToken++;
+      isSubmitting = false;
+      preparationPhase = null;
+      return;
+    }
     if (pendingOrderedRunIds.length > 0) {
       await handleSkipOrderedPrompt();
       return;
@@ -614,11 +661,12 @@
       console.error("Failed to cancel queued generations:", e);
     } finally {
       isSubmitting = false;
+      preparationPhase = null;
     }
   }
 
   /** Generate all grid cells sequentially with a shared seed, then stitch into a grid. */
-  async function handleGridGenerate() {
+  async function handleGridGenerate(preparation: ReturnType<typeof createGenerationPreparation>) {
     compare.saveActiveCell();
     const savedIndex = compare.activeIndex;
 
@@ -638,6 +686,7 @@
     const resultsByIndex = new Map<number, { promptId: string; cell: typeof compare.cells[0] }>();
 
     for (const { cell, index } of cellOrder) {
+      if (preparation.isCancelled()) break;
       compare.applyToGeneration(cell);
 
       const params = generation.toParams();
@@ -658,16 +707,24 @@
       }
 
       try {
+        preparation.phase("submitting");
         const result = await generate(params);
+        if (preparation.isCancelled()) {
+          try { await interruptGeneration(result.prompt_id); } catch { /* already gone */ }
+          break;
+        }
+        preparation.phase(null);
         params.seed = result.seed;
         progress.enqueue(result.prompt_id, params.upscale_enabled, params.mode, params);
         resultsByIndex.set(index, { promptId: result.prompt_id, cell });
       } catch (e) {
+        if (preparation.isCancelled()) break;
         console.error(`Grid cell ${index + 1} failed:`, e);
         failedCells.push(index);
       }
     }
 
+    if (preparation.isCancelled()) return;
     // Build arrays in original cell order for correct grid stitching
     const promptIds: string[] = [];
     const successSnapshots: typeof compare.cells = [];
@@ -694,7 +751,10 @@
     generation.saveSettings();
   }
 
-  const canGenerate = $derived(generation.canGenerate);
+  const canGenerate = $derived(generation.canGenerate && !isSubmitting);
+  const preparationLabel = $derived(preparationPhase === "inputs"
+    ? locale.t("progress.preparing")
+    : preparationPhase ? locale.t(`generation.preparation.${preparationPhase}`) : "");
 
   /**
    * Anlas the pending request is expected to cost, or null outside NovelAI mode.
@@ -748,13 +808,16 @@
   <button
     onclick={handleGenerate}
     disabled={!canGenerate}
+    aria-busy={preparationPhase !== null}
     title={generateButtonTitle}
     class="flex-1 py-3 rounded-xl font-semibold text-sm transition-colors
       {canGenerate
         ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'
         : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}"
   >
-    {#if progress.queueCount > 0}
+    {#if preparationPhase !== null}
+      {preparationLabel}
+    {:else if progress.queueCount > 0}
       {locale.t('generation.generate_queue', { count: progress.queueCount })}
     {:else if generation.resumeAppliesToMode && generation.isPaused && generation.mode === "txt2img"}
       {locale.t('generation.pause.continue', { step: String(generation.pausedEndStep), total: String(generation.steps) })}
@@ -792,12 +855,13 @@
     <QueuePanel />
   {/if}
 
-  {#if progress.isGenerating}
+  {#if progress.isGenerating || preparationPhase !== null}
     <button
       onclick={handleCancelCurrent}
       oncontextmenu={handleCancelAll}
       class="px-5 py-3 rounded-xl font-semibold text-sm bg-red-700 hover:bg-red-600 text-white transition-colors"
-      title={locale.t('generation.cancel_hint')}
+      aria-label={locale.t('common.cancel')}
+      title={locale.t(preparationPhase !== null ? 'generation.preparation.cancel_hint' : 'generation.cancel_hint')}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -817,6 +881,10 @@
     </button>
   {/if}
 </div>
+
+{#if preparationPhase !== null}
+  <p role="status" aria-live="polite" class="mt-1 text-center text-xs text-neutral-400">{preparationLabel}</p>
+{/if}
 
 {#if generation.isPaused && !generation.isNovelAi}
   <div class="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
