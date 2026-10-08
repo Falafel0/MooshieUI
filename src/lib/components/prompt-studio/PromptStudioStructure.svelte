@@ -29,20 +29,20 @@
 <dialog bind:this={dialog} oncancel={onClose} aria-label={locale.t(title)} class="fixed inset-0 m-auto w-[min(420px,calc(100%_-_24px))] rounded-xl border border-neutral-700 bg-neutral-900 p-5 text-neutral-200 shadow-2xl backdrop:bg-black/70">
   <form onsubmit={event => { event.preventDefault(); save(); }}>
     <h3 class="mb-4 text-sm font-semibold">{locale.t(title)}</h3>
-    <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="touch-target w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm" />
+    <input aria-label={locale.t('prompt_studio.custom_name')} placeholder={locale.t('prompt_studio.custom_name')} bind:value={name} class="ui-control w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm" />
     {#if id}<div class="mt-3 flex gap-2">
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 text-xs" onclick={() => customCatalog.move(id, -1)}>{locale.t('prompt_studio.group_up')}</button>
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 text-xs" onclick={() => customCatalog.move(id, 1)}>{locale.t('prompt_studio.group_down')}</button>
-      <button type="button" class="touch-target ml-auto rounded px-3 text-xs text-red-300" onclick={() => deleting = !deleting}>{locale.t('prompt_studio.delete')}</button>
+      <button type="button" class="ui-control rounded border border-neutral-700 px-3 text-xs" onclick={() => customCatalog.move(id, -1)}>{locale.t('prompt_studio.group_up')}</button>
+      <button type="button" class="ui-control rounded border border-neutral-700 px-3 text-xs" onclick={() => customCatalog.move(id, 1)}>{locale.t('prompt_studio.group_down')}</button>
+      <button type="button" class="ui-control ml-auto rounded px-3 text-xs text-red-300" onclick={() => deleting = !deleting}>{locale.t('prompt_studio.delete')}</button>
     </div>{/if}
     {#if deleting}<div role="alert" class="mt-3 rounded border border-red-900 bg-red-950/30 p-3 text-xs text-neutral-300">
       <p>{locale.t(category ? 'prompt_studio.delete_category_hint' : 'prompt_studio.delete_subcategory_hint')}</p>
-      <button type="button" disabled={!customCatalog.ready} class="touch-target mt-2 rounded bg-red-900 px-3 disabled:opacity-40" onclick={remove}>{locale.t('common.confirm')}</button>
+      <button type="button" disabled={!customCatalog.ready} class="ui-control mt-2 rounded bg-red-900 px-3 disabled:opacity-40" onclick={remove}>{locale.t('common.confirm')}</button>
     </div>{/if}
-    {#if error}<p role="alert" class="mt-3 text-xs leading-relaxed text-amber-300">{error}</p>{/if}
+    {#if error}<p role="alert" class="mt-3 text-xs leading-relaxed text-indigo-300">{error}</p>{/if}
     <div class="mt-4 flex justify-end gap-2">
-      <button type="button" class="touch-target rounded border border-neutral-700 px-3 text-xs" onclick={onClose}>{locale.t('common.cancel')}</button>
-      <button type="submit" disabled={!customCatalog.ready || !name.trim()} class="touch-target rounded bg-amber-400 px-4 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
+      <button type="button" class="ui-control rounded border border-neutral-700 px-3 text-xs" onclick={onClose}>{locale.t('common.cancel')}</button>
+      <button type="submit" disabled={!customCatalog.ready || !name.trim()} class="ui-control rounded bg-indigo-400 px-4 text-xs font-medium text-neutral-950 disabled:opacity-40">{locale.t('common.save')}</button>
     </div>
   </form>
 </dialog>

@@ -1,12 +1,13 @@
 # Replacing Photopea with Patchy
 
-Status: **native hand-off, a pinnable workspace panel, live layer properties and read-back implemented, plus automatic installation and process lifecycle**. Photopea is gone; MooshieUI installs Patchy, hands it a document, and can read either a saved result or the unsaved canvas of its open window. The WASM embed remains future work.
+Status: **native hand-off, a modal hand-off dialog, live layer properties and read-back implemented, plus automatic installation and process lifecycle**. Photopea is gone; MooshieUI installs Patchy, hands it a document, and can read either a saved result or the unsaved canvas of its open window. The WASM embed remains future work.
 
-## Workspace panel and the Patchy 1.07 contract
+## Modal hand-off and the Patchy 1.07 contract
 
-Pin the Patchy panel to keep the MooshieUI canvas interactive. Collapse keeps the
-handoff and live session intact; closing disconnects only the MCP proxy, leaving
-Patchy's unsaved document and history open. The panel shows the actual document
+Patchy opens in a modal dialog from the canvas or gallery. The workspace is inert
+while the dialog is open; Tab stays inside, Escape closes it, and closing returns
+focus to the opening control. Closing disconnects only the MCP proxy, leaving
+Patchy's unsaved document and history open. The dialog shows the actual document
 hierarchy, visibility, locks and opacity (0–100) from `get_state`. Visibility and
 opacity actions validate the layer ID and value, reject locked layers, and use
 `expectedState` before creating an undoable edit. Undo/Redo and adding the source

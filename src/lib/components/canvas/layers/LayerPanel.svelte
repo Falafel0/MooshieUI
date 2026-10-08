@@ -66,7 +66,7 @@
       </div>
     </details>
   </div>
-  <div bind:this={layerList} class="max-h-52 space-y-0.5 overflow-y-auto overscroll-contain rounded-md border border-ui-border p-1" data-document-layer-list>
+  <div bind:this={layerList} class="max-h-[clamp(13rem,24dvh,22rem)] space-y-0.5 overflow-y-auto overscroll-contain rounded-md border border-ui-border p-1" data-document-layer-list>
     <GroupLayerList />
   </div>
   <div class="flex h-7 items-center justify-end gap-0.5 border-t border-neutral-800 pt-1">

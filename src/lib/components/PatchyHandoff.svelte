@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Pin, PinOff, ChevronDown, ChevronUp, X, Layers, EyeOff, LockKeyhole, Folder, Eye } from "@lucide/svelte";
+  import { X, Layers, EyeOff, LockKeyhole, Folder, Eye } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { locale } from "../stores/locale.svelte.js";
   import { generation } from "../stores/generation.svelte.js";
@@ -79,9 +79,6 @@
     region: "patchy.import_region",
   };
 
-  // Dock presentation does not alter the document or restart the native session.
-  let pinned = $state(false);
-  let panelCollapsed = $state(false);
   let liveLayers = $state<PatchyLiveLayer[]>([]);
   const layerRows = $derived.by(() => {
     const rows: { layer: PatchyLiveLayer; depth: number }[] = [];
@@ -794,28 +791,34 @@
       void disconnectPatchyLive().catch((e) => console.warn("Patchy: live disconnect failed", e));
     };
   });
+  /** Native modal behavior makes the workspace inert and contains Tab focus.
+   * Closing returns focus to the control that opened the hand-off. */
+  function openDialog(node: HTMLDialogElement) {
+    const previous = document.activeElement;
+    node.showModal();
+    return {
+      destroy() {
+        node.close();
+        if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+      },
+    };
+  }
 </script>
 
 {#if open}
-  <div
-    class={pinned ? "pointer-events-none fixed inset-0 z-[230] flex items-end justify-end p-3" : "fixed inset-0 z-[230] flex items-start justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm"}
-    role="dialog"
-    aria-modal={!pinned}
+  <dialog
+    use:openDialog
+    oncancel={(event) => { event.preventDefault(); onclose(); }}
+    onkeydown={(event) => event.stopPropagation()}
+    aria-modal="true"
     aria-label={locale.t("patchy.title")}
+    class="fixed inset-0 mx-auto my-4 max-h-[calc(100dvh-2rem)] w-[min(64rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-ui-border bg-ui-surface p-0 text-neutral-200 shadow-2xl backdrop:bg-black/80 backdrop:backdrop-blur-sm"
   >
-    <div class="pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-ui-border bg-ui-surface p-3 shadow-2xl {pinned ? 'max-w-[460px] max-h-[72dvh]' : 'min-h-[30rem] max-w-2xl'}">
+    <div class="flex h-[min(54rem,calc(100dvh-2rem))] flex-col overflow-hidden p-4">
 
       <div class="flex items-start gap-2">
         <h2 class="text-sm font-semibold text-neutral-100">{locale.t("patchy.title")}</h2>
         <div class="ml-auto flex items-center gap-1">
-          <button type="button" class="ui-focus h-7 w-7 flex items-center justify-center rounded hover:bg-ui-hover text-neutral-400" aria-label={locale.t(pinned ? 'patchy.unpin_panel' : 'patchy.pin_panel')} title={locale.t(pinned ? 'patchy.unpin_panel' : 'patchy.pin_panel')} aria-pressed={pinned} onclick={() => { pinned = !pinned; panelCollapsed = false; }}>
-            {#if pinned}<PinOff size={15} />{:else}<Pin size={15} />{/if}
-          </button>
-          {#if pinned}
-            <button type="button" class="ui-focus h-7 w-7 flex items-center justify-center rounded hover:bg-ui-hover text-neutral-400" aria-label={locale.t(panelCollapsed ? 'patchy.expand_panel' : 'patchy.collapse_panel')} aria-expanded={!panelCollapsed} onclick={() => panelCollapsed = !panelCollapsed}>
-              {#if panelCollapsed}<ChevronUp size={15} />{:else}<ChevronDown size={15} />{/if}
-            </button>
-          {/if}
         <button
           type="button"
           class="ui-focus h-7 w-7 rounded text-neutral-400 hover:bg-ui-hover hover:text-neutral-100"
@@ -828,9 +831,8 @@
       <!-- The shell has a stable top edge and fixed working height. Live
            previews and import choices may change, but they now scroll inside
            this body instead of re-centering the whole modal every few seconds. -->
-      {#if !panelCollapsed}
       <div class="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
-        {#if !pinned}<p class="text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>{/if}
+        <p class="text-xs text-neutral-400">{locale.t(liveEnabled ? "patchy.live_hint" : "patchy.save_hint")}</p>
 
       {#if phase === "preparing"}
         <p class="mt-4 text-xs text-neutral-300" role="status">{locale.t("common.loading")}</p>
@@ -907,22 +909,17 @@
                   <span class="min-w-0 flex-1 truncate" title={row.layer.name}>{row.layer.name}</span>
                   <button type="button" disabled={busy || !liveToken || row.layer.locked} class="ui-focus flex h-6 w-6 items-center justify-center rounded hover:bg-ui-hover disabled:opacity-30" aria-label={`${locale.t(row.layer.visible ? 'canvas.hide_layer' : 'canvas.show_layer')}: ${row.layer.name}`} aria-pressed={row.layer.visible} onclick={() => runLiveAction('set_layer_visibility', { id: row.layer.id, value: !row.layer.visible })}>{#if row.layer.visible}<Eye size={13} />{:else}<EyeOff size={13} />{/if}</button>
                   {#if row.layer.locked}<span title={locale.t('canvas.lock_layer')}><LockKeyhole size={12} /></span>{/if}
-                  <input type="number" aria-label={`${locale.t('canvas.opacity')}: ${row.layer.name}`} value={row.layer.opacity} min="0" max="100" step="1" disabled={busy || !liveToken || row.layer.locked} onchange={(event) => changeLayerOpacity(event, row.layer)} class="ui-control h-6 w-12 rounded border border-ui-border bg-neutral-950 px-1 text-right tabular-nums disabled:opacity-40" /><span class="text-neutral-500">%</span>
+                  <input type="number" aria-label={`${locale.t('canvas.opacity')}: ${row.layer.name}`} value={row.layer.opacity} min="0" max="100" step="1" disabled={busy || !liveToken || row.layer.locked} onchange={(event) => changeLayerOpacity(event, row.layer)} class="ui-control h-6 w-16 rounded border border-ui-border bg-neutral-950 px-1 text-right tabular-nums disabled:opacity-40" /><span class="text-neutral-500">%</span>
                 </li>
               {/each}
             </ul>
             <p class="border-t border-ui-border px-3 py-2 text-[11px] text-neutral-400">{locale.t('patchy.layers_hint')}</p>
           </section>
         {/if}
-        <div class="mt-4 grid items-start gap-2 {!pinned ? 'sm:grid-cols-2' : ''}">
-          {#if pinned}
-            <div class="flex items-center gap-2 rounded-lg border border-ui-border px-3 py-2 text-xs">
-              <span class="min-w-0 flex-1 truncate text-neutral-400" title={documentPath ?? undefined}>{exportInfo?.name ?? '—'}</span>
-              <button type="button" disabled={launching} onclick={launch} class="ui-control shrink-0 rounded-md border border-ui-border px-2 text-neutral-200 hover:bg-ui-hover disabled:opacity-40">{locale.t(launched ? 'patchy.reopen' : 'patchy.launch')}</button>
-            </div>
-          {:else}
+        <div class="mt-4 grid items-start gap-3 sm:grid-cols-2">
           <PatchyTransferPanel
             step="export"
+            largePreview={true}
             state={exportStepState}
             busy={busy || launching}
             name={exportInfo?.name ?? null}
@@ -942,11 +939,10 @@
               >{launched ? locale.t("patchy.reopen") : locale.t("patchy.launch")}</button>
             </div>
           </PatchyTransferPanel>
-          {/if}
 
           <PatchyTransferPanel
             step="import"
-            largePreview={pinned}
+            largePreview={true}
             state={importStepState}
             busy={busy}
             name={importInfo?.name ?? null}
@@ -1159,9 +1155,6 @@
         </div>
       {/if}
       </div>
-      {:else}
-        <p class="mt-1 truncate text-[11px] text-neutral-400" role="status">{liveEnabled ? liveError || locale.t("patchy.live_hint") : locale.t("patchy.save_hint")}</p>
-      {/if}
     </div>
-  </div>
+  </dialog>
 {/if}

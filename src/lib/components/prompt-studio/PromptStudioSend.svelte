@@ -47,29 +47,29 @@
   <p class="mt-2 text-xs text-neutral-400">{locale.t('prompt_studio.send_hint')}</p>
   <div class="mt-4 grid gap-3 sm:grid-cols-3">
     <label class="text-xs text-neutral-400">{locale.t('prompt_studio.destination')}
-      <select bind:value={destination} class="touch-target mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
+      <select bind:value={destination} class="ui-control mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
         {#each ['txt2img', 'img2img', 'inpainting'] as mode}<option value={mode}>{locale.t(`gallery.mode.${mode}`)}</option>{/each}
       </select>
     </label>
     <label class="text-xs text-neutral-400">{locale.t('prompt_studio.target_field')}
-      <select bind:value={field} class="touch-target mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
+      <select bind:value={field} class="ui-control mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
         <option value="positive">{locale.t('generation.prompts.positive')}</option>
         <option value="negative">{locale.t('generation.prompts.negative')}</option>
       </select>
     </label>
     <label class="text-xs text-neutral-400">{locale.t('prompt_studio.insert_method')}
-      <select bind:value={method} class="touch-target mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
+      <select bind:value={method} class="ui-control mt-1 w-full rounded border border-neutral-700 bg-neutral-900 p-2 text-neutral-200">
         {#each ['append', 'prepend', 'replace'] as value}<option value={value}>{locale.t(`prompt_studio.insert_${value}`)}</option>{/each}
       </select>
     </label>
   </div>
   <label class="mt-3 flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" bind:checked={asBlocks} />{locale.t('prompt_studio.send_as_blocks')}</label>
   {#if asBlocks}<p class="mt-2 text-xs text-neutral-400">{locale.t('prompt_studio.send_blocks_hint')}</p>{/if}
-  {#if method === 'replace' && (asBlocks ? currentBoxes.length : current.trim())}<p role="status" class="mt-3 text-xs text-amber-300">{locale.t(asBlocks ? 'prompt_studio.send_blocks_replace_hint' : 'prompt_studio.send_replace_hint')}</p>{/if}
+  {#if method === 'replace' && (asBlocks ? currentBoxes.length : current.trim())}<p role="status" class="mt-3 text-xs text-indigo-300">{locale.t(asBlocks ? 'prompt_studio.send_blocks_replace_hint' : 'prompt_studio.send_replace_hint')}</p>{/if}
   <label class="mt-4 block text-xs text-neutral-400" for="studio-send-preview">{locale.t('schedule.preview')}</label>
   <textarea id="studio-send-preview" readonly value={preview} class="mt-1 min-h-40 w-full resize-y rounded border border-neutral-800 bg-neutral-900 p-3 text-sm leading-relaxed text-neutral-200"></textarea>
   <div class="mt-4 flex justify-end gap-2">
-    <button type="button" class="touch-target rounded border border-neutral-700 px-3 py-2 text-xs" onclick={onCancel}>{locale.t('common.cancel')}</button>
-    <button type="button" class="touch-target rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-40" disabled={!studio.prompt.trim()} onclick={send}>{locale.t('prompt_studio.apply')}</button>
+    <button type="button" class="ui-control rounded border border-neutral-700 px-3 py-2 text-xs" onclick={onCancel}>{locale.t('common.cancel')}</button>
+    <button type="button" class="ui-control rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-40" disabled={!studio.prompt.trim()} onclick={send}>{locale.t('prompt_studio.apply')}</button>
   </div>
 </dialog>

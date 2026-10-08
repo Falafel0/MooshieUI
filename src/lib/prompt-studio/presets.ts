@@ -1,3 +1,4 @@
+import { promptTokenRanges, parsePromptAtom } from './weight-converter.js';
 import type { Choice, Detail } from './studio.svelte.js';
 
 /**
@@ -78,16 +79,8 @@ export function toSnapshot(state: StudioState): StudioSnapshotV1 {
 export function tagsFromRawPrompt(raw: string): Choice[] {
   const seen = new Set<string>();
   const out: Choice[] = [];
-  for (const fragment of raw.split(/[,\n]+/)) {
-    const weighted = fragment.trim().match(/^\((.*?):([\d.]+)\)$/) ?? fragment.trim().match(/^([\d.]+)::(.*?)::$/);
-    const weightText = fragment.trim().startsWith('(') ? weighted?.[2] : weighted?.[1];
-    const weight = weightText && Number.isFinite(Number(weightText)) ? Math.max(0.1, Math.min(2, Number(weightText))) : 1;
-    const tag = fragment
-      .trim()
-      .replace(/^\((.*?):[\d.]+\)$/, '$1')
-      .replace(/^[\d.]+::(.*?)::$/, '$1')
-      .replace(/^[([{]+|[)\]}]+$/g, '')
-      .trim();
+  for (const fragment of promptTokenRanges(raw)) {
+    const { tag, weight } = parsePromptAtom(fragment.text);
     if (!tag || seen.has(tag)) continue;
     seen.add(tag);
     out.push({ tag, name: tag.replaceAll('_', ' '), category: categoryFor(tag), weight });

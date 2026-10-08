@@ -76,9 +76,9 @@
     {#each SHELF_GROUPS as group}
       {@const groupTabs = visibleTabs.filter((tab) => shelfGroup(tab) === group)}
       {#if groupTabs.length}
-        <div class="flex shrink-0 flex-col px-1.5 {group !== shelfGroup(visibleTabs[0]) ? 'border-l border-ui-border/60' : ''}">
-          {#if !collapsed}<span class="px-3 pt-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500">{locale.t(`bottom_panel.group.${group}`)}</span>{/if}
-          <div class="flex items-center gap-1 {collapsed ? '' : 'pb-1'}">
+        <div class="flex shrink-0 items-center gap-1 px-1.5 {group !== shelfGroup(visibleTabs[0]) ? 'border-l border-ui-border/60' : ''}">
+          {#if !collapsed}<span class="px-2 text-[10px] font-medium uppercase tracking-wider text-neutral-500">{locale.t(`bottom_panel.group.${group}`)}</span>{/if}
+          <div class="flex items-center gap-1 py-0.5">
           {#each groupTabs as tab (tab)}
       <button
         id={`bottom-tab-${tab}`} role="tab" aria-selected={activeTab === tab} aria-controls={`bottom-content-${tab}`} tabindex={activeTab === tab ? 0 : -1}

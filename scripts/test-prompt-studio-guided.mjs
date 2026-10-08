@@ -81,7 +81,7 @@ studio.replaceChoices([choice('keep', 'target'), choice('new', 'target'), choice
 assert.deepEqual(plain(studio.selected.map(row => row.tag)), ['before', 'keep', 'new', 'after']);
 assert.deepEqual(plain(studio.details.keep.mods), ['retained']);
 assert.deepEqual(plain(studio.details.before.mods), ['untouched']);
-assert.equal(studio.rawPrompt, '[literal|syntax], <chunk:a>');
+assert.equal(studio.rawPrompt, '[literal|syntax], <chunk:a>, keep, retained, new', 'Recipe changes also update the visible manual prompt without erasing syntax');
 assert.deepEqual(plain(studio.pinned), ['keep']); assert.deepEqual(plain(studio.banned), ['excluded']);
 assert.equal(studio.history.length, 1, 'A bulk replacement is one undo step');
 studio.replaceChoices([choice('keep', 'target'), choice('new', 'target')], ['target']);
@@ -110,7 +110,7 @@ workflow.randomize('character');
 assert.equal(studio.selected.find(row => row.category === subject.id).tag, lockedSubject);
 assert.ok(studio.selected.some(row => row.tag === pinnedFeature));
 assert.ok(studio.selected.some(row => row.tag === 'before' && row.category === 'library'));
-assert.equal(studio.rawPrompt, '[literal|syntax], <chunk:a>');
+assert.ok(studio.rawPrompt.startsWith('[literal|syntax], <chunk:a>, keep, retained, new'), 'Randomizing a recipe preserves unrelated manual syntax and resources');
 workflow.reset('character');
 assert.deepEqual(plain(studio.selected.filter(row => row.category.startsWith('recipe:character:')).map(row => row.tag)), [lockedSubject, pinnedFeature]);
 const historyBeforeGroup = studio.history.length;
