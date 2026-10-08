@@ -1,7 +1,7 @@
 # MooshieUI Fork
 
 > **A Windows-first fork of [MooshieUI](https://github.com/Mooshieblob1/MooshieUI), built around a layer-based inpainting workspace.**
-> This branch is maintained as its own project: it has its own version line (`2.3.7-fork.*`), its own releases, installers and signed updates, its own application identifier and settings directory (**MooshieUI Fork**), and it is not interchangeable with an upstream install. A second install can read the same ComfyUI server, model folders and gallery only if you point it at them in Settings.
+> This branch is maintained as its own project: it has its own version line (`2.3.9-fork.*`), its own releases, installers and signed updates, its own application identifier and settings directory (**MooshieUI Fork**), and it is not interchangeable with an upstream install. A second install can read the same ComfyUI server, model folders and gallery only if you point it at them in Settings.
 
 Every release of this branch ships **one Windows installer** (`x64-setup.exe` for Windows 10/11 on x86_64) plus its signature and the updater manifest. Linux and macOS builds, the headless-server binary, and container images are not part of this fork's release path; the source for browser/server mode is still in the repository and still builds, it is simply not what this branch publishes.
 
@@ -11,13 +11,14 @@ Every release of this branch ships **one Windows installer** (`x64-setup.exe` fo
 
 ## What this branch changes
 
-The upstream app answers the question *"what do I generate?"*. This branch is about *"what do I change, and where?"* — it takes the canvas editor apart into three mechanisms that never borrow from each other:
+The upstream app answers the question *"what do I generate?"*. This branch is about *"what do I change, and where?"* — it separates raster composition, editable masks and generation modifiers:
 
 | Layer type | What it is | What a generation run reads from it |
 |------------|------------|-------------------------------------|
 | **Raster** | An image placed on the canvas: the picture itself | Its pixels, its transform (position, size, rotation, flips) and its real opacity |
 | **Mask** | A painted area for an inpainting pass | The painted pixels, the mask's denoise, its painted coverage and its processing (grow, blur, invert) |
 | **Prompt region** | An area that speaks to the prompt | The region's prompt, negative prompt and strength — **never pixels** |
+| **ControlNet** | A reference that guides an edit | Model, preprocessor, strength and reference pixels; conditions mask passes without adding a pass |
 
 A mask has no prompt of its own: it runs the global prompt, and the text of a prompt region it overlaps is added to the conditioning. A prompt region never edits pixels. This separation is enforced in code (`src/lib/utils/regionalStrategy.ts`) and covered by tests, so a region can no longer be mistaken for a mask and vice versa.
 
@@ -25,16 +26,20 @@ A mask has no prompt of its own: it runs the global prompt, and the text of a pr
 
 - **Denoise** — how strongly the pixels under it are changed, with a "use the document value" checkbox so the inherited default stays visible instead of hidden.
 - **Painted coverage** — how much of the painted area counts as a mask. At 0% the layer is left out of a run entirely.
-- **Edge falloff by coverage** — on: the core of a brush stroke is edited at full strength and the edges fade below it, using a per-pixel denoise schedule (no extra nodes, no extra passes); off: the whole mask is edited at one strength.
+- **Edge falloff by coverage** — on: the core of a brush stroke is edited at full strength and the edges fade below it, using a per-pixel denoise schedule with Differential Diffusion (no extra generation passes); off: the whole mask is edited at one strength.
 - **Grow, blur, invert, own inpaint size** — a mask can carry its own processing and size, or inherit the document's.
 
 **Move and resize are one tool.** The handles sit on the layer's *real* content — the painted pixels of a mask, the drawn shapes of a region, the image of a raster — not on a rectangle that a stroke width quietly inflated. Dragging moves; dragging a handle resizes; Shift keeps the proportions, Alt scales from the centre, and the angle snaps only to the upright ones. The dashed context guides around the layer follow a move live instead of lagging a repaint behind it.
 
-**Display and generation are separated on purpose.** Opacity, tint and the visibility of an overlay change how the layer looks on the canvas and nothing else; the sliders that a run reads live under their own heading, above the display ones.
+**Display and generation have explicit controls.** Mask/region overlay opacity and tint affect the guide; painted alpha and coverage affect generation. Raster opacity changes the real composition. Hiding a layer or group excludes it from the run; ControlNet guide visibility is separate from its enable switch.
+
+**Connect layers explicitly.** Groups keep pixels and modifiers readable. Masks and regions can target a raster’s intrinsic alpha; rasters can use a painted mask for clipping; ControlNets can read a raster’s rendered pixels. Scope modifiers to a group, the document, or selected masks. Broken references stay visible for repair and never become global. Projects preserve these links and painted strokes, including semi-transparent erasure. See [layer relationships](docs/INPAINT_LAYER_RELATIONSHIPS.md).
+
+**Compact canvas tools.** Brush, Eraser, grouped fill shapes, Move and resize, and Pan have distinct roles. Layer actions distinguish clearing pixels from deleting a layer; canvas resizing acts on the document. Arrow keys navigate the toolbar and its menus.
 
 **The rest of the branch's own work:**
 
-- **Patchy hand-off** — install, send the canvas to [Patchy](https://github.com/SethRobinson/Patchy), and take the edited document back, with the file locations and the direction of the exchange stated in the UI.
+- **Patchy workspace panel** — install and send the canvas to [Patchy](https://github.com/SethRobinson/Patchy), pin the panel, inspect live layers, adjust visibility/opacity, undo and import unsaved edits through its native MCP connector. Import reads the composite, not a reconstructed layer stack. [Integration details](docs/PATCHY_INTEGRATION.md).
 - **Projects** — save the canvas dimensions, base and layer pixels together with the workspace settings under a name, and load them back later.
 - **Recommended parameters can be hidden completely**, for people who already know what they are doing.
 - **Windows-only release pipeline** — one NSIS build, a manifest with a single `windows-x86_64` entry, and an artifact check that fails the release if a second installer sneaks into the upload set.

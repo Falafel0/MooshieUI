@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { effectiveLayerVisibility } from "./lib/utils/layerRelations.js";
   import { patchyDocumentMatches } from "./lib/utils/patchyHandoff.js";
   import { onMount, onDestroy, untrack } from "svelte";
   import { ipcInvoke, ipcListen, isTauri, isBrowserMode, startHeartbeat, getAuthToken, setAuthToken, setAuthUser, authHeaders, wasRememberMe, userScopedKey } from "./lib/utils/ipc.js";
@@ -38,7 +39,7 @@
   import { music } from "./lib/stores/music.svelte.js";
   import { musicCover } from "./lib/stores/musicCover.svelte.js";
   import { stopScorePreview } from "./lib/utils/musicPreview.js";
-  untrack(() => generation.setDocumentControlProvider(() => canvas.layers));
+  untrack(() => generation.setDocumentControlProvider(() => canvas.layers.map(layer => ({ ...layer, visible: effectiveLayerVisibility(layer, canvas.groups) }))));
 
   $effect(() => { const id = musicCover.nativeJob?.prompt_id; if (id) untrack(() => music.rememberPrompt(id)); });
   $effect(() => { if (music.playing) untrack(stopScorePreview); });

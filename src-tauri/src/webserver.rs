@@ -3467,6 +3467,15 @@ async fn dispatch_command(
                 )
                 .await?;
             }
+            if params.mode == "inpainting" {
+                let base_url = state.base_url().await;
+                crate::comfyui::nodes::verify_required_inpaint_nodes_for_generation(
+                    &state.http_client,
+                    &base_url,
+                    &params,
+                )
+                .await?;
+            }
             let seed = if params.seed < 0 {
                 (rand::random::<u64>() >> 1) as i64
             } else {

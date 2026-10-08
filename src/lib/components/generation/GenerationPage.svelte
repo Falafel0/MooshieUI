@@ -1882,7 +1882,7 @@
           <div use:scrollCapture>
             <label class="flex items-center justify-between text-xs text-neutral-400 mb-1">
               <span>{locale.t('generation.image.denoise')}<InfoTip text={locale.t('generation.image.denoise_tip')} /></span>
-              <EditableValue value={generation.denoise} min={0} max={1} step={0.01} decimals={2} onchange={(v) => generation.denoise = v} />
+              <EditableValue value={generation.denoise} min={0} max={1} step={0.01} decimals={2} onchange={(v) => { generation.denoise = v; generation.saveSettings(); }} />
             </label>
             <input
               type="range"

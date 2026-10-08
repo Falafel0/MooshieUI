@@ -1,12 +1,16 @@
 import type Konva from "konva";
 
 /** Export document pixels without viewport transforms or preview-only visibility. */
-export function captureLayer(layer: Konva.Layer, width: number, height: number): HTMLCanvasElement {
+export function captureLayer(layer: Konva.Layer, width: number, height: number, options: { includeClipping?: boolean } = {}): HTMLCanvasElement {
   const saved = { x: layer.x(), y: layer.y(), scaleX: layer.scaleX(), scaleY: layer.scaleY(), visible: layer.visible(), opacity: layer.opacity() };
+  const clip = options.includeClipping === false ? layer.findOne('.raster-clip-mask') : undefined;
+  const clipVisible = clip?.visible();
   try {
+    clip?.visible(false);
     layer.setAttrs({ x: 0, y: 0, scaleX: 1, scaleY: 1, visible: true, opacity: 1 });
     return layer.toCanvas({ pixelRatio: 1, width, height });
   } finally {
+    if (clip && clipVisible !== undefined) clip.visible(clipVisible);
     layer.setAttrs(saved);
   }
 }
@@ -146,4 +150,15 @@ export async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<number[
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Failed to encode mask PNG");
   return Array.from(new Uint8Array(await blob.arrayBuffer()));
+}
+
+/** ComfyUI controls are RGB: explicitly show and upload the same black matte. */
+export function matteControlnetReference(source: HTMLCanvasElement): HTMLCanvasElement {
+  const output = document.createElement('canvas');
+  output.width = source.width; output.height = source.height;
+  const ctx = output.getContext('2d')!;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, output.width, output.height);
+  ctx.drawImage(source, 0, 0);
+  return output;
 }

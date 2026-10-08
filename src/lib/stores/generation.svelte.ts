@@ -1,5 +1,6 @@
 import { controlnetLayerPayloads, controlnetPayload } from "../utils/controlnetState.js";
 import { DEFAULT_INPAINT_SETTINGS, normalizeInpaintSettings, type InpaintSettings } from "../utils/inpaintSettings.js";
+import { effectiveGenerationDenoise, normalizeDenoise } from "../utils/denoising.js";
 import { ipcStore, userScopedKey } from "../utils/ipc.js";
 import { triggerSync } from "../utils/syncTrigger.js";
 import { compileTimeline, isTimelineActive } from "../utils/timelineProvider.js";
@@ -809,7 +810,9 @@ class GenerationStore {
    * the paused run with the painted image instead of starting an inpaint.
    */
   pausedEditArmed = $state(false);
-  denoise = $state(0.7);
+  private _denoise = $state(0.7);
+  get denoise(): number { return this._denoise; }
+  set denoise(value: number) { this._denoise = normalizeDenoise(value, this._denoise); }
   // Input files belong to their editing workspace, not whichever tab is visible
   // when an asynchronous upload happens to finish. Kept in memory with previews.
   modeInputs = $state<Partial<Record<GenerationMode, {
@@ -4008,7 +4011,7 @@ class GenerationStore {
       width: this.width,
       height: this.height,
       batch_size: this.batchSize,
-      denoise: this.denoise,
+      denoise: effectiveGenerationDenoise(this.mode, this.denoise),
       differential_diffusion: this.differentialDiffusion,
       input_image: this.inputImage,
       mask_image: this.maskImage,

@@ -205,6 +205,7 @@ pub struct PatchyLiveRead {
     pub height: u32,
     pub full_resolution: bool,
     pub requested_target: Option<String>,
+    pub layers: Value,
 }
 
 /// Patchy's documented user-script directory is under Qt's RTsoft/Patchy
@@ -345,6 +346,7 @@ async fn read_from_session(
             height: 0,
             full_resolution: false,
             requested_target: take_return_request(handoff),
+            layers: document["layers"].clone(),
         });
     }
     if preview_only {
@@ -369,6 +371,7 @@ async fn read_from_session(
             height: image.height(),
             full_resolution: image.width() == width && image.height() == height,
             requested_target: take_return_request(handoff),
+            layers: document["layers"].clone(),
         });
     }
     let mut canvas = RgbaImage::new(width, height);
@@ -412,6 +415,7 @@ async fn read_from_session(
         height,
         full_resolution: true,
         requested_target: None,
+        layers: document["layers"].clone(),
     })
 }
 
@@ -447,6 +451,49 @@ pub async fn disconnect_patchy_live() -> Result<(), AppError> {
     Ok(())
 }
 
+fn find_live_layer<'a>(layers: &'a Value, id: &str) -> Option<&'a Value> {
+    for layer in layers.as_array()? {
+        if layer["id"].as_str() == Some(id) {
+            return Some(layer);
+        }
+        if let Some(found) = find_live_layer(&layer["children"], id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn validated_layer_change(
+    document: &Value,
+    action: &str,
+    change: &Value,
+) -> Result<Value, AppError> {
+    let id = change["id"]
+        .as_str()
+        .ok_or_else(|| failure("Patchy layer ID is missing"))?;
+    let layer = find_live_layer(&document["layers"], id)
+        .ok_or_else(|| failure("Patchy layer no longer exists; refresh the panel"))?;
+    if layer["locked"].as_bool().unwrap_or(true) {
+        return Err(failure("Patchy layer is locked"));
+    }
+    let value = match action {
+        "set_layer_visibility" => Value::Bool(
+            change["value"]
+                .as_bool()
+                .ok_or_else(|| failure("Layer visibility must be a boolean"))?,
+        ),
+        "set_layer_opacity" => {
+            let value = change["value"]
+                .as_f64()
+                .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+                .ok_or_else(|| failure("Layer opacity must be between 0 and 100"))?;
+            json!(value)
+        }
+        _ => return Err(failure("Unknown Patchy layer action")),
+    };
+    Ok(json!({"layerId": id, "value": value}))
+}
+
 /// Apply a deliberate, undoable action to the attached document. The token
 /// comes from a preview and is checked again immediately before the edit;
 /// changes made by the artist in between are never overwritten or retried.
@@ -457,6 +504,7 @@ pub async fn patchy_live_action(
     action: String,
     expected_state: String,
     source_bytes: Option<Vec<u8>>,
+    layer_change: Option<Value>,
 ) -> Result<bool, AppError> {
     let handoff = handoff_path(&path)?;
     let mut guard = LIVE.lock().await;
@@ -503,6 +551,21 @@ pub async fn patchy_live_action(
             Ok(reply["structuredContent"]["changed"]
                 .as_bool()
                 .unwrap_or(false))
+        }
+        "set_layer_visibility" | "set_layer_opacity" => {
+            let change = validated_layer_change(
+                doc,
+                &action,
+                &layer_change.ok_or_else(|| failure("Patchy layer change is missing"))?,
+            )?;
+            let code = if action == "set_layer_visibility" {
+                "var layer = app.getDocument(patchy.args.documentId).getLayer(patchy.args.layerId); layer.visible = patchy.args.value;"
+            } else {
+                "var layer = app.getDocument(patchy.args.documentId).getLayer(patchy.args.layerId); layer.opacity = patchy.args.value;"
+            };
+            session.tool("execute_script", json!({"name": "MooshieUI layer properties", "expectedState": expected_state,
+                "code": code, "args": {"documentId": document_id, "layerId": change["layerId"], "value": change["value"]}})).await?;
+            Ok(true)
         }
         "add_reference_layer" => {
             let bytes = source_bytes.ok_or_else(|| failure("Source image is missing"))?;
@@ -577,5 +640,41 @@ mod tests {
         assert!(matches_handoff("/tmp/mooshie/portrait-123.psd", handoff));
         assert!(!matches_handoff("/tmp/other/portrait-123.psd", handoff));
         assert!(!matches_handoff("/tmp/mooshie/portrait-456.png", handoff));
+    }
+}
+
+#[cfg(test)]
+mod layer_change_tests {
+    use super::*;
+    #[test]
+    fn changes_only_known_unlocked_layers_with_valid_values() {
+        let doc = json!({"layers":[{"id":"group","locked":false,"children":[{"id":"paint","locked":false,"children":[]},{"id":"locked","locked":true}]}]});
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_visibility",
+            &json!({"id":"paint","value":false})
+        )
+        .is_ok());
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_opacity",
+            &json!({"id":"paint","value":42.5})
+        )
+        .is_ok());
+        for change in [
+            json!({"id":"missing","value":25}),
+            json!({"id":"locked","value":25}),
+            json!({"id":"paint","value":-1}),
+            json!({"id":"paint","value":101}),
+            json!({"id":"paint","value":"50"}),
+        ] {
+            assert!(validated_layer_change(&doc, "set_layer_opacity", &change).is_err());
+        }
+        assert!(validated_layer_change(
+            &doc,
+            "set_layer_visibility",
+            &json!({"id":"paint","value":1})
+        )
+        .is_err());
     }
 }

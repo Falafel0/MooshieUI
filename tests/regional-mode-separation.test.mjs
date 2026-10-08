@@ -95,6 +95,9 @@ const fixture = (globalThis.__regionalSeparationTest = {
   uploadImageBytes: async (_bytes, name) => ({ name }),
 });
 
+const relationCode = ts.transpileModule(fs.readFileSync(new URL('../src/lib/utils/layerRelations.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const relationFunctions = await import('data:text/javascript;base64,' + Buffer.from(relationCode).toString('base64'));
+Object.assign(fixture, relationFunctions);
 const regionsSource = fs.readFileSync(new URL('../src/lib/utils/inpaintingRegions.ts', import.meta.url), 'utf8');
 let regionsCode = ts.transpileModule(regionsSource, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
@@ -146,8 +149,8 @@ test('a raster layer is the picture, never a pass and never conditioning', async
   const conditioning = await regions.prepareConditioningRegions();
   assert.deepEqual(
     conditioning.map((entry) => entry.id),
-    ['region-1'],
-    'only regions condition the prompt',
+    [],
+    'without edit masks no modifier can condition an inpaint pass',
   );
 });
 
@@ -167,8 +170,8 @@ test('the panel numbers its passes with the same rule the chain runs them', () =
     'visible masks only, painted bottom to top',
   );
   assert.match(
-    layerPanel,
-    /processingOrder = \$derived\(editMaskPassOrder\(canvas\.sortedLayers\)\)/,
+    fs.readFileSync(new URL('../src/lib/components/canvas/layers/GroupLayerList.svelte', import.meta.url), 'utf8'),
+    /processingOrder = \$derived\(editMaskPassOrder\(canvas\.sortedLayers/,
     'the #n badge must come from the shared order, or it can lie about which mask runs first',
   );
   assert.equal(
@@ -410,7 +413,18 @@ test('regions with zero strength or coverage do not block a run or upload unused
   fixture.canvas.sortedLayers = [
     regionLayer('no-strength', { regionalStrength: 0, regionalPrompt: '' }),
     regionLayer('no-coverage', { coverage: 0, regionalPrompt: '' }),
-    active,
+    active, maskLayer('edit-target'),
   ];
+  fixture.canvas.layers = fixture.canvas.sortedLayers;
   assert.deepEqual((await regions.prepareConditioningRegions()).map(region => region.id), ['active']);
+});
+
+
+test('inactive empty-scope modifiers do not block a run, while active broken references do', () => {
+  const mask=maskLayer('edit');
+  const control={id:'control',name:'Pose',type:'controlnet',visible:true,controlnet:{enabled:true},referenceRasterId:'missing',modifierScope:{mode:'masks',maskIds:[]}};
+  const snapshot={layers:[mask,control],groups:[]};
+  assert.doesNotThrow(()=>regions.assertInpaintLayerRelations(snapshot));
+  control.modifierScope.maskIds=['edit'];
+  assert.throws(()=>regions.assertInpaintLayerRelations(snapshot),/layer_relation_error/);
 });

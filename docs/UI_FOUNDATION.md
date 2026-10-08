@@ -81,3 +81,32 @@ Verify fresh/legacy/custom order, Positive/Negative editing, retained split pref
 ## Upstream integration
 
 This branch merges upstream `main` at `14a7ca6` (v2.3.16), including Krea 2 GGUF compatibility, stale ComfyUI restart after app updates, and optional Krea 2 encoder selection. Fork package identity, updater destination and Windows packaging remain intact. Encoder selection combines upstream's installed Krea 2 preference with the fork's family-only loader detection and inventory guards; regression checks exercise both paths.
+
+
+## Inpainting tools and native editor panel
+
+The canvas toolbar groups filled shapes behind one menu. Freeform fill paints
+coverage; it is not a selection lasso. Move handles transform layer content;
+Resize canvas changes the document frame. Fill layer and Clear pixels share a
+layer-action menu, while Delete layer remains a separate document action.
+Brush/eraser size appears only for strokes; Paint opacity controls painted alpha.
+Mask overlay opacity, raster opacity and generation coverage have separate roles.
+A fill creates one undo entry. The toolbar and menus support arrow-key navigation.
+
+Groups show pixel layers separately from modifiers. Selecting a linked layer
+highlights its connected rows; its inspector names reference targets and scope.
+Mask, region and ControlNet controls operate on the same canvas coordinates.
+ControlNets and regions condition edit masks; they do not add generation passes.
+
+The Patchy panel can be pinned without blocking the canvas and collapsed without
+resetting its session. It reads the real hierarchy and edits visibility/opacity
+through native MCP with a state guard. Read-back imports the composite. See
+[Patchy integration](PATCHY_INTEGRATION.md) for the v1.07 host contracts and limits.
+
+
+ControlNet custom selection uses ComfyUI's exact model names. A saved selection
+missing from the current inventory remains visible with an explanation, including
+a family change between `controlnet` and Anima's `model_patches`. NovelAI keeps
+saved document controls but replaces their editor with an availability note.
+Changing the checkpoint or family during asynchronous input preparation cancels
+that submission rather than mixing the old reference and the new pipeline.

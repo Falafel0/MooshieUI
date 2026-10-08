@@ -1,4 +1,6 @@
 export interface InpaintSettings {
+  /** Per-submission mask sampling policy. Omitted in legacy workflows. */
+  density_denoise?: boolean;
   resize_mode: 'resize' | 'crop' | 'fill' | 'latent';
   mask_blur: number;
   invert_mask: boolean;

@@ -1563,6 +1563,41 @@ pub async fn verify_required_h3_nodes_for_generation(
     Ok(())
 }
 
+fn needs_current_inpaint_nodes(
+    mode: &str,
+    denoise: f64,
+    settings: Option<&serde_json::Value>,
+) -> bool {
+    mode == "inpainting"
+        && denoise > 0.0
+        && settings.is_some_and(|settings| {
+            settings["density_denoise"].is_boolean()
+                || settings["area_limit_image"]
+                    .as_str()
+                    .is_some_and(|name| !name.trim().is_empty())
+        })
+}
+
+/// Older running servers have the class but ignore the new mask/alpha contract.
+/// Probe its additive schema before submitting a workflow that relies on it.
+pub async fn verify_required_inpaint_nodes_for_generation(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    params: &GenerationParams,
+) -> Result<(), String> {
+    if !needs_current_inpaint_nodes(
+        &params.mode,
+        params.denoise,
+        params.inpaint_settings.as_ref(),
+    ) {
+        return Ok(());
+    }
+    if node_declares_input(http_client, base_url, "MooshieInpaintPrepare", "area_limit").await {
+        return Ok(());
+    }
+    Err("Update the MooshieUI custom nodes on the connected ComfyUI server and restart it. This inpainting request needs the current mask density and raster alpha support.".into())
+}
+
 /// Verify that ComfyUI loaded the MooshieUI custom node classes required by
 /// every generated workflow. If ComfyUI was already running when nodes were
 /// deployed to disk, the files exist but /object_info will still be missing
@@ -2524,5 +2559,64 @@ mod install_script_tests {
             assert!(actual[path] == *bytes, "{} differs", path.display());
         }
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod inpaint_schema_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn only_requests_using_the_new_mask_contract_need_the_schema_probe() {
+        let uniform = json!({"density_denoise": false});
+        let density = json!({"density_denoise": true});
+        let alpha = json!({"area_limit_image": "alpha.png"});
+        for settings in [&uniform, &density, &alpha] {
+            assert!(needs_current_inpaint_nodes(
+                "inpainting",
+                0.5,
+                Some(settings)
+            ));
+        }
+        assert!(!needs_current_inpaint_nodes(
+            "inpainting",
+            0.0,
+            Some(&uniform)
+        ));
+        assert!(!needs_current_inpaint_nodes("txt2img", 1.0, Some(&uniform)));
+        assert!(!needs_current_inpaint_nodes("inpainting", 0.5, None));
+        assert!(!needs_current_inpaint_nodes(
+            "inpainting",
+            0.5,
+            Some(&json!({"mask_blur":4}))
+        ));
+    }
+    #[tokio::test]
+    async fn additive_area_limit_input_distinguishes_current_and_stale_running_nodes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for current in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let info = json!({"MooshieInpaintPrepare":{"input":{"optional": if current {json!({"area_limit":["MASK"]})} else {json!({})}}}});
+            let body = info.to_string();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                socket.read(&mut request).await.unwrap();
+                let response=format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body);
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+            assert_eq!(
+                node_declares_input(
+                    &reqwest::Client::new(),
+                    &url,
+                    "MooshieInpaintPrepare",
+                    "area_limit"
+                )
+                .await,
+                current
+            );
+            server.await.unwrap();
+        }
     }
 }

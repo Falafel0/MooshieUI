@@ -1,5 +1,6 @@
 import Konva from "konva";
 import type { CanvasLayer } from "./canvas.svelte.js";
+import type { LayerGroup } from "../utils/layerRelations.js";
 
 interface HistoryLayerEntry {
   layerId: string;
@@ -9,6 +10,9 @@ interface HistoryLayerEntry {
 interface DocumentState {
   layers: CanvasLayer[];
   activeLayerId: string | null;
+  /** Optional to preserve callers written before organizational groups. */
+  groups?: LayerGroup[];
+  activeGroupId?: string | null;
 }
 interface HistoryEntry {
   layers: HistoryLayerEntry[];
@@ -21,22 +25,31 @@ class CanvasHistoryStore {
   redoStack = $state.raw<HistoryEntry[]>([]);
   private layers: Map<string, Konva.Layer> | null = null;
   private onRestored: ((layerIds: string[]) => void) | null = null;
-  private onDocumentRestored: ((layers: CanvasLayer[], activeLayerId: string | null) => void) | null = null;
+  private onDocumentRestored: ((layers: CanvasLayer[], activeLayerId: string | null, groups: LayerGroup[], activeGroupId: string | null) => void) | null = null;
   private getDocumentState: (() => DocumentState) | null = null;
 
   setRefs(layers: Map<string, Konva.Layer>, _width: number, _height: number) { this.layers = layers; }
   setOnRestored(callback: ((layerIds: string[]) => void) | null) { this.onRestored = callback; }
-  setOnDocumentRestored(callback: ((layers: CanvasLayer[], activeLayerId: string | null) => void) | null) {
+  setOnDocumentRestored(callback: ((layers: CanvasLayer[], activeLayerId: string | null, groups: LayerGroup[], activeGroupId: string | null) => void) | null) {
     this.onDocumentRestored = callback;
   }
   setDocumentStateProvider(provider: (() => DocumentState) | null) { this.getDocumentState = provider; }
   get canUndo() { return this.undoStack.length > 0; }
   get canRedo() { return this.redoStack.length > 0; }
 
+  private clonePixelLayer(layer: Konva.Layer): Konva.Layer {
+    const clone = layer.clone();
+    // This destination-in image is derived from clipping metadata and rebuilt
+    // by the renderer. Keeping it as pixel content would bake clipping into
+    // undo snapshots and make later unlinking lose the original raster pixels.
+    for (const node of clone.getChildren()) if (node.hasName("raster-clip-mask")) node.destroy();
+    return clone;
+  }
+
   private capture(ids: string[]): HistoryLayerEntry[] {
     return ids.flatMap((id) => {
       const layer = this.layers?.get(id);
-      return layer ? [{ layerId: id, nodes: layer.getChildren().map((node) => node.clone()) }] : [];
+      return layer ? [{ layerId: id, nodes: layer.getChildren().filter(node => !node.hasName("raster-clip-mask")).map((node) => node.clone()) }] : [];
     });
   }
   private captureDocument(state: DocumentState, layerIds: string[] = []): HistoryEntry {
@@ -46,11 +59,12 @@ class CanvasHistoryStore {
     const metadata = JSON.parse(JSON.stringify(state.layers.map(({ controlnetPreviewUrl: _preview, ...layer }) => layer))) as CanvasLayer[];
     const layersToCopy = new Set(layerIds);
     return {
-      document: { layers: metadata, activeLayerId: state.activeLayerId },
+      document: { layers: metadata, activeLayerId: state.activeLayerId,
+        groups: JSON.parse(JSON.stringify(state.groups ?? [])) as LayerGroup[], activeGroupId: state.activeGroupId ?? null },
       layers: state.layers.flatMap((meta) => {
         const layer = this.layers?.get(meta.id);
         return layersToCopy.has(meta.id) && layer
-          ? [{ layerId: meta.id, nodes: [], layer: layer.clone() }]
+          ? [{ layerId: meta.id, nodes: [], layer: this.clonePixelLayer(layer) }]
           : [];
       }),
     };
@@ -74,7 +88,10 @@ class CanvasHistoryStore {
   }
   snapshot(id: string) { this.snapshotLayers([id]); }
   snapshotDocument(layers: CanvasLayer[], activeLayerId: string | null, layerIdsToCopy: string[] = []) {
-    this.undoStack = this.append(this.undoStack, this.captureDocument({ layers, activeLayerId }, layerIdsToCopy));
+    // Existing layer-only callers still capture the complete document context
+    // supplied by the store, before the action mutates groups or bindings.
+    const context = this.getDocumentState?.();
+    this.undoStack = this.append(this.undoStack, this.captureDocument({ ...context, layers, activeLayerId }, layerIdsToCopy));
     this.dispose(this.redoStack);
     this.redoStack = [];
   }
@@ -127,7 +144,7 @@ class CanvasHistoryStore {
       }
     }
 
-    this.onDocumentRestored?.(document.layers, document.activeLayerId);
+    this.onDocumentRestored?.(document.layers, document.activeLayerId, document.groups ?? [], document.activeGroupId ?? null);
     this.onRestored?.(restored);
     this.dispose([entry]);
   }

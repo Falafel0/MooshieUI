@@ -1423,6 +1423,7 @@ class MooshieInpaintPrepare:
                 "grow": ("INT", {"default": 0, "min": 0, "max": 256}),
                 "settings": ("STRING", {"default": "{}"})},
                 "optional": {
+                    "area_limit": ("MASK",),
                     "target_width": ("INT", {"default": 0, "min": 0, "max": 16384}),
                     "target_height": ("INT", {"default": 0, "min": 0, "max": 16384}),
                 }}
@@ -1430,7 +1431,7 @@ class MooshieInpaintPrepare:
     FUNCTION = "prepare"
     CATEGORY = "mooshie/inpainting"
 
-    def prepare(self, image, mask, width, height, grow, settings, target_width=0, target_height=0):
+    def prepare(self, image, mask, width, height, grow, settings, target_width=0, target_height=0, area_limit=None):
         opts = _inpaint_options(settings)
         image = image[..., :3]
         b, ih, iw, _ = image.shape
@@ -1438,6 +1439,10 @@ class MooshieInpaintPrepare:
         mask = _inpaint_resize(mask.reshape(-1, 1, *mask.shape[-2:]).to(image.device), iw, ih)
         if mask.shape[0] == 1 and b > 1:
             mask = mask.expand(b, -1, -1, -1)
+        if area_limit is not None:
+            area_limit = _inpaint_resize(area_limit.reshape(-1, 1, *area_limit.shape[-2:]).to(image.device), iw, ih)
+            if area_limit.shape[0] == 1 and b > 1:
+                area_limit = area_limit.expand(b, -1, -1, -1)
         rgb = image.movedim(-1, 1)
         mode = opts["resize_mode"]
         if mode in ("crop", "fill"):
@@ -1445,16 +1450,20 @@ class MooshieInpaintPrepare:
             rw, rh = max(1, round(iw * scale)), max(1, round(ih * scale))
             rgb = _inpaint_resize(rgb, rw, rh)
             mask = _inpaint_resize(mask, rw, rh)
+            if area_limit is not None: area_limit = _inpaint_resize(area_limit, rw, rh)
             if mode == "crop":
                 x, y = (rw-width)//2, (rh-height)//2
                 rgb, mask = rgb[:, :, y:y+height, x:x+width], mask[:, :, y:y+height, x:x+width]
+                if area_limit is not None: area_limit = area_limit[:, :, y:y+height, x:x+width]
             else:
                 px, py = width-rw, height-rh
                 padding = (px//2, px-px//2, py//2, py-py//2)
                 rgb = torch.nn.functional.pad(rgb, padding, mode="replicate")
                 mask = torch.nn.functional.pad(mask, padding)
+                if area_limit is not None: area_limit = torch.nn.functional.pad(area_limit, padding)
         else:
             rgb, mask = _inpaint_resize(rgb, width, height), _inpaint_resize(mask, width, height)
+            if area_limit is not None: area_limit = _inpaint_resize(area_limit, width, height)
         mask = mask.clamp(0, 1)
         if opts["invert_mask"]:
             mask = 1-mask
@@ -1469,6 +1478,11 @@ class MooshieInpaintPrepare:
             kernel /= kernel.sum()
             mask = torch.nn.functional.conv2d(torch.nn.functional.pad(mask, (radius,radius,0,0), mode="replicate"), kernel.view(1,1,1,-1))
             mask = torch.nn.functional.conv2d(torch.nn.functional.pad(mask, (0,0,radius,radius), mode="replicate"), kernel.view(1,1,-1,1))
+        if area_limit is not None:
+            # Growth, inversion and blur cannot grant permission outside a
+            # linked raster. Cap rather than multiply again: the raw exported
+            # mask already incorporated intrinsic alpha once.
+            mask = torch.minimum(mask, area_limit.clamp(0, 1))
         base = rgb.movedim(1, -1)
         x, y, cw, ch = 0, 0, width, height
         if opts["area"] == "masked":
@@ -1509,7 +1523,7 @@ class MooshieInpaintPrepare:
         # interpolation and distorts non-square Only masked regions.
         context["sample_size"] = (sample_width, sample_height)
         sample_mask = _inpaint_resize(cropped_mask, sample_width, sample_height).squeeze(1)
-        if opts["soft"]:
+        if opts["soft"] and opts.get("density_denoise") is not False:
             sample_mask = sample_mask.pow(max(.01, min(8, float(opts["schedule_bias"]))))
         # Latent resize encodes native crop pixels, then resizes the latent in the encoder.
         pixels = cropped_rgb if mode == "latent" else _inpaint_resize(cropped_rgb, sample_width, sample_height)
@@ -1553,6 +1567,13 @@ class MooshieInpaintEncode:
             generator = torch.Generator(device="cpu").manual_seed(seed)
             noise = torch.randn(samples.shape, generator=generator, dtype=samples.dtype).to(samples.device)
             samples = samples*(1-latent_mask) + noise*latent_mask
+        if opts.get("density_denoise") is False:
+            # Density is still the final compositing alpha. With per-pixel
+            # denoise disabled, however, every selected pixel must be sampled
+            # at the same denoise, even when DifferentialDiffusion is patched
+            # automatically for the model. Binarize after interpolation and
+            # content preparation so neither silently changes this policy.
+            latent_mask = (latent_mask > 0).to(latent_mask.dtype)
         # KSampler consumes noise_mask alongside `samples`, so it must have
         # the latent resolution. Returning the full-resolution brush mask here
         # made inpainting fail or apply to the wrong area whenever the VAE

@@ -15,6 +15,7 @@ const docs = await import('data:text/javascript;base64,' + Buffer.from(code).toS
 /** A mask layer, so every case starts from the same honest shape. */
 function maskLayer(overrides = {}) {
   return {
+    id: 'mask-1',
     name: 'Mask 1',
     type: 'mask',
     visible: true,
@@ -62,6 +63,7 @@ test('a raster may not point at pixels that die with the session', () => {
     document_({
       layers: [
         {
+          id: 'base',
           name: 'Base',
           type: 'raster',
           visible: true,
@@ -135,6 +137,7 @@ test('what only changes how a layer looks is not a change to the document', () =
     document_({
       layers: [
         {
+          id: 'base',
           name: 'Base',
           type: 'raster',
           visible: true,
@@ -155,4 +158,124 @@ test('settings travel with a document and compare by value', () => {
   const circular = {};
   circular.self = circular;
   assert.equal(docs.settingsSignature(circular), 'unreadable', 'a broken snapshot must not throw');
+});
+
+test('v2 persists ids and groups while v1 documents without either remain readable', () => {
+  const legacy = document_({ version: 1 });
+  delete legacy.groups;
+  delete legacy.layers[0].id;
+  assert.equal(docs.isProjectDocument(legacy), true);
+  const current = document_();
+  assert.equal(current.version, 2);
+  assert.deepEqual(current.groups, []);
+  assert.equal(docs.isProjectDocument(current), true);
+  assert.equal(docs.isProjectDocument({ ...current, groups: undefined }), false);
+  assert.equal(docs.isProjectDocument({ ...current, layers: [{ ...current.layers[0], id: undefined }] }), false);
+  assert.equal(docs.isProjectDocument({ ...current, layers: [current.layers[0], { ...current.layers[0] }] }), false);
+  for (const groups of [
+    [{ id: 'g', name: 'Group', visible: true }, { id: 'g', name: 'Duplicate', visible: true }],
+    [{ id: 'g', name: 'Group', visible: 'yes' }],
+    [{ id: '', name: 'Group', visible: true }],
+    [{ id: 'g', name: 'Group', visible: true, collapsed: 'yes' }],
+  ]) assert.equal(docs.isProjectDocument({ ...current, groups }), false);
+  for (const version of [0, -1, 1.5, NaN]) assert.equal(docs.isProjectDocument({ ...current, version }), false);
+});
+
+test('serialized relations retain missing explicit references and empty scope without broadening', () => {
+  const doc = document_({ groups: [{ id: 'face', name: 'Face', visible: true, collapsed: true }] });
+  doc.layers = [
+    maskLayer({ groupId: 'face', targetRasterId: 'missing-raster' }),
+    { ...maskLayer(), id: 'pixels', type: 'raster', spatialPng: undefined, clippingMaskId: 'missing-mask', clippingEnabled: false },
+    { ...maskLayer(), id: 'prompt', type: 'region', modifierScope: { mode: 'masks', maskIds: [] }, targetRasterId: 'missing-raster' },
+  ];
+  const stored = JSON.parse(JSON.stringify(doc));
+  assert.equal(docs.isProjectDocument(stored), true, 'missing targets are repairable intent, not corrupt metadata');
+  assert.equal(stored.layers[0].targetRasterId, 'missing-raster');
+  assert.equal(stored.layers[1].clippingMaskId, 'missing-mask');
+  assert.equal(stored.layers[1].clippingEnabled, false);
+  assert.deepEqual(stored.layers[2].modifierScope.maskIds, []);
+  assert.equal(stored.groups[0].collapsed, true);
+  assert.equal(docs.isProjectDocument(document_({ layers: [maskLayer({ groupId: 'missing-group' })] })), true);
+});
+
+test('invalid relation roles and shapes are rejected before load', () => {
+  for (const patch of [
+    { referenceRasterId: 'pixels' },
+    { clippingMaskId: 'another-mask' },
+    { clippingEnabled: true },
+    { targetRasterId: 12 },
+    { groupId: '' },
+    { modifierScope: { mode: 'document' } },
+  ]) assert.equal(docs.isProjectDocument(document_({ layers: [maskLayer(patch)] })), false, JSON.stringify(patch));
+  for (const modifierScope of [{ mode: 'bad' }, { mode: 'masks', maskIds: 'mask-1' }, { mode: 'masks', maskIds: [null] }]) {
+    assert.equal(docs.isProjectDocument(document_({ layers: [maskLayer({ type: 'region', modifierScope })] })), false);
+  }
+});
+
+test('groups and functional bindings change the signature, collapsed UI state does not', () => {
+  const doc = document_({ groups: [{ id: 'face', name: 'Face', visible: true, collapsed: false }] });
+  const baseline = docs.documentSignature(doc);
+  const clone = () => JSON.parse(JSON.stringify(doc));
+  const collapsed = clone();
+  collapsed.groups[0].collapsed = true;
+  assert.equal(docs.documentSignature(collapsed), baseline);
+  for (const patch of [{ groupId: 'face' }, { targetRasterId: 'raster' }, { clippingMaskId: 'other-mask' }, { clippingEnabled: false }, { referenceRasterId: 'raster' }, { modifierScope: { mode: 'masks', maskIds: [] } }]) {
+    const changed = clone();
+    Object.assign(changed.layers[0], patch);
+    assert.notEqual(docs.documentSignature(changed), baseline, JSON.stringify(patch));
+  }
+  for (const patch of [{ name: 'Face edited' }, { visible: false }, { id: 'face-new' }]) {
+    const changed = clone();
+    Object.assign(changed.groups[0], patch);
+    assert.notEqual(docs.documentSignature(changed), baseline);
+  }
+});
+
+test('raster paint preserves primitives, eraser ordering and transforms without baking generated clipping', () => {
+  const node = (type, attrs, name = '') => ({ getClassName: () => type, getAttrs: () => attrs, hasName: value => value === name });
+  const points = [2, 4, 10, 20];
+  const raw = [
+    node('Image', { image: {} }, 'raster-asset'),
+    node('Line', { points, stroke: '#fff', strokeWidth: 12, lineCap: 'round', opacity: .7, globalCompositeOperation: 'source-over', listening: false }),
+    node('Rect', { x: 4, y: 8, width: 12, height: 20, fill: '#e0c', scaleX: 2, scaleY: .5 }),
+    node('Ellipse', { x: 8, y: 12, radiusX: 4, radiusY: 2, rotation: 15, fill: '#fff' }),
+    node('Line', { points: [8, 8, 14, 20], stroke: '#000', strokeWidth: 5, globalCompositeOperation: 'destination-out' }),
+    node('Image', { image: {} }, 'raster-clip-mask'),
+  ];
+  const paint = docs.captureRasterPaint(raw);
+  assert.deepEqual(paint.map(command => command.type), ['Line', 'Rect', 'Ellipse', 'Line']);
+  assert.equal(paint.at(-1).attrs.globalCompositeOperation, 'destination-out');
+  assert.equal(paint[1].attrs.scaleX, 2);
+  assert.equal(paint[0].attrs.listening, undefined);
+  points[0] = 100;
+  assert.equal(paint[0].attrs.points[0], 2, 'capture is a snapshot, not a live pointer to the stroke');
+  const restored = docs.decodeRasterPaint(JSON.parse(JSON.stringify(paint)));
+  assert.deepEqual(restored, paint);
+  restored[0].attrs.points[0] = 200;
+  assert.equal(paint[0].attrs.points[0], 2);
+  const document = document_({ layers: [{ ...maskLayer(), type: 'raster', rasterPaint: paint }] });
+  assert.equal(docs.isProjectDocument(document), true, 'a pure painted raster does not need an asset image');
+  assert.equal(docs.isProjectDocument(document_({ layers: [maskLayer({ rasterPaint: paint })] })), false);
+  const baseline = docs.documentSignature(document);
+  document.layers[0].rasterPaint[0].attrs.stroke = '#abc';
+  assert.notEqual(docs.documentSignature(document), baseline);
+});
+
+test('unsupported nodes or malformed paint cannot be quietly omitted from a saved raster', () => {
+  const unknownImage = { getClassName: () => 'Image', getAttrs: () => ({ image: {} }), hasName: () => false };
+  assert.throws(() => docs.captureRasterPaint([unknownImage]), /Cannot save raster paint node: Image/);
+  for (const paint of [
+    [{ type: 'Path', attrs: {} }],
+    [{ type: 'Line', attrs: {} }],
+    [{ type: 'Line', attrs: { points: [1, 2, 3] } }],
+    [{ type: 'Line', attrs: { points: [1, NaN] } }],
+    [{ type: 'Rect', attrs: { width: -1 } }],
+    [{ type: 'Rect', attrs: { x: Infinity } }],
+    [{ type: 'Ellipse', attrs: { opacity: 2 } }],
+    [{ type: 'Rect', attrs: { globalCompositeOperation: 'made-up' } }],
+    [{ type: 'Rect', attrs: { customFunction: 'unsupported' } }],
+  ]) {
+    assert.equal(docs.isRasterPaint(paint), false, JSON.stringify(paint));
+    assert.equal(docs.decodeRasterPaint(paint), null);
+  }
 });

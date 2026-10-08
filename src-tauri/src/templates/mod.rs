@@ -18,6 +18,127 @@ pub mod video_interpolate;
 pub mod video_refine;
 pub mod video_retake;
 
+#[cfg(test)]
+mod denoise_tests {
+    use super::graph_test_util::{build, linked, nodes, params, single};
+    use super::validate_generation_params;
+    use serde_json::json;
+
+    #[test]
+    fn zero_denoise_bypasses_lossy_vae_reconstruction() {
+        for mode in ["img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            p.denoise = 0.0;
+            p.inpaint_settings = Some(json!({"masked_content": "noise", "soft": true}));
+            let workflow = build(&p);
+            assert!(nodes(&workflow, "KSampler").is_empty(), "{mode}");
+            assert!(nodes(&workflow, "VAEEncode").is_empty(), "{mode}");
+            assert!(
+                nodes(&workflow, "MooshieInpaintEncode").is_empty(),
+                "{mode}"
+            );
+            assert!(nodes(&workflow, "VAEDecode").is_empty(), "{mode}");
+            let saved = single(&workflow, "MooshieSaveImage");
+            let image = linked(&workflow, &saved["inputs"]["images"]);
+            assert_eq!(
+                image["class_type"],
+                if mode == "img2img" {
+                    "ImageScale"
+                } else {
+                    "LoadImage"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn zero_base_denoise_keeps_an_independently_enabled_upscale_pass() {
+        let mut p = params("inpainting", "sdxl");
+        p.denoise = 0.0;
+        p.upscale_enabled = true;
+        p.upscale_method = "latent".into();
+        p.upscale_scale = 2.0;
+        p.upscale_steps = 8;
+        p.upscale_denoise = 0.2;
+        let workflow = build(&p);
+        assert_eq!(
+            single(&workflow, "KSampler")["inputs"]["denoise"],
+            json!(0.2)
+        );
+        assert!(nodes(&workflow, "MooshieInpaintEncode").is_empty());
+    }
+
+    #[test]
+    fn fractional_denoise_reaches_sampler_without_changing_steps_or_control_strength() {
+        for mode in ["img2img", "inpainting"] {
+            for denoise in [0.01, 0.42, 1.0] {
+                let mut p = params(mode, "sdxl");
+                p.denoise = denoise;
+                let workflow = build(&p);
+                let sampler = single(&workflow, "KSampler");
+                assert_eq!(sampler["inputs"]["denoise"], json!(denoise));
+                assert_eq!(sampler["inputs"]["steps"], json!(p.steps));
+            }
+        }
+    }
+
+    #[test]
+    fn density_sampling_requests_differential_diffusion_even_without_a_global_patch() {
+        let mut p = params("inpainting", "sdxl");
+        p.inpaint_settings = Some(json!({"density_denoise": true}));
+        let workflow = build(&p);
+        assert_eq!(nodes(&workflow, "DifferentialDiffusion").len(), 1);
+        assert_eq!(nodes(&workflow, "KSampler").len(), 1);
+        let encode = single(&workflow, "MooshieInpaintEncode");
+        let settings: serde_json::Value =
+            serde_json::from_str(encode["inputs"]["settings"].as_str().unwrap()).unwrap();
+        assert_eq!(settings["density_denoise"], json!(true));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_active_denoise_and_ignores_unused_state() {
+        for mode in ["img2img", "inpainting"] {
+            let mut p = params(mode, "sdxl");
+            for value in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+                p.denoise = value;
+                let error = validate_generation_params(&p).unwrap_err();
+                assert!(error.contains("Denoising strength"), "{mode}: {error}");
+            }
+            for value in [0.0, 0.42, 1.0] {
+                p.denoise = value;
+                assert!(validate_generation_params(&p).is_ok());
+            }
+        }
+        let mut p = params("txt2img", "sdxl");
+        p.denoise = f64::NAN;
+        p.upscale_denoise = f64::NAN;
+        p.facefix_denoise = f64::NAN;
+        assert!(validate_generation_params(&p).is_ok());
+        p.upscale_enabled = true;
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Upscale denoising strength"));
+        p.upscale_enabled = false;
+        p.facefix_enabled = true;
+        assert!(validate_generation_params(&p)
+            .unwrap_err()
+            .contains("Face detail denoising strength"));
+    }
+    #[test]
+    fn linked_raster_alpha_limits_area_without_an_extra_sampling_job() {
+        let mut p = params("inpainting", "sdxl");
+        p.inpaint_settings =
+            Some(json!({"area_limit_image": "raster-alpha.png", "density_denoise": false}));
+        let workflow = build(&p);
+        assert_eq!(nodes(&workflow, "KSampler").len(), 1);
+        let prepare = single(&workflow, "MooshieInpaintPrepare");
+        let limit = linked(&workflow, &prepare["inputs"]["area_limit"]);
+        assert_eq!(limit["class_type"], "LoadImageMask");
+        assert_eq!(limit["inputs"]["image"], "raster-alpha.png");
+        assert_eq!(limit["inputs"]["channel"], "red");
+    }
+}
+
 use serde_json::{json, Value};
 
 use crate::comfyui::types::{BaseSources, GenerationParams, PromptSegment, StageContext};
@@ -159,6 +280,26 @@ pub fn validate_generation_params(params: &GenerationParams) -> Result<(), Strin
 
     let needs_input_image =
         matches!(params.mode.as_str(), "img2img" | "inpainting") || params.refine_only;
+
+    let check_denoise = |label: &str, value: f64| {
+        if value.is_finite() && (0.0..=1.0).contains(&value) {
+            Ok(())
+        } else {
+            Err(format!("{label} must be a finite value between 0 and 1."))
+        }
+    };
+    if matches!(params.mode.as_str(), "img2img" | "inpainting") && !params.refine_only {
+        check_denoise("Denoising strength", params.denoise)?;
+    }
+    if params.upscale_enabled && params.upscale_method != "seedvr2" {
+        check_denoise("Upscale denoising strength", params.upscale_denoise)?;
+    }
+    if params.facefix_enabled {
+        check_denoise("Face detail denoising strength", params.facefix_denoise)?;
+    }
+    for segment in &params.detail_segments {
+        check_denoise("Segment detail denoising strength", segment.creativity)?;
+    }
 
     if needs_input_image
         && params

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { prepareControlnetReference } from "../../utils/controlnetReference.js";
-  import { captureLayer } from "../../utils/canvasLayerExport.js";
+  import { canvasPngBytes, matteControlnetReference } from "../../utils/canvasLayerExport.js";
   import { controlnetEditor as generation, controlnetEditorContext, setControlnetSourceData } from "../../stores/controlnetEditor.svelte.js";
   import { canvas } from "../../stores/canvas.svelte.js";
   import { models } from "../../stores/models.svelte.js";
@@ -9,6 +9,7 @@
   import {
     downloadModel,
     uploadImage,
+    uploadImageBytes,
     readClipboardImageSafe,
     checkNodeAvailable,
     installCustomNode,
@@ -48,13 +49,24 @@
   let dlBytes = $state(0);
   let dlTotal = $state(0);
   let uploadingImage = $state(false);
-  const imagePreviewUrl = $derived(generation.controlnetPreviewUrl);
+  const linkedReferenceId = $derived(controlnetEditorContext() ? canvas.activeLayer?.referenceRasterId ?? null : null);
+  let linkedPreviewUrl = $state<string | null>(null);
+  const imagePreviewUrl = $derived(linkedReferenceId ? linkedPreviewUrl : generation.controlnetPreviewUrl);
+  $effect(() => {
+    const id = linkedReferenceId;
+    void canvas.paintRevision;
+    void canvas.layers;
+    untrack(() => {
+      const pixels = id ? canvas.exportRasterLayer(id) : null;
+      linkedPreviewUrl = pixels ? matteControlnetReference(pixels).toDataURL('image/png') : null;
+    });
+  });
   const imageRequests = new LatestControlnetRequest();
   const previewRequests = new LatestControlnetRequest();
   let previewRequest: ReturnType<LatestControlnetRequest['begin']> | null = null;
   let mounted = false;
   let imageError = $state<string | null>(null);
-  const requestKey = () => JSON.stringify([controlnetEditorContext(), controlnetRequestKey(generation)]);
+  const requestKey = () => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, linkedReferenceId, linkedReferenceId ? canvas.paintRevision : 0, linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null, controlnetRequestKey(generation)]);
   const previewPreprocessor = $derived(generation.controlnetPreprocessor?.trim() || null);
   const sourceImage = $derived(generation.mode === 'image_edit' ? generation.editReferenceImages[0] ?? null : generation.mode === 'img2img' || generation.mode === 'inpainting' ? generation.inputImage : null);
   let readyWait: Awaited<ReturnType<typeof createComfyReadyWait>> | null = null;
@@ -99,6 +111,7 @@
     generation.isAnima ? models.modelPatches : models.controlnetModels,
   );
 
+  const selectedModelMissing = $derived(!!generation.controlnetModel && !models.loading && !customModeModels.includes(generation.controlnetModel));
   const presetNeedsPreprocessor = $derived(!!previewPreprocessor);
 
   function beginControlEdit() { const id = controlnetEditorContext(); if (id) canvas.beginControlnetEdit(id); }
@@ -201,11 +214,13 @@
     preprocessorPreviewUrl = null; preprocessorPreviewStatus = 'idle';
   }
   function removeImage() {
+    if (linkedReferenceId && canvas.activeLayer) { canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null }); resetPreparedPreview(); return; }
     imageRequests.invalidate(); uploadingImage = false; generation.controlnetImage = null;
     clearPreview(); setControlnetSourceData(null); resetPreparedPreview(); generation.saveSettings();
   }
   async function useSourceImage() {
     if (!sourceImage) return;
+    if (linkedReferenceId && canvas.activeLayer) canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null });
     imageRequests.invalidate(); uploadingImage = false; resetPreparedPreview(); clearPreview();
     generation.controlnetImage = sourceImage;
     setControlnetSourceData(null);
@@ -229,6 +244,7 @@
       if (!file.type.startsWith('image/')) throw new Error(locale.t('generation.controlnet.image_type'));
       const result = await prepareControlnetReference(file);
       if (!mounted || !imageRequests.current(request, requestKey())) return;
+      if (linkedReferenceId && canvas.activeLayer) canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null });
       resetPreparedPreview(); generation.controlnetImage = result.name; setPreview(result.blob);
       if (controlnetEditorContext()) setControlnetSourceData(result.sourceData);
       generation.saveSettings();
@@ -236,14 +252,10 @@
     finally { if (mounted && imageRequests.current(request, request.key)) uploadingImage = false; }
   }
   async function useRasterReference(id: string) {
-    const request = imageRequests.begin(requestKey());
-    const node = canvas.getStageRef()?.getLayers().find((item: { id: () => string }) => item.id() === id);
-    if (!node) return;
-    try {
-      const captured = captureLayer(node, canvas.canvasWidth, canvas.canvasHeight);
-      const blob = await new Promise<Blob>((resolve, reject) => captured.toBlob(result => result ? resolve(result) : reject(new Error('Image encode failed')), 'image/png'));
-      if (mounted && imageRequests.current(request, requestKey())) await uploadControlImage(new File([blob], 'canvas-reference.png', {type:'image/png'}));
-    } catch (error) { if (mounted && imageRequests.current(request, requestKey())) imageError = locale.t('generation.controlnet.image_failed', {error:String(error)}); }
+    if (!controlnetEditorContext() || !canvas.activeLayer || canvas.activeLayer.locked) return;
+    if (!canvas.layers.some(layer => layer.id === id && layer.type === 'raster')) return;
+    canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: id });
+    resetPreparedPreview();
   }
 
   async function handleImageUpload(event: Event) {
@@ -395,15 +407,24 @@
     }
   }
   async function preparePreprocessorImage() {
-    const image = generation.controlnetImage, preprocessor = previewPreprocessor;
-    if (!image || !preprocessor || preprocessorPreviewStatus === 'preparing') return;
+    let image = generation.controlnetImage;
+    const preprocessor = previewPreprocessor;
+    if ((!image && !linkedReferenceId) || !preprocessor || preprocessorPreviewStatus === 'preparing') return;
     resetPreparedPreview(); const request = previewRequests.begin(requestKey()); previewRequest = request;
     preprocessorPreviewStatus = 'preparing';
     preprocessorPreviewTimeout = setTimeout(() => {
       if (previewRequests.current(request, requestKey())) { preprocessorPreviewStatus = 'failed'; preprocessorPreviewPromptId = null; previewRequests.invalidate(); pendingPreprocessorEvents.clear(); }
     }, 120_000);
     try {
-      const result = await generateControlnetPreprocessorPreview(image, preprocessor);
+      if (linkedReferenceId) {
+        const reference = canvas.exportRasterLayer(linkedReferenceId);
+        if (!reference) throw new Error(locale.t('canvas.missing_connection'));
+        const bytes = await canvasPngBytes(matteControlnetReference(reference));
+        const uploaded = await uploadImageBytes(bytes, `control-preview-${controlnetEditorContext()}.png`);
+        if (!mounted || !previewRequests.current(request, requestKey())) return;
+        image = uploaded.name;
+      }
+      const result = await generateControlnetPreprocessorPreview(image!, preprocessor);
       if (!mounted || !previewRequests.current(request, requestKey())) return;
       preprocessorPreviewPromptId = result.prompt_id;
       const buffered = pendingPreprocessorEvents.get(result.prompt_id); pendingPreprocessorEvents.clear();
@@ -639,15 +660,18 @@
           /></label
         >
         <select
+          aria-label={locale.t('generation.controlnet.controlnet_model')}
           bind:value={generation.controlnetModel}
           onchange={() => generation.saveSettings()}
           class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:border-indigo-500 transition-colors"
         >
           <option value={null}>{locale.t('generation.controlnet.select_model')}</option>
+          {#if selectedModelMissing}<option value={generation.controlnetModel} disabled>{generation.controlnetModel} — {locale.t('generation.controlnet.not_available')}</option>{/if}
           {#each customModeModels as model}
             <option value={model}>{model}</option>
           {/each}
         </select>
+        {#if selectedModelMissing}<p role="status" class="mt-1 text-xs text-amber-300">{locale.t('generation.controlnet.model_missing', { model: generation.controlnetModel ?? '' })}</p>{/if}
       </div>
 
       <div class="flex items-center gap-2">
@@ -683,7 +707,7 @@
     {/if}
 
       <!-- Preprocessor preview -->
-      {#if presetNeedsPreprocessor && generation.controlnetImage && connection.connected}
+      {#if presetNeedsPreprocessor && (generation.controlnetImage || linkedReferenceId) && connection.connected}
         <div class="flex items-center justify-between">
           <span class="text-xs text-neutral-400">{locale.t('generation.controlnet.prepare_preprocessor')}<InfoTip text={locale.t('generation.controlnet.prepare_preprocessor_tip')} /></span>
           {#if preprocessorPreviewStatus === "preparing"}
@@ -718,10 +742,10 @@
       {/if}
 
     {#if sourceImage}<button type="button" onclick={useSourceImage} class="ui-control w-full rounded-lg border border-ui-border text-xs text-neutral-300 hover:bg-ui-selected">{locale.t('generation.controlnet.use_source')}</button>{/if}
-    {#if controlnetEditorContext() && canvas.layers.some(layer => layer.type === 'raster' && layer.image)}
+    {#if controlnetEditorContext() && canvas.layers.some(layer => layer.type === 'raster')}
       <select aria-label={locale.t('generation.controlnet.use_layer')} value="" onchange={event => { const id = event.currentTarget.value; event.currentTarget.value = ''; void useRasterReference(id); }} class="ui-control w-full rounded-md border border-ui-border bg-neutral-950 px-2 text-xs text-neutral-300">
         <option value="" disabled>{locale.t('generation.controlnet.use_layer')}</option>
-        {#each canvas.sortedLayers.filter(layer => layer.type === 'raster' && layer.image) as layer (layer.id)}<option value={layer.id}>{layer.name}</option>{/each}
+        {#each canvas.sortedLayers.filter(layer => layer.type === 'raster') as layer (layer.id)}<option value={layer.id}>{layer.name}</option>{/each}
       </select>
     {/if}
     {#if imageError}<p role="alert" class="text-xs text-red-400">{imageError}</p>{/if}
@@ -732,7 +756,7 @@
           text={locale.t('generation.controlnet.image_tip')}
         /></label
       >
-      {#if generation.controlnetImage}
+      {#if generation.controlnetImage || linkedReferenceId}
         <div class="space-y-2">
           {#if imagePreviewUrl}
             <div class="relative rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700">
@@ -755,7 +779,7 @@
             </div>
           {/if}
           <div class="flex items-center gap-2 bg-neutral-800 rounded-lg px-3 py-2">
-            <span class="text-xs text-neutral-300 truncate flex-1">{generation.controlnetImage}</span>
+            <span class="text-xs text-neutral-300 truncate flex-1">{linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId)?.name ?? locale.t("canvas.missing_target") : generation.controlnetImage}</span>
             {#if !imagePreviewUrl}
               <button
                 onclick={removeImage}

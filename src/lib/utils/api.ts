@@ -516,7 +516,18 @@ export async function readPatchyDocument(
 /** Capture the matching document in the user's open Patchy window, including
  * unsaved edits. A preview is bounded to 1024 pixels; a full read preserves
  * every pixel and rejects edits made while its tiles were being captured. */
+export interface PatchyLiveLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  isGroup: boolean;
+  children: PatchyLiveLayer[];
+}
+
 export interface PatchyLiveRead {
+  layers?: PatchyLiveLayer[];
   bytes: number[];
   modified: boolean;
   state_token: string;
@@ -550,16 +561,18 @@ export async function disconnectPatchyLive(): Promise<void> {
 
 export async function patchyLiveAction(
   path: string,
-  action: "undo" | "redo" | "add_reference_layer",
+  action: "undo" | "redo" | "add_reference_layer" | "set_layer_visibility" | "set_layer_opacity",
   expectedState: string,
   sourceBytes?: number[] | null,
   explicit?: string | null,
+  layerChange?: { id: string; value: boolean | number },
 ): Promise<boolean> {
   return ipcInvoke<boolean>("patchy_live_action", {
     path,
     action,
     expectedState,
     sourceBytes: sourceBytes ?? null,
+    layerChange: layerChange ?? null,
     explicit: explicit ?? null,
   });
 }

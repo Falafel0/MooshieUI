@@ -50,6 +50,25 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     );
     next_id += 1;
 
+    // Zero denoise must leave the source intact. Encoding/decoding or filling
+    // masked content would otherwise alter pixels despite the zero setting.
+    // Post-processing can still act on this image when explicitly enabled.
+    if params.denoise == 0.0 {
+        return WorkflowResult {
+            workflow,
+            next_id,
+            image_output: (load_img_id, 0),
+            model_source,
+            clip_source,
+            positive_source: pos_source,
+            negative_source: neg_source,
+            vae_source,
+            sampler_id: String::new(),
+            refiner_model_source: None,
+            base_sources: None,
+        };
+    }
+
     // Load mask
     let load_mask_id = next_id.to_string();
     workflow.insert(
@@ -69,6 +88,21 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         .clone()
         .unwrap_or_else(|| json!({}))
         .to_string();
+    let area_limit_id = params
+        .inpaint_settings
+        .as_ref()
+        .and_then(|settings| settings.get("area_limit_image"))
+        .and_then(|value| value.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| {
+            let id = next_id.to_string();
+            workflow.insert(
+                id.clone(),
+                json!({"class_type": "LoadImageMask", "inputs": {"image": name, "channel": "red"}}),
+            );
+            next_id += 1;
+            id
+        });
     let prepare_id = next_id.to_string();
     workflow.insert(
         prepare_id.clone(),
@@ -84,6 +118,9 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
         }),
     );
     next_id += 1;
+    if let Some(id) = area_limit_id {
+        workflow.get_mut(&prepare_id).unwrap()["inputs"]["area_limit"] = json!([id, 0]);
+    }
     let masked_latent_id = next_id.to_string();
     workflow.insert(
         masked_latent_id.clone(),
@@ -227,7 +264,14 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     let is_cfgpp_sampler = sampler_name_lc.contains("cfg_pp");
     let is_vpred_or_anima = is_vpred_model(params) || params.model_architecture == "anima";
 
-    let use_differential_diffusion = params.differential_diffusion
+    let density_denoise = params
+        .inpaint_settings
+        .as_ref()
+        .and_then(|s| s.get("density_denoise"))
+        .and_then(|s| s.as_bool())
+        .unwrap_or(false);
+    let use_differential_diffusion = density_denoise
+        || params.differential_diffusion
         || params
             .inpaint_settings
             .as_ref()

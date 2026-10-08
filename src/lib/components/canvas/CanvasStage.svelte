@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
+  import { effectiveLayerVisibility, modifierAppliesToMask } from "../../utils/layerRelations.js";
   import Konva from "konva";
-  import { captureLayer, maskToGrayscale } from "../../utils/canvasLayerExport.js";
+  import { captureLayer, maskToGrayscale, matteControlnetReference } from "../../utils/canvasLayerExport.js";
   import { processMaskCoverage } from "../../utils/maskProcessing.js";
   import { resolveTint, resolveTintKey } from "../../utils/layerTints.js";
   import { isTypingTarget } from "../../utils/keyboardTarget.js";
@@ -124,6 +125,7 @@
   });
 
   onDestroy(() => {
+    if (clippingRaf !== null) cancelAnimationFrame(clippingRaf);
     // A pointer can be released outside the stage, or the editor can be
     // unmounted mid-drag. Commit the last raster position before retaining its
     // layer node so a remount cannot snap it back to an older store value.
@@ -359,7 +361,7 @@
     const node = konvaLayers.get(layer.id);
     const geometry = node ? JSON.stringify(node.getChildren().map((child) => nodeGeometry(child))) : 'none';
     const key = [
-      layer.id, canvas.paintRevision, grow, blur, invert, tint, geometry,
+      layer.id, canvas.paintRevision, layer.targetRasterId, layer.coverage, grow, blur, invert, tint, geometry,
       canvas.canvasWidth, canvas.canvasHeight,
     ].join('|');
     if (contentBoundsCache?.key === key) return contentBoundsCache.bounds;
@@ -369,7 +371,7 @@
       contentBoundsCache = { key, bounds: null };
       return null;
     }
-    const processed = buildProcessedMask(source, grow, blur, invert, tint);
+    const processed = buildProcessedMask(source, grow, blur, invert, tint, layer.targetRasterId);
     const bounds = processed.bounds;
     const result = bounds ? clampToDocument(identityBox(bounds.x, bounds.y, bounds.width, bounds.height), canvas.canvasWidth, canvas.canvasHeight) : null;
     contentBoundsCache = { key, bounds: result };
@@ -398,7 +400,7 @@
     }
     const kLayer = layer ? konvaLayers.get(layer.id) : null;
     transformBase = layerBoxNode && kLayer
-      ? { reference: boxGeometryOf(layerBoxNode), nodes: kLayer.getChildren().map((node) => ({ node, base: nodeGeometry(node) })) }
+      ? { reference: boxGeometryOf(layerBoxNode), nodes: kLayer.getChildren().filter(node => node.name() !== 'raster-clip-mask').map((node) => ({ node, base: nodeGeometry(node) })) }
       : null;
   }
 
@@ -509,7 +511,7 @@
       // proportions, Alt scales from the centre, only upright angles snap.
       const layer = canvas.activeLayer;
       const onCanvas = canvas.selectedWorkspaceSection === 'layers';
-      const canTransform = !!(layer && onCanvas && layer.visible && !layer.locked);
+      const canTransform = !!(layer && onCanvas && effectiveLayerVisibility(layer, canvas.groups) && !layer.locked);
       selectionTransformer.setAttrs({
         rotateEnabled: true,
         keepRatio: false,
@@ -583,7 +585,7 @@
     image.src = url;
   }
 
-  function buildProcessedMask(source: HTMLCanvasElement, grow: number, blur: number, invert: boolean, color: string) {
+  function buildProcessedMask(source: HTMLCanvasElement, grow: number, blur: number, invert: boolean, color: string, targetRasterId?: string | null) {
     // The overlay is a display aid. Processing it at preview resolution keeps
     // brush strokes responsive even on multi-megapixel documents.
     const previewScale = Math.min(1, 512 / Math.max(source.width, source.height));
@@ -595,6 +597,16 @@
     const sourceData = scaledSource.getContext('2d')!.getImageData(0, 0, width, height);
     const coverage = Float32Array.from({ length: width * height }, (_, i) => sourceData.data[i * 4] / 255);
     const values = processMaskCoverage(coverage, width, height, grow * previewScale, blur * previewScale, invert);
+    if (targetRasterId) {
+      const limit = canvas.exportRasterLayer(targetRasterId, { raw: true });
+      if (!limit) values.fill(0);
+      else {
+        const limitCanvas = document.createElement('canvas'); limitCanvas.width = width; limitCanvas.height = height;
+        const ctx = limitCanvas.getContext('2d')!; ctx.drawImage(limit, 0, 0, width, height);
+        const alpha = ctx.getImageData(0, 0, width, height).data;
+        for (let i = 0; i < values.length; i++) values[i] = Math.min(values[i], alpha[i * 4 + 3] / 255);
+      }
+    }
     const processed = document.createElement('canvas');
     processed.width = width; processed.height = height;
     const processedCtx = processed.getContext('2d')!;
@@ -616,6 +628,25 @@
     return { image: processed, bounds: maxX >= 0 ? { x: minX / previewScale, y: minY / previewScale, width: (maxX - minX + 1) / previewScale, height: (maxY - minY + 1) / previewScale } : null };
   }
 
+  /** Selected modifiers show the edit masks they actually condition, without adding passes. */
+  function drawModifierTargetGuides(modifier: CanvasLayer) {
+    if (!contextLayer || modifier.showContext === false) return;
+    for (const mask of canvas.layers.filter(layer => layer.type === 'mask' && modifierAppliesToMask(modifier, layer.id, canvas.layers, canvas.groups))) {
+      const pixels = canvas.exportMaskLayer(mask.id);
+      if (!pixels) continue;
+      const settings = mask.inpaintSettings ?? generation.inpaintSettings;
+      const { bounds } = buildProcessedMask(pixels, mask.maskGrow ?? generation.growMaskBy, settings.mask_blur, settings.invert_mask, resolveTint(mask), mask.targetRasterId);
+      if (!bounds) continue;
+      const zoom = canvas.viewport.zoom;
+      const color = resolveTint(mask);
+      contextLayer.add(new Konva.Rect({ ...bounds, stroke: color, strokeWidth: 1 / zoom, dash: [3 / zoom, 4 / zoom], opacity: .85, listening: false }));
+      const label = new Konva.Label({ x: bounds.x, y: Math.max(0, bounds.y - 20 / zoom), listening: false });
+      label.add(new Konva.Tag({ fill: '#171717', opacity: .9, cornerRadius: 3 / zoom }));
+      label.add(new Konva.Text({ text: mask.name, fill: color, fontSize: 11 / zoom, padding: 4 / zoom, listening: false }));
+      contextLayer.add(label);
+    }
+  }
+
   async function updateContextOverlay() {
     if (!contextLayer) return;
     const revision = ++contextRevision;
@@ -625,19 +656,22 @@
     overlayGroup = new Konva.Group({ listening: false });
     contextLayer.add(overlayGroup);
 
-    if (canvas.activeLayer?.type === 'controlnet' && canvas.activeLayer.visible && canvas.controlContextPreviewUrl) {
+    if (canvas.activeLayer?.type === 'controlnet' && effectiveLayerVisibility(canvas.activeLayer, canvas.groups)) {
       if (canvas.activeLayer.showContext === false) { contextLayer.batchDraw(); return; }
       try {
-        const image = await loadImageEl(canvas.controlContextPreviewUrl);
+        const reference = canvas.activeLayer.referenceRasterId ? canvas.exportRasterLayer(canvas.activeLayer.referenceRasterId) : null;
+        const image = reference ? matteControlnetReference(reference) : (canvas.controlContextPreviewUrl ? await loadImageEl(canvas.controlContextPreviewUrl) : null);
+        if (!image) { drawModifierTargetGuides(canvas.activeLayer); contextLayer.batchDraw(); return; }
         if (!contextLayer || revision !== contextRevision) return;
         contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: .4, listening: false }));
         contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: resolveTint(canvas.activeLayer), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
       } catch { /* The source preview can disappear while a blob URL is replaced. */ }
+      drawModifierTargetGuides(canvas.activeLayer);
       reorderStageLayers(); contextLayer.batchDraw(); return;
     }
 
     const layer = canvas.activeLayer;
-    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !layer.visible || layer.showContext === false) {
+    if (canvas.selectedWorkspaceSection !== 'layers' || !layer || !isMaskLayer(layer) || !effectiveLayerVisibility(layer, canvas.groups) || layer.showContext === false) {
       contextLayer.batchDraw(); return;
     }
     const source = canvas.exportMaskLayer(layer.id);
@@ -645,7 +679,7 @@
     const settings = layer.inpaintSettings ?? generation.inpaintSettings;
     const grow = layer.type === 'mask' ? layer.maskGrow ?? generation.growMaskBy : 0;
     const color = resolveTint(layer);
-    const { bounds } = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, color);
+    const { bounds } = buildProcessedMask(source, grow, layer.type === 'mask' ? settings.mask_blur : 0, layer.type === 'mask' && settings.invert_mask, color, layer.targetRasterId);
     if (!contextLayer || revision !== contextRevision) return;
     if (bounds) {
       const holder: Konva.Container = overlayGroup ?? contextLayer;
@@ -666,6 +700,7 @@
         holder.add(new Konva.Rect({ x, y, width, height, stroke: '#f8fafc', strokeWidth: 1 / canvas.viewport.zoom, dash: [3 / canvas.viewport.zoom, 4 / canvas.viewport.zoom], opacity: .72, listening: false }));
       }
     }
+    if (layer.type === 'region') drawModifierTargetGuides(layer);
     reorderStageLayers(); contextLayer.batchDraw();
   }
 
@@ -908,7 +943,7 @@
     const sorted = canvas.sortedLayers.filter(layer => layer.type !== "controlnet").toReversed();
 
     for (const layer of sorted) {
-      const effectiveVisible = layer.visible;
+      const effectiveVisible = effectiveLayerVisibility(layer, canvas.groups);
       if (!konvaLayers.has(layer.id)) {
         const existing = stage.getLayers().find((node) => node.id() === layer.id) ?? canvas.takeLayerNode(layer.id);
         // No hit canvas: a document layer is painted through the active layer and
@@ -930,6 +965,12 @@
           height: canvas.canvasHeight,
         });
 
+        // This render-only mask stays last even while new strokes are appended.
+        kLayer.off('beforeDraw.clipping');
+        kLayer.on('beforeDraw.clipping', () => {
+          const clip = kLayer.findOne('.raster-clip-mask');
+          if (clip && clip.zIndex() !== kLayer.getChildren().length - 1) clip.moveToTop();
+        });
         stage.add(kLayer);
 
         if (!existing && layer.initialRegion) {
@@ -946,6 +987,14 @@
           }
         }
 
+        if (!existing && layer.type === 'raster' && layer.rasterPaint) {
+          for (const command of layer.rasterPaint) {
+            const attrs = { ...command.attrs, listening: false };
+            kLayer.add(command.type === 'Line' ? new Konva.Line(attrs as Konva.LineConfig)
+              : command.type === 'Ellipse' ? new Konva.Ellipse(attrs as Konva.EllipseConfig)
+              : new Konva.Rect(attrs));
+          }
+        }
         konvaLayers.set(layer.id, kLayer);
       } else {
         const kLayer = konvaLayers.get(layer.id)!;
@@ -962,6 +1011,7 @@
         if (!node) {
           node = new Konva.Image({ name: 'raster-asset', image: undefined, listening: false });
           kLayer.add(node);
+          node.moveToBottom();
           const target = node;
           const image = new Image();
           image.onload = () => {
@@ -970,6 +1020,7 @@
             paintLayerAsset(target, image, layer);
             kLayer.batchDraw();
             scheduleThumbRefresh(layer.id);
+            scheduleClippingRefresh();
           };
           image.src = asset.src;
         } else if (node.getAttr('tintKey') !== resolveTintKey(layer)) {
@@ -1000,8 +1051,64 @@
       }
     }
 
+    refreshRasterClipping();
     reorderStageLayers();
   }
+
+  let clippingRaf: number | null = null;
+  const clippingKeys = new Map<string, string>();
+  function scheduleClippingRefresh() {
+    if (clippingRaf !== null) return;
+    clippingRaf = requestAnimationFrame(() => {
+      clippingRaf = null;
+      refreshRasterClipping(true);
+    });
+  }
+
+  /** Clipping uses raw painted mask alpha; no visibility, density or reciprocal links. */
+  function refreshRasterClipping(force = false) {
+    if (!stage) return;
+    const sources = new Map<string, HTMLCanvasElement>();
+    for (const raster of canvas.layers.filter(layer => layer.type === 'raster')) {
+      const kLayer = konvaLayers.get(raster.id);
+      if (!kLayer) continue;
+      let clip = kLayer.findOne('.raster-clip-mask') as Konva.Image | undefined;
+      if (!raster.clippingMaskId || raster.clippingEnabled === false) {
+        clip?.destroy();
+        clippingKeys.delete(raster.id);
+        continue;
+      }
+      const maskMeta = canvas.layers.find(layer => layer.id === raster.clippingMaskId);
+      const key = `${raster.clippingMaskId}:${canvas.paintRevision}:${canvas.canvasWidth}:${canvas.canvasHeight}:${JSON.stringify(maskMeta?.image)}`;
+      if (!force && clip && clippingKeys.get(raster.id) === key) continue;
+      clippingKeys.set(raster.id, key);
+      let pixels = sources.get(raster.clippingMaskId);
+      if (!pixels) {
+        const mask = canvas.layers.find(layer => layer.id === raster.clippingMaskId && layer.type === 'mask');
+        const node = mask ? konvaLayers.get(mask.id) : null;
+        pixels = node ? captureLayer(node, canvas.canvasWidth, canvas.canvasHeight) : document.createElement('canvas');
+        if (!node) { pixels.width = canvas.canvasWidth; pixels.height = canvas.canvasHeight; }
+        sources.set(raster.clippingMaskId, pixels);
+      }
+      if (!clip) {
+        clip = new Konva.Image({ name: 'raster-clip-mask', image: pixels, listening: false, globalCompositeOperation: 'destination-in' });
+        kLayer.add(clip);
+      }
+      clip.setAttrs({ image: pixels, x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, visible: true });
+      clip.moveToTop();
+      kLayer.batchDraw();
+      scheduleThumbRefresh(raster.id);
+    }
+  }
+
+  $effect(() => {
+    void canvas.paintRevision;
+    void canvas.layers;
+    void canvas.groups;
+    void canvas.canvasWidth;
+    void canvas.canvasHeight;
+    untrack(scheduleClippingRefresh);
+  });
 
   function applyViewport() {
     if (!stage) return;
@@ -1151,7 +1258,7 @@
   function getDrawingTargetLayer(): { layer: (typeof canvas.layers)[number]; kLayer: Konva.Layer } | null {
     if (canvas.selectedWorkspaceSection !== 'layers') return null;
     const layer = canvas.activeLayer;
-    if (!layer || layer.type === "controlnet" || layer.locked || !layer.visible) return null;
+    if (!layer || layer.type === "controlnet" || layer.locked || !effectiveLayerVisibility(layer, canvas.groups)) return null;
 
     const kLayer = getActiveKonvaLayer();
     if (!kLayer) return null;
@@ -1283,7 +1390,7 @@
     const pointer = stage?.getPointerPosition();
     if (!pointer) return;
     for (const meta of canvas.sortedLayers) {
-      if (meta.type === 'controlnet' || !meta.visible || meta.opacity <= 0) continue;
+      if (meta.type === 'controlnet' || !effectiveLayerVisibility(meta, canvas.groups) || meta.opacity <= 0) continue;
       const node = konvaLayers.get(meta.id);
       if (!node) continue;
       const ratio = node.getCanvas().getPixelRatio();
@@ -1344,7 +1451,7 @@
 
       const color = tool === "eraser" ? "#000000" : drawingColor(layer);
 
-      const drawOpacity = tool === "eraser" ? 1 : canvas.brushSettings.opacity;
+      const drawOpacity = canvas.brushSettings.opacity;
 
       currentLine = new Konva.Line({
         stroke: color,
@@ -1424,7 +1531,7 @@
 
     if (tool === "move") {
       const layer = canvas.activeLayer;
-      if (!layer || layer.locked || !layer.visible || canvas.selectedWorkspaceSection !== "layers") return;
+      if (!layer || layer.locked || !effectiveLayerVisibility(layer, canvas.groups) || canvas.selectedWorkspaceSection !== "layers") return;
 
       const kLayer = getActiveKonvaLayer();
       if (!kLayer) return;
@@ -1435,7 +1542,7 @@
       isMovingLayer = true;
       movingLayerId = layer.id;
       moveStartPos = pos;
-      moveNodeStarts = kLayer.getChildren().map((node) => ({
+      moveNodeStarts = kLayer.getChildren().filter(node => node.name() !== 'raster-clip-mask').map((node) => ({
         node,
         x: node.x(),
         y: node.y(),
@@ -1550,6 +1657,7 @@
       uiLayer?.batchDraw();
     }
 
+    if ((isDrawing || isMovingLayer) && canvas.layers.some(layer => layer.clippingMaskId && layer.clippingEnabled !== false)) scheduleClippingRefresh();
     if (tooltipRaf === null) {
       tooltipRaf = requestAnimationFrame(() => updateTooltip(e));
     }
@@ -1659,6 +1767,7 @@
       // Pixels went down: the picture changed even though the layer records did
       // not, and a project has to know that before it can call itself saved.
       canvas.bumpPaintRevision();
+      scheduleClippingRefresh();
       void autoCommitMaskIfNeeded();
     }
   }
@@ -1683,9 +1792,14 @@
     }
 
     if (isDrawing) {
+      const strokeLayerId = currentLine?.getLayer()?.id();
       isDrawing = false;
       currentLine = null;
       activeStrokeTool = null;
+      canvas.bumpPaintRevision();
+      scheduleClippingRefresh();
+      if (strokeLayerId) scheduleThumbRefresh(strokeLayerId);
+      void autoCommitMaskIfNeeded();
     }
 
     if (isDrawingRect) {
@@ -1782,7 +1896,7 @@
     compositeCanvas.height = canvas.canvasHeight;
     const ctx = compositeCanvas.getContext('2d')!;
     if (refLayer) ctx.drawImage(captureLayer(refLayer, canvas.canvasWidth, canvas.canvasHeight), 0, 0);
-    const sorted = [...canvas.layers].filter((layer) => layer.type === 'raster' && layer.visible).sort((a, b) => a.order - b.order);
+    const sorted = [...canvas.layers].filter((layer) => layer.type === 'raster' && effectiveLayerVisibility(layer, canvas.groups)).sort((a, b) => a.order - b.order);
     for (const layer of sorted) {
       const kLayer = konvaLayers.get(layer.id);
       if (!kLayer) continue;
@@ -1868,6 +1982,7 @@
   $effect(() => {
     // Re-sync Konva layers when canvas layers change
     void canvas.layers;
+    void canvas.groups;
     void canvas.canvasWidth;
     void canvas.canvasHeight;
     syncKonvaLayers();
@@ -1967,6 +2082,8 @@
     void canvas.canvasWidth;
     void canvas.canvasHeight;
     void canvas.selectedWorkspaceSection;
+    void canvas.groups;
+    void canvas.paintRevision;
     void canvas.showLayerContext;
     void canvas.controlContextPreviewUrl;
     void generation.growMaskBy;
@@ -1980,56 +2097,36 @@
   // Public API for export
   export function getRasterComposite(): HTMLCanvasElement | null {
     if (!stage) return null;
-
-    const offscreen = document.createElement("canvas");
+    refreshRasterClipping();
+    const offscreen = document.createElement('canvas');
     offscreen.width = canvas.canvasWidth;
     offscreen.height = canvas.canvasHeight;
-    const ctx = offscreen.getContext("2d")!;
-
-    const sorted = [...canvas.layers]
-      .filter((l) => l.type === "raster" && l.visible)
-      .sort((a, b) => a.order - b.order);
-
-    for (const layer of sorted) {
-      const kLayer = konvaLayers.get(layer.id);
-      if (!kLayer) continue;
-
-      const layerCanvas = captureLayer(kLayer, canvas.canvasWidth, canvas.canvasHeight);
-      ctx.globalAlpha = layer.opacity;
-      ctx.drawImage(layerCanvas, 0, 0);
-      ctx.globalAlpha = 1;
-
+    const ctx = offscreen.getContext('2d')!;
+    for (const layer of canvas.visibleLayers.filter(layer => layer.type === 'raster')) {
+      const pixels = canvas.exportRasterLayer(layer.id);
+      if (pixels) ctx.drawImage(pixels, 0, 0);
     }
-
     return offscreen;
   }
 
   export function getMaskCanvas(): HTMLCanvasElement | null {
     if (!stage) return null;
-
-    // Region layers carry prompt influence only. They never grant permission
-    // to change pixels, so only true inpaint masks enter the exported union.
-    const maskLayers = canvas.layers.filter((l) => l.type === "mask" && l.visible);
-    if (maskLayers.length === 0) return null;
-
-    const offscreen = document.createElement("canvas");
+    const offscreen = document.createElement('canvas');
     offscreen.width = canvas.canvasWidth;
     offscreen.height = canvas.canvasHeight;
-    const ctx = offscreen.getContext("2d")!;
-
-    for (const layer of maskLayers) {
-      const kLayer = konvaLayers.get(layer.id);
-      if (!kLayer) continue;
-
-      const layerCanvas = captureLayer(kLayer, canvas.canvasWidth, canvas.canvasHeight);
-      // Coverage, not the display slider: the overlay may be drawn faint and
-      // still edit at full strength.
-      ctx.globalAlpha = layer.coverage ?? 1;
-      ctx.drawImage(layerCanvas, 0, 0);
+    const ctx = offscreen.getContext('2d')!;
+    let anyMask = false;
+    for (const layer of canvas.visibleLayers.filter(layer => layer.type === 'mask')) {
+      const grayscale = canvas.exportMaskLayer(layer.id);
+      if (!grayscale) continue;
+      // Grayscale is fully opaque; turn coverage into alpha before unioning.
+      const data = grayscale.getContext('2d')!.getImageData(0, 0, grayscale.width, grayscale.height);
+      for (let i = 0; i < data.data.length; i += 4) data.data[i + 3] = data.data[i];
+      grayscale.getContext('2d')!.putImageData(data, 0, 0);
+      ctx.drawImage(grayscale, 0, 0);
+      anyMask = true;
     }
-    ctx.globalAlpha = 1;
-
-    return offscreen;
+    return anyMask ? offscreen : null;
   }
 
   // Get cursor style based on active tool
@@ -2078,7 +2175,7 @@
           {locale.t('canvas.duplicate')}
         </button>
         <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left hover:bg-neutral-800" disabled={canvas.activeLayer.type === 'controlnet' || canvas.activeLayer.locked} onclick={() => runMenuAction(() => canvas.clearLayer(canvas.activeLayerId!))}>
-          {locale.t('canvas.clear_layer')}
+          {locale.t('canvas.clear_pixels')}
         </button>
         <button type="button" role="menuitem" class="flex h-6 w-full items-center rounded px-2 text-left text-red-300 hover:bg-red-500/10 disabled:opacity-40" disabled={!canvas.canDeleteActiveLayer} onclick={() => runMenuAction(() => canvas.removeLayer(canvas.activeLayerId!))}>
           {locale.t('canvas.delete_layer')}

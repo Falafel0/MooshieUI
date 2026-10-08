@@ -50,12 +50,17 @@ export function newControlnetLayer(): ControlnetLayerSettings {
   return { enabled: true, mode: "custom", preset: null, model: null, preprocessor: null,
     image: null, strength: 1, startPercent: 0, endPercent: 1 };
 }
-export function controlnetLayerPayloads(layers: readonly { type: string; visible: boolean; order: number; controlnet?: ControlnetLayerSettings }[]): ControlNetPayload[] {
+export function controlnetLayerPayloads(layers: readonly { id?: string; type: string; visible: boolean; order: number; controlnet?: ControlnetLayerSettings }[]): ControlNetPayload[] {
   return [...layers].filter(layer => layer.type === 'controlnet' && layer.visible && layer.controlnet?.enabled)
     .sort((a, b) => a.order - b.order).map(layer => {
       const c = layer.controlnet!;
-      return { enabled: true, preset: c.mode === 'preset' ? c.preset?.trim() || null : null, controlnet_model: c.model?.trim() || null,
+      return { ...(layer.id !== undefined ? { layer_id: layer.id } : {}), enabled: true, preset: c.mode === 'preset' ? c.preset?.trim() || null : null, controlnet_model: c.model?.trim() || null,
         image: c.image?.trim() || null, preprocessor: c.preprocessor?.trim() || null,
         strength: c.strength, start_percent: c.startPercent, end_percent: c.endPercent };
     });
+}
+
+/** Model switches during input preparation must not reuse a reference for another pipeline. */
+export function generationModelContextKey(state: { mode: string; checkpoint: string; modelFamily: string }): string {
+  return JSON.stringify([state.mode, state.checkpoint, state.modelFamily]);
 }

@@ -193,8 +193,8 @@ test('every string the new controls show exists in the base locale', () => {
 });
 
 test('no component keeps its own copy of the pass order', () => {
-  const panel = read('src/lib/components/canvas/layers/LayerPanel.svelte');
-  assert.match(panel, /editMaskPassOrder\(canvas\.sortedLayers\)/);
+  const panel = read('src/lib/components/canvas/layers/GroupLayerList.svelte');
+  assert.match(panel, /editMaskPassOrder\(canvas\.sortedLayers/);
   assert.equal(
     /filter\([^)]*type === ['"]mask['"][^)]*\)\.reverse\(\)/.test(panel),
     false,

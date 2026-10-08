@@ -11,16 +11,24 @@ code = 'const setTimeout = (fn) => { fn(); };\n' + code;
 Object.assign(fixture, {
   generation: {}, progress: { clearPromptOutput() {} }, canvas: {}, locale: { t: (key) => key },
   buildRegionalContextPrompt: (text) => text, mergeRegionalPromptText: (base, local) => [base,local].filter(Boolean).join(', '),
-  uploadImageBytes: async (_, name) => ({ name }), renderRegionMaskPngBytes: async () => [1], canvasPngBytes: async (pixels) => pixels,
+  uploadImageBytes: (...args) => fixture.uploadImpl(...args), renderRegionMaskPngBytes: async () => [1], maskToGrayscale: (pixels) => pixels, canvasPngBytes: (...args) => fixture.encodeImpl(...args),
   regionStrengthToDenoise: (s) => .38 + s*.27, regionalChainStepSeed: (s,i) => String(BigInt(s)+BigInt(i)+1n),
   tempOutputToUploadBytes: async () => [2], waitForPromptCompletion: async () => {}, waitForPromptOutput: async (id) => id+'.png',
 });
+const relationCode = ts.transpileModule(fs.readFileSync(new URL('../src/lib/utils/layerRelations.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const relationFunctions = await import('data:text/javascript;base64,' + Buffer.from(relationCode).toString('base64'));
+Object.assign(fixture, relationFunctions);
+const defaultsCode = ts.transpileModule(fs.readFileSync(new URL('../src/lib/utils/inpaintSettings.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+Object.assign(fixture, await import('data:text/javascript;base64,' + Buffer.from(defaultsCode).toString('base64')));
+fixture.captureInpaintLayerSnapshot = () => JSON.parse(JSON.stringify({layers:fixture.canvas.layers, groups:fixture.canvas.groups ?? []}));
+fixture.assertInpaintLayerRelations = snapshot => assert.deepEqual(relationFunctions.validateLayerRelations(snapshot.layers, snapshot.groups), []);
 const { runRegionalInpaintChain } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 function setup(mode='inpainting') {
   Object.assign(fixture.generation, { mode, isAnima:false, supportsRegionalConditioning:mode==='inpainting', differentialDiffusion:false, loras:[], toParams: (options={}) => ({mode,input_image:'source.png',positive_prompt:'shared',negative_prompt:'global bad',seed:'123',width:64,height:64,facefix_enabled:true,detail_segments:[{text:'detail'}],inpaint_settings:{mask_blur:4},positive_regions:options.regionalSelectionsOverride??[]}) });
-  fixture.canvas.layers=[{id:'a',name:'A',type:'mask'},{id:'b',name:'B',type:'mask'}];
+  fixture.canvas.layers=[{id:'a',name:'A',type:'mask',visible:true},{id:'b',name:'B',type:'mask',visible:true},{id:'prompt-region',name:'Region',type:'region',visible:true}];
+  fixture.encodeImpl=async pixels=>pixels;
   fixture.canvas.exportMaskLayer=(id)=>[id==='a'?10:20];
-  fixture.uploadImageBytes=async(_,name)=>({name});
+  fixture.uploadImpl=async(_,name)=>({name});
   const calls=[];
   const callbacks={conditioningRegions:[{id:'prompt-region',shape:'lasso',text:'red hair',strength:1,x:0,y:0,width:1,height:1,mask_image:'region.png'}],submit:async(params,ctx)=>{calls.push({params,ctx});return {promptId:'p'+calls.length,seed:'123'};}};
   const regions=['a','b'].map(id=>({id,maskLayerId:mode==='inpainting'?id:undefined,text:id,strength:1,shape:'box',x:0,y:0,width:1,height:1}));
@@ -86,7 +94,8 @@ test('later layer settings are frozen before the first submission',async()=>{
 
 test('ControlNet layers and prompt regions modify every mask pass without adding generation steps', async () => {
   const {calls, callbacks, regions} = setup();
-  const controls = [{enabled:true, image:'depth.png', controlnet_model:'depth.safetensors', strength:.7}, {enabled:true, image:'pose.png', controlnet_model:'pose.safetensors', strength:.5}];
+  const controls = [{layer_id:'control-depth',enabled:true, image:'depth.png', controlnet_model:'depth.safetensors', strength:.7}, {layer_id:'control-pose',enabled:true, image:'pose.png', controlnet_model:'pose.safetensors', strength:.5}];
+  fixture.canvas.layers.push(...controls.map(control => ({ id:control.layer_id, type:'controlnet', visible:true, controlnet:{enabled:true} })));
   const original = fixture.generation.toParams;
   fixture.generation.toParams = options => ({...original(options), controlnet:null, controlnet_layers:controls});
   await runRegionalInpaintChain(regions, callbacks);
@@ -96,4 +105,48 @@ test('ControlNet layers and prompt regions modify every mask pass without adding
     assert.equal(params.positive_regions.length, 1, 'the prompt region conditions each mask pass');
     assert.equal(params.positive_regions[0].mask_image, 'region.png');
   }
+});
+
+
+test('explicit and group-scoped modifiers condition only their edit masks, without adding passes', async () => {
+  const { calls, callbacks, regions } = setup();
+  fixture.canvas.groups = [{id:'portrait',name:'Portrait',visible:true},{id:'background',name:'Background',visible:true}];
+  fixture.canvas.layers.find(layer=>layer.id==='a').groupId='portrait';
+  fixture.canvas.layers.find(layer=>layer.id==='b').groupId='background';
+  fixture.canvas.layers.find(layer=>layer.id==='prompt-region').groupId='portrait';
+  fixture.canvas.layers.push({id:'pose',type:'controlnet',visible:true,controlnet:{enabled:true},modifierScope:{mode:'masks',maskIds:['b']}},
+    {id:'off',type:'controlnet',visible:true,controlnet:{enabled:true},modifierScope:{mode:'masks',maskIds:[]}});
+  const original=fixture.generation.toParams;
+  fixture.generation.toParams=options=>({...original(options),controlnet_layers:[{layer_id:'pose',image:'pose.png'},{layer_id:'off',image:'unused.png'}]});
+  await runRegionalInpaintChain(regions,callbacks);
+  assert.equal(calls.length,2);
+  assert.equal(calls[0].params.positive_regions.length,1);
+  assert.equal(calls[1].params.positive_regions.length,0);
+  assert.deepEqual(calls.map(call=>call.params.controlnet_layers.map(control=>control.layer_id)),[[],['pose']]);
+  fixture.canvas.groups=[];
+});
+
+test('modifier targeting is frozen before PNG encoding and remains stable across submissions', async () => {
+  const { calls, callbacks, regions } = setup();
+  const control={id:'pose',type:'controlnet',visible:true,controlnet:{enabled:true},modifierScope:{mode:'masks',maskIds:['b']}};
+  fixture.canvas.layers.push(control);
+  const original=fixture.generation.toParams;
+  fixture.generation.toParams=options=>({...original(options),controlnet_layers:[{layer_id:'pose',image:'pose.png',strength:.5}]});
+  const encode=fixture.encodeImpl;
+  fixture.encodeImpl=async pixels=>{control.modifierScope.maskIds=['a'];control.visible=false;return pixels;};
+  try { await runRegionalInpaintChain(regions,callbacks); } finally { fixture.encodeImpl=encode; }
+  assert.deepEqual(calls.map(call=>call.params.controlnet_layers.map(control=>control.layer_id)),[[],['pose']]);
+});
+
+test('linked raster alpha is uploaded as a separate strict processing limit, not a generation pass', async () => {
+  const { calls, callbacks, regions } = setup();
+  fixture.canvas.layers.push({id:'raster',type:'raster',visible:true});
+  fixture.canvas.layers.find(layer=>layer.id==='a').targetRasterId='raster';
+  fixture.canvas.exportRasterLayer=(_id, options)=>{assert.equal(options.raw,true); return [127];};
+  const uploads=[]; fixture.uploadImpl=async(bytes,name)=>{uploads.push({bytes,name});return {name};};
+  await runRegionalInpaintChain(regions,callbacks);
+  assert.equal(calls.length,2);
+  assert.match(calls[0].params.inpaint_settings.area_limit_image,/inpaint_area_limit_0_/);
+  assert.equal(calls[1].params.inpaint_settings.area_limit_image,undefined);
+  assert.deepEqual(uploads.find(upload=>upload.name.startsWith('inpaint_area_limit')).bytes,[127]);
 });

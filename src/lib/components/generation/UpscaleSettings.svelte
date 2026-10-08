@@ -337,11 +337,13 @@
       <div use:scrollCapture>
         <label class="flex items-center justify-between text-xs text-neutral-400 mb-1">
           <span>{locale.t('generation.upscale.denoise')}<InfoTip text={locale.t('generation.upscale.denoise_tip')} /></span>
-          <EditableValue value={generation.upscaleDenoise} min={0} max={1} step={0.05} decimals={2} onchange={(v) => generation.upscaleDenoise = v} />
+          <EditableValue value={generation.upscaleDenoise} min={0} max={1} step={0.05} decimals={2} onchange={(v) => { generation.upscaleDenoise = v; generation.saveSettings(); }} />
         </label>
         <input
           type="range"
           bind:value={generation.upscaleDenoise}
+          onchange={() => generation.saveSettings()}
+          aria-label={locale.t('generation.upscale.denoise')}
           min="0"
           max="1"
           step="0.05"

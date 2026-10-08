@@ -87,6 +87,25 @@ pub fn build(params: &GenerationParams, seed: i64) -> WorkflowResult {
     );
     next_id += 1;
 
+    // Denoise zero means no AI redraw. A VAE round-trip is lossy even when
+    // KSampler adds no noise, so bypass both while retaining the requested
+    // image resize and any independently enabled post-processing.
+    if params.denoise == 0.0 {
+        return WorkflowResult {
+            workflow,
+            next_id,
+            image_output: (resize_id, 0),
+            model_source,
+            clip_source,
+            positive_source: pos_source,
+            negative_source: neg_source,
+            vae_source,
+            sampler_id: String::new(),
+            refiner_model_source: None,
+            base_sources: None,
+        };
+    }
+
     // VAE Encode the resized image
     let encode_id = next_id.to_string();
     workflow.insert(

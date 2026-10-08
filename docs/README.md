@@ -1,6 +1,6 @@
 # MooshieUI documentation
 
-Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for **v2.3.9-fork.2**. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
+Documentation for the current implementation, including the local Prompt Studio tag packs and upstream integration for the current fork workspace. Start with the [repository README](../README.md) for an overview or the [user wiki](https://github.com/Mooshieblob1/MooshieUI/wiki) for installation and feature walkthroughs.
 
 ## Feature and technical references
 
@@ -16,6 +16,7 @@ Documentation for the current implementation, including the local Prompt Studio 
 | [Music studio guide](MUSIC.md) | Covers, reviewed scores, checked edits, MIDI, versions, comparisons and project exports |
 | [Prompt Assistant account sign-in](PROMPT-ASSISTANT-SIGN-IN.md) | ChatGPT and Gemini sign-in, automatic setup, account limits and audio support |
 | [Video generation methods](VIDEO.md) | Standard, Larryvrh/LightX2V/PDD Turbo, BF16/INT8 VDN and retained 2× drafts |
+| [INPAINT_LAYER_RELATIONSHIPS.md](INPAINT_LAYER_RELATIONSHIPS.md) | Grouping, explicit alpha links, modifier scope and project persistence |
 | [PATCHY_INTEGRATION.md](PATCHY_INTEGRATION.md) | The Patchy hand-off that replaced Photopea, executable discovery and licence notes |
 
 The wiki also covers [music and playlists](https://github.com/Mooshieblob1/MooshieUI/wiki/Music-Generation), [video](https://github.com/Mooshieblob1/MooshieUI/wiki/Video-Generation), [pause and continue](https://github.com/Mooshieblob1/MooshieUI/wiki/Generation-Basics#pause-and-continue-a-generation), [Style Creator](https://github.com/Mooshieblob1/MooshieUI/wiki/Prompting-Guide#style-creator), [Image Edit](https://github.com/Mooshieblob1/MooshieUI/wiki/Image-Edit-Mode), and [hosted accounts](https://github.com/Mooshieblob1/MooshieUI/wiki/Server,-LAN-and-Multi-User).

@@ -14,6 +14,8 @@ export interface LoraPayloadEntry {
 }
 
 export interface ControlNetPayload {
+  /** Frontend document identity used to resolve per-mask conditioning scope. */
+  layer_id?: string;
   enabled: boolean;
   preset: string | null;
   controlnet_model: string | null;

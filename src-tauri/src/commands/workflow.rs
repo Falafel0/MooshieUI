@@ -70,6 +70,17 @@ pub async fn generate(
         .map_err(AppError::InvalidWorkflow)?;
     }
 
+    if params.mode == "inpainting" {
+        let base_url = { state.config.read().await.server_url.clone() };
+        crate::comfyui::nodes::verify_required_inpaint_nodes_for_generation(
+            &state.http_client,
+            &base_url,
+            &params,
+        )
+        .await
+        .map_err(AppError::InvalidWorkflow)?;
+    }
+
     // Misplaced model: the file lives in a folder that doesn't match what it
     // actually is (e.g. a Flux unet dropped into models/checkpoints/). ComfyUI's
     // stock loaders validate the filename against their own folder listing and
