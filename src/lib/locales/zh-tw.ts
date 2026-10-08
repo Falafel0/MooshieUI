@@ -2412,6 +2412,12 @@ const zhTw: Record<string, string> = {
   "generation.inpaint.differential_diffusion": "差異擴散",
   "generation.inpaint.differential_tip": "除非使用 CFG++ 取樣器，否則建議在局部重繪中使用 v-pred / Anima 風格模型。有助於在編輯遮罩區域時保留來源結構。",
 
+  "generation.controlnet.source_image": "來源影像",
+  "generation.controlnet.processed_input": "處理後的控制圖",
+  "generation.controlnet.canvas_preview": "影像預覽",
+  "generation.controlnet.guide_opacity": "引導圖不透明度",
+  "generation.controlnet.input_raw_note": "沒有前處理器時，此影像直接傳入ControlNet。引導圖不透明度只改變畫布顯示。",
+  "generation.controlnet.input_processed_note": "前處理器將來源影像轉換為控制圖。預覽不會取代來源影像；生成時只處理一次。",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "使用參考影像引導生成。ControlNet 可以保留來源影像的邊緣、深度、姿態等。",
   "generation.controlnet.presets": "預設",

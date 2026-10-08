@@ -98,6 +98,22 @@ modifier's on-canvas guide can be hidden independently; hiding a guide must not
 change its scope or generation parameters. Disabling a modifier preserves every
 binding so enabling it again restores the same intent.
 
+The selected ControlNet shows a read-only guide on the canvas. Its inspector
+distinguishes the **source image** (an upload or a linked raster) from the
+**processed map** returned by the preprocessor. Preparing a preview switches to
+the processed map; the two preview buttons let the user compare it with the
+source. A linked raster does not override that processed-map view. Without a
+preprocessor, the source itself is the control input. Generation still processes
+the original source exactly once; a prepared preview never replaces it.
+
+ControlNet guide opacity is the layer's display-only `opacity`, initially 40%
+for new controls. It changes neither ControlNet strength nor the input pixels.
+The canvas badge names the displayed image. Disabling the modifier does not
+prevent inspecting its guide or discard a prepared map; hiding its group hides
+the guide. Processed previews are session-only and must be prepared again after
+changing source, preprocessor or model context. Masks are listed and inspected
+in the right document panel; no duplicate mask list occupies the prompt panel.
+
 Groups organize layers and define default modifier scope. They do not isolate
 the raster compositor, create a generation job, change pixel coordinates, or
 give a mask a layer-only output. A group may contain different roles. Global

@@ -2461,6 +2461,12 @@ const es: Record<string, string> = {
   "generation.inpaint.differential_tip": "Recomendado para modelos v-pred / Anima durante inpainting a menos que uses un muestreador CFG++. Ayuda a preservar la estructura de origen al editar las regiones enmascaradas.",
 
   // ControlNet
+  "generation.controlnet.source_image": "Imagen original",
+  "generation.controlnet.processed_input": "Mapa procesado",
+  "generation.controlnet.canvas_preview": "Vista de imagen",
+  "generation.controlnet.guide_opacity": "Opacidad de guía",
+  "generation.controlnet.input_raw_note": "Sin preprocesador, esta imagen se envía directamente a ControlNet. La opacidad de guía solo afecta a la vista.",
+  "generation.controlnet.input_processed_note": "El preprocesador convierte el original en un mapa de control. La vista no sustituye al original; la generación lo procesa una vez.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "Usa una imagen de referencia para guiar la generación. ControlNet puede preservar bordes, profundidad, pose y más de una imagen fuente.",
   "generation.controlnet.presets": "Preajustes",

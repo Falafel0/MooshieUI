@@ -2412,6 +2412,12 @@ const ru: Record<string, string> = {
   "generation.inpaint.differential_diffusion": "Дифференциальная диффузия",
   "generation.inpaint.differential_tip": "Рекомендуется для моделей типа v-pred / Anima при инпейнтинге, если вы не используете сэмплер CFG++. Помогает сохранить исходную структуру при редактировании замаскированных областей.",
 
+  "generation.controlnet.source_image": "Исходное изображение",
+  "generation.controlnet.processed_input": "Обработанная карта",
+  "generation.controlnet.canvas_preview": "Просмотр изображения",
+  "generation.controlnet.guide_opacity": "Прозрачность ориентира",
+  "generation.controlnet.input_raw_note": "Без препроцессора это изображение передаётся прямо в ControlNet. Прозрачность ориентира меняет только отображение на холсте.",
+  "generation.controlnet.input_processed_note": "Препроцессор превращает источник в карту управления. Просмотр не заменяет источник; при генерации он обрабатывается один раз.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "Использует эталонное изображение для управления генерацией. ControlNet может сохранять края, глубину, позу и многое другое из исходного изображения.",
   "generation.controlnet.presets": "Пресеты",

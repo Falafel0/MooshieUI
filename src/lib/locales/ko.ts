@@ -2412,6 +2412,12 @@ const ko: Record<string, string> = {
   "generation.inpaint.differential_diffusion": "차등 확산",
   "generation.inpaint.differential_tip": "CFG++ 샘플러를 사용하지 않는 한 인페인팅 중 v-pred / Anima 스타일 모델에 권장. 마스크 영역 편집 시 소스 구조를 보존하는 데 도움이 됩니다.",
 
+  "generation.controlnet.source_image": "원본 이미지",
+  "generation.controlnet.processed_input": "처리된 맵",
+  "generation.controlnet.canvas_preview": "이미지 미리보기",
+  "generation.controlnet.guide_opacity": "가이드 불투명도",
+  "generation.controlnet.input_raw_note": "전처리기가 없으면 이 이미지를 ControlNet에 직접 전달합니다. 가이드 불투명도는 표시만 바꿉니다.",
+  "generation.controlnet.input_processed_note": "전처리기는 원본을 제어 맵으로 변환합니다. 미리보기는 원본을 대체하지 않으며 생성 시 한 번만 처리합니다.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "참조 이미지를 사용하여 생성을 안내합니다. ControlNet은 소스 이미지의 엣지, 깊이, 포즈 등을 보존할 수 있습니다.",
   "generation.controlnet.presets": "프리셋",

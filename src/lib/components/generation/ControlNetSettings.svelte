@@ -44,6 +44,7 @@
   let preprocessorPreviewPromptId = $state<string | null>(null);
   let preprocessorPreviewStatus = $state<"idle" | "preparing" | "ready" | "failed">("idle");
   let preprocessorPreviewUrl = $state<string | null>(null);
+  let previewKind = $state<'source' | 'processed'>('source');
   let downloading = $state<string | null>(null);
   let downloadError = $state<string | null>(null);
   let dlBytes = $state(0);
@@ -52,6 +53,7 @@
   const linkedReferenceId = $derived(controlnetEditorContext() ? canvas.activeLayer?.referenceRasterId ?? null : null);
   let linkedPreviewUrl = $state<string | null>(null);
   const imagePreviewUrl = $derived(linkedReferenceId ? linkedPreviewUrl : generation.controlnetPreviewUrl);
+  const displayedPreviewUrl = $derived(previewKind === 'processed' && preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl);
   $effect(() => {
     const id = linkedReferenceId;
     void canvas.paintRevision;
@@ -66,7 +68,7 @@
   let previewRequest: ReturnType<LatestControlnetRequest['begin']> | null = null;
   let mounted = false;
   let imageError = $state<string | null>(null);
-  const requestKey = () => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, linkedReferenceId, linkedReferenceId ? canvas.paintRevision : 0, linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null, controlnetRequestKey(generation)]);
+  const requestKey = (previewOnly = false) => JSON.stringify([controlnetEditorContext(), controlnetEditorContext() ? canvas.activeLayer?.locked : false, linkedReferenceId, linkedReferenceId ? canvas.paintRevision : 0, linkedReferenceId ? canvas.layers.find(layer => layer.id === linkedReferenceId) : null, controlnetRequestKey(generation, previewOnly)]);
   const previewPreprocessor = $derived(generation.controlnetPreprocessor?.trim() || null);
   const sourceImage = $derived(generation.mode === 'image_edit' ? generation.editReferenceImages[0] ?? null : generation.mode === 'img2img' || generation.mode === 'inpainting' ? generation.inputImage : null);
   let readyWait: Awaited<ReturnType<typeof createComfyReadyWait>> | null = null;
@@ -211,7 +213,7 @@
     previewRequests.invalidate(); previewRequest = null; preprocessorPreviewPromptId = null;
     clearPreprocessorPreviewTimeout(); pendingPreprocessorEvents.clear();
     if (preprocessorPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(preprocessorPreviewUrl);
-    preprocessorPreviewUrl = null; preprocessorPreviewStatus = 'idle';
+    preprocessorPreviewUrl = null; preprocessorPreviewStatus = 'idle'; previewKind = 'source';
   }
   function removeImage() {
     if (linkedReferenceId && canvas.activeLayer) { canvas.setLayerRelations(canvas.activeLayer.id, { referenceRasterId: null }); resetPreparedPreview(); return; }
@@ -386,20 +388,20 @@
   /** Preview is non-destructive: generation still preprocesses the original reference exactly once. */
   async function applyPreparedPreprocessorImage(data: any) {
     const request = previewRequest;
-    if (!request || !previewRequests.current(request, requestKey())) return;
+    if (!request || !previewRequests.current(request, requestKey(true))) return;
     clearPreprocessorPreviewTimeout();
     try {
       const result = await imageBytesFromPreprocessorEvent(data);
-      if (!mounted || !previewRequests.current(request, requestKey())) return;
+      if (!mounted || !previewRequests.current(request, requestKey(true))) return;
       if (!result) throw new Error(locale.t('generation.controlnet.no_image_data'));
       if (preprocessorPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(preprocessorPreviewUrl);
-      preprocessorPreviewUrl = URL.createObjectURL(result.blob); preprocessorPreviewStatus = 'ready';
-    } catch { if (previewRequests.current(request, requestKey())) preprocessorPreviewStatus = 'failed'; }
-    finally { if (previewRequests.current(request, requestKey())) preprocessorPreviewPromptId = null; }
+      preprocessorPreviewUrl = URL.createObjectURL(result.blob); preprocessorPreviewStatus = 'ready'; previewKind = 'processed';
+    } catch { if (previewRequests.current(request, requestKey(true))) preprocessorPreviewStatus = 'failed'; }
+    finally { if (previewRequests.current(request, requestKey(true))) preprocessorPreviewPromptId = null; }
   }
   async function handlePreprocessorPreviewEvent(event: any) {
     const data = event.payload, pid = data?.prompt_id;
-    if (!pid || !previewRequest || preprocessorPreviewStatus !== 'preparing' || !previewRequests.current(previewRequest, requestKey())) return;
+    if (!pid || !previewRequest || preprocessorPreviewStatus !== 'preparing' || !previewRequests.current(previewRequest, requestKey(true))) return;
     if (preprocessorPreviewPromptId === pid) { await applyPreparedPreprocessorImage(data); return; }
     if (!preprocessorPreviewPromptId) {
       if (pendingPreprocessorEvents.size >= 32) pendingPreprocessorEvents.delete(pendingPreprocessorEvents.keys().next().value!);
@@ -410,10 +412,10 @@
     let image = generation.controlnetImage;
     const preprocessor = previewPreprocessor;
     if ((!image && !linkedReferenceId) || !preprocessor || preprocessorPreviewStatus === 'preparing') return;
-    resetPreparedPreview(); const request = previewRequests.begin(requestKey()); previewRequest = request;
+    resetPreparedPreview(); const request = previewRequests.begin(requestKey(true)); previewRequest = request;
     preprocessorPreviewStatus = 'preparing';
     preprocessorPreviewTimeout = setTimeout(() => {
-      if (previewRequests.current(request, requestKey())) { preprocessorPreviewStatus = 'failed'; preprocessorPreviewPromptId = null; previewRequests.invalidate(); pendingPreprocessorEvents.clear(); }
+      if (previewRequests.current(request, requestKey(true))) { preprocessorPreviewStatus = 'failed'; preprocessorPreviewPromptId = null; previewRequests.invalidate(); pendingPreprocessorEvents.clear(); }
     }, 120_000);
     try {
       if (linkedReferenceId) {
@@ -421,15 +423,15 @@
         if (!reference) throw new Error(locale.t('canvas.missing_connection'));
         const bytes = await canvasPngBytes(matteControlnetReference(reference));
         const uploaded = await uploadImageBytes(bytes, `control-preview-${controlnetEditorContext()}.png`);
-        if (!mounted || !previewRequests.current(request, requestKey())) return;
+        if (!mounted || !previewRequests.current(request, requestKey(true))) return;
         image = uploaded.name;
       }
       const result = await generateControlnetPreprocessorPreview(image!, preprocessor);
-      if (!mounted || !previewRequests.current(request, requestKey())) return;
+      if (!mounted || !previewRequests.current(request, requestKey(true))) return;
       preprocessorPreviewPromptId = result.prompt_id;
       const buffered = pendingPreprocessorEvents.get(result.prompt_id); pendingPreprocessorEvents.clear();
       if (buffered) await applyPreparedPreprocessorImage(buffered);
-    } catch { if (mounted && previewRequests.current(request, requestKey())) { preprocessorPreviewStatus = 'failed'; clearPreprocessorPreviewTimeout(); preprocessorPreviewPromptId = null; } }
+    } catch { if (mounted && previewRequests.current(request, requestKey(true))) { preprocessorPreviewStatus = 'failed'; clearPreprocessorPreviewTimeout(); preprocessorPreviewPromptId = null; } }
   }
 
   function presetAvailable(presetId: string): boolean {
@@ -466,7 +468,7 @@
     });
   });
   $effect(() => {
-    const key = requestKey();
+    const key = requestKey(true);
     untrack(() => {
       if (previewRequest && !previewRequests.current(previewRequest, key)) resetPreparedPreview();
       if (uploadingImage) uploadingImage = false;
@@ -474,11 +476,14 @@
   });
 
   $effect(() => {
-    canvas.controlContextPreviewUrl = generation.controlnetEnabled
-      ? (preprocessorPreviewStatus === 'ready' ? preprocessorPreviewUrl : imagePreviewUrl)
-      : null;
+    const context = controlnetEditorContext();
+    canvas.controlContextPreviewLayerId = context || null;
+    canvas.controlContextPreviewKind = previewKind;
+    canvas.controlContextPreviewUrl = context ? displayedPreviewUrl : null;
     return () => {
       canvas.controlContextPreviewUrl = null;
+      canvas.controlContextPreviewLayerId = null;
+      canvas.controlContextPreviewKind = 'source';
     };
   });
 
@@ -734,11 +739,6 @@
             </button>
           {/if}
         </div>
-        {#if preprocessorPreviewUrl && preprocessorPreviewStatus === "ready"}
-          <div class="relative rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700">
-            <img src={preprocessorPreviewUrl} alt={locale.t("controlnet.preprocessor_preview_alt")} class="w-full max-h-32 object-contain" />
-          </div>
-        {/if}
       {/if}
 
     {#if sourceImage}<button type="button" onclick={useSourceImage} class="ui-control w-full rounded-lg border border-ui-border text-xs text-neutral-300 hover:bg-ui-selected">{locale.t('generation.controlnet.use_source')}</button>{/if}
@@ -752,17 +752,23 @@
     <!-- Control image upload -->
     <div>
       <label class="block text-xs text-neutral-400 mb-1"
-        >{locale.t('generation.controlnet.control_image_label')}<InfoTip
+        >{locale.t('generation.controlnet.source_image')}<InfoTip
           text={locale.t('generation.controlnet.image_tip')}
         /></label
       >
       {#if generation.controlnetImage || linkedReferenceId}
         <div class="space-y-2">
-          {#if imagePreviewUrl}
+          {#if presetNeedsPreprocessor}
+            <div class="flex gap-1 rounded-md bg-neutral-950 p-1" role="group" aria-label={locale.t('generation.controlnet.canvas_preview')}>
+              <button type="button" aria-pressed={previewKind === 'source'} onclick={() => previewKind = 'source'} class="min-h-7 flex-1 rounded px-2 text-[11px] {previewKind === 'source' ? 'bg-ui-selected text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}">{locale.t('generation.controlnet.source_image')}</button>
+              <button type="button" aria-pressed={previewKind === 'processed'} disabled={preprocessorPreviewStatus !== 'ready'} onclick={() => previewKind = 'processed'} class="min-h-7 flex-1 rounded px-2 text-[11px] disabled:opacity-40 {previewKind === 'processed' ? 'bg-ui-selected text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}">{locale.t('generation.controlnet.processed_input')}</button>
+            </div>
+          {/if}
+          {#if displayedPreviewUrl}
             <div class="relative rounded-lg overflow-hidden bg-neutral-800 border border-neutral-700">
               <img
-                src={imagePreviewUrl}
-                alt={locale.t('generation.controlnet.control_image_alt')}
+                src={displayedPreviewUrl}
+                alt={locale.t(previewKind === 'processed' ? 'generation.controlnet.processed_input' : 'generation.controlnet.source_image')}
                 class="w-full max-h-24 object-contain"
               />
               <div class="absolute top-1.5 right-1.5">
@@ -798,6 +804,7 @@
               />
             </label>
           </div>
+          <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t(presetNeedsPreprocessor ? 'generation.controlnet.input_processed_note' : 'generation.controlnet.input_raw_note')}</p>
         </div>
       {:else}
         <!-- svelte-ignore a11y_no_static_element_interactions -->

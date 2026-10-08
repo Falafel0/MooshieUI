@@ -22,8 +22,9 @@ export function controlnetPayload(state: ControlNetState): ControlNetPayload | n
     start_percent: state.controlnetStartPercent, end_percent: state.controlnetEndPercent,
   };
 }
-export function controlnetRequestKey(state: ControlNetState & { modelFamily: string }): string {
-  return JSON.stringify([state.mode, state.modelFamily, state.controlnetEnabled, state.controlnetMode, state.controlnetPreset, state.controlnetModel, state.controlnetImage, state.controlnetPreprocessor]);
+export function controlnetRequestKey(state: ControlNetState & { modelFamily: string }, previewOnly = false): string {
+  // Inspecting a source/map does not require the modifier to participate in a run.
+  return JSON.stringify([state.mode, state.modelFamily, previewOnly ? null : state.controlnetEnabled, state.controlnetMode, state.controlnetPreset, state.controlnetModel, state.controlnetImage, state.controlnetPreprocessor]);
 }
 export class LatestControlnetRequest {
   private revision = 0;

@@ -2529,6 +2529,12 @@ const pl: Record<string, string> = {
   "generation.inpaint.differential_tip": "Zalecane dla modeli v-pred / Anima podczas inpaintingu, chyba że używasz samplera CFG++. Pomaga zachować strukturę źródłową podczas edycji zamaskowanych obszarów.",
 
   // ControlNet
+  "generation.controlnet.source_image": "Obraz źródłowy",
+  "generation.controlnet.processed_input": "Przetworzona mapa",
+  "generation.controlnet.canvas_preview": "Podgląd obrazu",
+  "generation.controlnet.guide_opacity": "Krycie podglądu",
+  "generation.controlnet.input_raw_note": "Bez preprocesora obraz trafia bezpośrednio do ControlNet. Krycie podglądu zmienia tylko wyświetlanie.",
+  "generation.controlnet.input_processed_note": "Preprocesor tworzy mapę sterującą ze źródła. Podgląd nie zastępuje źródła; generowanie przetwarza je raz.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "Użyj obrazu referencyjnego, aby kierować generowaniem. ControlNet może zachować krawędzie, głębię, pozę i więcej z obrazu źródłowego.",
   "generation.controlnet.presets": "Presety",

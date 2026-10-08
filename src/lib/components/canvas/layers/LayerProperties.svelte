@@ -122,6 +122,12 @@
     <fieldset disabled={layer.locked} class="min-w-0 space-y-2 p-2 disabled:opacity-50">
       {#if layer.locked || !participates}<p role="status" class="rounded bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-300">{stateMessage}</p>{/if}
       <LayerConnections />
+      <label class="flex items-center gap-2 text-[11px] text-neutral-400">
+        <span class="shrink-0">{locale.t('generation.controlnet.guide_opacity')}</span>
+        <input aria-label={locale.t('generation.controlnet.guide_opacity')} type="range" value={layer.opacity} oninput={(event) => setOpacity(Number(event.currentTarget.value))} onpointerup={finishSliderEdit} onpointercancel={finishSliderEdit} onkeyup={finishSliderEdit} onblur={finishSliderEdit} min="0" max="1" step="0.01" class="min-w-0 flex-1 accent-indigo-500" />
+        <span class="w-8 shrink-0 text-right tabular-nums text-neutral-300">{Math.round(layer.opacity * 100)}%</span>
+      </label>
+      <p class="text-[11px] leading-relaxed text-neutral-500">{locale.t('canvas.display_note')}</p>
       {#if generation.isNovelAi}
         <p role="status" class="rounded bg-amber-500/10 px-2 py-1.5 text-xs text-amber-300">{locale.t('canvas.controlnet_provider_unavailable')}</p>
       {:else}<ControlNetSettings />{/if}

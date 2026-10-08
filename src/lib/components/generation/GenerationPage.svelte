@@ -11,7 +11,6 @@
   import RegionalPromptModal from "./RegionalPromptModal.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import SamplerSettings from "./SamplerSettings.svelte";
-  import InpaintTarget from "./InpaintTarget.svelte";
   import DimensionControls from "./DimensionControls.svelte";
   import GenerateButton from "./GenerateButton.svelte";
   import UpscaleSettings from "./UpscaleSettings.svelte";
@@ -2529,7 +2528,6 @@
           </div>
         {/if}
         <div class="{mobileFriendly ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden pl-3 pr-5 pt-20 pb-6 flex flex-col gap-2' : 'contents'}">
-        {#if generation.mode === "inpainting"}<InpaintTarget />{/if}
         {@render sectionDropZone("left", 0)}
         {#each leftRenderSections as section, i}
           {@render renderSection(section)}

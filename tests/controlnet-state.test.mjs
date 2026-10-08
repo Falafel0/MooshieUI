@@ -25,6 +25,13 @@ test('latest request rejects superseded uploads, mode changes, source changes an
  for(const change of [{mode:'inpainting'},{modelFamily:'anima'},{controlnetImage:'new.png'},{controlnetPreprocessor:null},{controlnetEnabled:false}]) assert.equal(requests.current(latest,controlnetRequestKey({...state,...change})),false);
  requests.invalidate();assert.equal(requests.current(latest,key),false);
 });
+test('map inspection survives disabling a modifier but invalidates a changed source or pipeline',()=>{
+ const requests=new LatestControlnetRequest(),key=controlnetRequestKey(state,true),request=requests.begin(key);
+ assert.equal(requests.current(request,controlnetRequestKey({...state,controlnetEnabled:false},true)),true);
+ for(const change of [{controlnetImage:'replacement.png'},{controlnetPreprocessor:null},{modelFamily:'anima'},{mode:'inpainting'}]) {
+  assert.equal(requests.current(request,controlnetRequestKey({...state,...change},true)),false);
+ }
+});
 const layer=(order,overrides={})=>({id:`control-${order}`,name:`Control ${order}`,type:'controlnet',visible:true,opacity:1,locked:false,order,controlnet:{...newControlnetLayer(),model:'depth.safetensors',image:`hint-${order}.png`,sourceData:'data:image/png;base64,AAAA'},...overrides});
 test('document controls preserve stack order and exclude hidden, disabled and non-control layers',()=>{
  const layers=[layer(2),layer(0),layer(1,{visible:false}),layer(3,{controlnet:{...newControlnetLayer(),enabled:false}}),{type:'mask',visible:true,order:4}];

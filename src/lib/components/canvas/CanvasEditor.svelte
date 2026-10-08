@@ -251,6 +251,7 @@
           <span class="h-2 w-2 shrink-0 rounded-full" style="background: {resolveTint(activeContextLayer)}"></span>
           <strong class="max-w-32 truncate px-0.5 font-medium text-neutral-100">{activeContextLayer.name}</strong>
           {#if activeContextLayer.type === 'controlnet'}
+            <span class="rounded bg-neutral-800 px-1.5 py-0.5">{locale.t(canvas.controlContextPreviewLayerId === activeContextLayer.id && canvas.controlContextPreviewKind === 'processed' ? 'generation.controlnet.processed_input' : 'generation.controlnet.source_image')}</span>
             <span class="rounded bg-neutral-800 px-1.5 py-0.5 tabular-nums">×{(activeContextLayer.controlnet?.strength ?? 1).toFixed(2)}</span>
             <span class="tabular-nums text-neutral-400">{Math.round((activeContextLayer.controlnet?.startPercent ?? 0) * 100)}–{Math.round((activeContextLayer.controlnet?.endPercent ?? 1) * 100)}%</span>
           {:else if activeContextLayer.type === 'region'}

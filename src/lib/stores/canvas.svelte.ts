@@ -218,6 +218,8 @@ class CanvasStore {
   maskOverlayVisible = $state(true);
   showLayerContext = $state(true);
   controlContextPreviewUrl = $state<string | null>(null);
+  controlContextPreviewLayerId = $state<string | null>(null);
+  controlContextPreviewKind = $state<'source' | 'processed'>('source');
 
   // UI state
   isCanvasMode = $state(false);
@@ -1224,7 +1226,7 @@ class CanvasStore {
         name: layerName,
         type,
         visible: true,
-        opacity: 1,
+        opacity: type === 'controlnet' ? .4 : 1,
         // A mask or a region starts at full coverage: the sliders that dim the
         // overlay are display-only, so this is the one value a run reads.
         coverage: type === "mask" || type === "region" ? 1 : undefined,

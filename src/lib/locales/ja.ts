@@ -2429,6 +2429,12 @@ const ja: Record<string, string> = {
   "generation.inpaint.differential_tip": "CFG++サンプラーを使用しない限り、インペインティング中のv-pred / Animaスタイルモデルに推奨。マスク領域の編集時にソース構造を保持するのに役立ちます。",
 
   // ControlNet
+  "generation.controlnet.source_image": "元画像",
+  "generation.controlnet.processed_input": "処理済みマップ",
+  "generation.controlnet.canvas_preview": "画像プレビュー",
+  "generation.controlnet.guide_opacity": "ガイドの不透明度",
+  "generation.controlnet.input_raw_note": "前処理なしでは、この画像を直接ControlNetに渡します。ガイドの不透明度は表示だけに影響します。",
+  "generation.controlnet.input_processed_note": "前処理で元画像を制御マップに変換します。プレビューは元画像を置き換えず、生成時に一度だけ処理します。",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "参照画像を使用して生成をガイドします。ControlNetはソース画像のエッジ、深度、ポーズなどを保持できます。",
   "generation.controlnet.presets": "プリセット",

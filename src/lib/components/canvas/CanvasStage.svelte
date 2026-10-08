@@ -656,17 +656,24 @@
     overlayGroup = new Konva.Group({ listening: false });
     contextLayer.add(overlayGroup);
 
-    if (canvas.activeLayer?.type === 'controlnet' && effectiveLayerVisibility(canvas.activeLayer, canvas.groups)) {
-      if (canvas.activeLayer.showContext === false) { contextLayer.batchDraw(); return; }
+    // Showing a reference is independent from including this modifier in a run.
+    // Hidden or unresolved groups still hide their contained guides.
+    const control = canvas.activeLayer;
+    if (control?.type === 'controlnet' && canvas.selectedWorkspaceSection === 'layers' &&
+        (!control.groupId || canvas.groups.some(group => group.id === control.groupId && group.visible))) {
+      if (control.showContext === false) { contextLayer.batchDraw(); return; }
       try {
-        const reference = canvas.activeLayer.referenceRasterId ? canvas.exportRasterLayer(canvas.activeLayer.referenceRasterId) : null;
-        const image = reference ? matteControlnetReference(reference) : (canvas.controlContextPreviewUrl ? await loadImageEl(canvas.controlContextPreviewUrl) : null);
-        if (!image) { drawModifierTargetGuides(canvas.activeLayer); contextLayer.batchDraw(); return; }
-        if (!contextLayer || revision !== contextRevision) return;
-        contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: .4, listening: false }));
-        contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: resolveTint(canvas.activeLayer), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
+        const reference = control.referenceRasterId ? canvas.exportRasterLayer(control.referenceRasterId) : null;
+        const previewUrl = canvas.controlContextPreviewLayerId === control.id ? canvas.controlContextPreviewUrl : null;
+        const image = previewUrl ? await loadImageEl(previewUrl) : reference ? matteControlnetReference(reference) : control.controlnet?.sourceData ? await loadImageEl(control.controlnet.sourceData) : null;
+        if (!contextLayer || revision !== contextRevision || canvas.activeLayerId !== control.id) return;
+        if (image) {
+          contextLayer.add(new Konva.Image({ image, width: canvas.canvasWidth, height: canvas.canvasHeight, opacity: control.opacity, listening: false, name: 'controlnet-guide' }));
+          contextLayer.add(new Konva.Rect({ x: 0, y: 0, width: canvas.canvasWidth, height: canvas.canvasHeight, stroke: resolveTint(control), strokeWidth: 1.5 / canvas.viewport.zoom, dash: [8 / canvas.viewport.zoom, 5 / canvas.viewport.zoom], opacity: .8, listening: false }));
+        }
       } catch { /* The source preview can disappear while a blob URL is replaced. */ }
-      drawModifierTargetGuides(canvas.activeLayer);
+      if (!contextLayer || revision !== contextRevision || canvas.activeLayerId !== control.id) return;
+      drawModifierTargetGuides(control);
       reorderStageLayers(); contextLayer.batchDraw(); return;
     }
 
@@ -2086,6 +2093,7 @@
     void canvas.paintRevision;
     void canvas.showLayerContext;
     void canvas.controlContextPreviewUrl;
+    void canvas.controlContextPreviewLayerId;
     void generation.growMaskBy;
     void generation.inpaintSettings;
     void generation.controlnetStrength;

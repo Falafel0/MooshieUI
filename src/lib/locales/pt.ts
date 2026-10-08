@@ -2412,6 +2412,12 @@ const pt: Record<string, string> = {
   "generation.inpaint.differential_diffusion": "Difusão Diferencial",
   "generation.inpaint.differential_tip": "Recomendado para modelos v-pred / estilo Anima durante inpainting, a menos que esteja usando um sampler CFG++. Ajuda a preservar a estrutura de origem ao editar regiões mascaradas.",
 
+  "generation.controlnet.source_image": "Imagem original",
+  "generation.controlnet.processed_input": "Mapa processado",
+  "generation.controlnet.canvas_preview": "Prévia da imagem",
+  "generation.controlnet.guide_opacity": "Opacidade da guia",
+  "generation.controlnet.input_raw_note": "Sem pré-processador, esta imagem vai diretamente para ControlNet. A opacidade da guia altera apenas a exibição.",
+  "generation.controlnet.input_processed_note": "O pré-processador converte a origem em um mapa de controle. A prévia não substitui a origem; a geração a processa uma vez.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "Use uma imagem de referência para guiar a geração. ControlNet pode preservar bordas, profundidade, pose e mais de uma imagem de origem.",
   "generation.controlnet.presets": "Presets",

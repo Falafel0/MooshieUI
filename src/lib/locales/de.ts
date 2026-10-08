@@ -2433,6 +2433,12 @@ const de: Record<string, string> = {
   "generation.inpaint.differential_diffusion": "Differentielle Diffusion",
   "generation.inpaint.differential_tip": "Empfohlen für v-pred / Anima-Stil-Modelle beim Inpainting, es sei denn, Sie verwenden CFG++-Sampler. Hilft, die Quellstruktur beim Bearbeiten maskierter Bereiche zu bewahren.",
 
+  "generation.controlnet.source_image": "Quellbild",
+  "generation.controlnet.processed_input": "Verarbeitete Karte",
+  "generation.controlnet.canvas_preview": "Bildvorschau",
+  "generation.controlnet.guide_opacity": "Deckkraft der Hilfe",
+  "generation.controlnet.input_raw_note": "Ohne Vorverarbeitung wird dieses Bild direkt an ControlNet übergeben. Die Deckkraft ändert nur die Anzeige.",
+  "generation.controlnet.input_processed_note": "Die Vorverarbeitung erstellt aus der Quelle eine Steuerkarte. Die Vorschau ersetzt die Quelle nicht; bei der Generierung wird sie einmal verarbeitet.",
   "generation.controlnet.title": "ControlNet",
   "generation.controlnet.tip": "Verwendet Referenzbilder zur Steuerung der Erzeugung. ControlNet kann Kanten, Tiefe, Pose usw. des Quellbildes bewahren.",
   "generation.controlnet.presets": "Vorlagen",
