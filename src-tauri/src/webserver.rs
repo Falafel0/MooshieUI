@@ -1784,6 +1784,10 @@ fn version_newer_than(latest: &str, current: &str) -> bool {
 
 #[test]
 fn release_versions_compare_prereleases_numerically() {
+    assert!(version_newer_than("2.3.18-mooshie.1", "2.3.9-fork.9"));
+    assert!(version_newer_than("2.3.18-mooshie.10", "2.3.18-mooshie.2"));
+    assert!(!version_newer_than("2.3.18-mooshie.2", "2.3.18-mooshie.10"));
+    assert!(version_newer_than("2.3.19-mooshie.1", "2.3.18-mooshie.10"));
     assert!(version_newer_than("2.3.6-fork.10", "2.3.6-fork.2"));
     assert!(!version_newer_than("2.3.6-fork.1", "2.3.6-fork.2"));
     assert!(!version_newer_than("2.3.6-fork.1", "2.3.6-fork.1"));
@@ -4725,6 +4729,21 @@ async fn dispatch_command(
                 .to_string();
             let result =
                 crate::commands::api::read_modelspec_internal(&state, &category, &filename)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "detect_model_kind" => {
+            let category = args["category"]
+                .as_str()
+                .ok_or("Missing category")?
+                .to_string();
+            let filename = args["filename"]
+                .as_str()
+                .ok_or("Missing filename")?
+                .to_string();
+            let result =
+                crate::commands::api::detect_model_kind_internal(&state, &category, &filename)
                     .await
                     .map_err(|e| e.to_string())?;
             serde_json::to_value(result).map_err(|e| e.to_string())

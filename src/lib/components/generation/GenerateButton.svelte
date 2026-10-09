@@ -193,6 +193,9 @@
         errorMsg = locale.t('generation.error_no_checkpoint');
         return;
       }
+      if (generation.mode !== "video" && !generation.isNovelAi) {
+        await preparation.wait("inputs", () => generation.checkComponentKinds());
+      }
 
       // Check style transfer only when it will actually be sent: an armed or
       // paused run clears it in toParams(), except the regional inpaint chain,

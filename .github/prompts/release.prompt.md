@@ -14,7 +14,7 @@ Full release path: **repo hygiene → pre-commit → version bump → changelog 
 
 | Field | Default if omitted |
 |-------|-------------------|
-| Version `X.Y.Z` | Read `package.json`, patch+1 (no `v` prefix in files) |
+| Version `X.Y.Z` | Use the merged upstream base plus `-mooshie.N`: increment N on the same base, reset to 1 for a newer base. See `docs/FORK_WORKSPACE.md`; omit `v` in package files. |
 | Summary | `git log` since last `v*` tag |
 
 ## Windows git (required)

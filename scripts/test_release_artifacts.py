@@ -55,6 +55,14 @@ class ReleaseArtifactsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.collect()
 
+    def test_mooshie_version_is_preserved_in_installer_and_updater(self):
+        for file in list(self.source.glob("*.exe*")):
+            file.rename(file.with_name(file.name.replace("2.3.1", "2.3.18-mooshie.1")))
+        result = module.collect(self.source, self.output, "v2.3.18-mooshie.1", "Falafel0/MooshieUI")
+        self.assertEqual(result["version"], "2.3.18-mooshie.1")
+        self.assertEqual(result["platforms"]["windows-x86_64"]["url"],
+                         "https://github.com/Falafel0/MooshieUI/releases/download/v2.3.18-mooshie.1/MooshieUI.Fork_2.3.18-mooshie.1_x64-setup.exe")
+
 
 if __name__ == "__main__":
     unittest.main()

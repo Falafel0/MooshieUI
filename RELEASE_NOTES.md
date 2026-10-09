@@ -1,3 +1,35 @@
+## What's New in v2.3.18-mooshie.1
+
+### Upstream and version numbering
+- Merge Mooshieblob1/MooshieUI through fd63cfc (v2.3.18 plus model component-kind detection), retaining the fork workspace, ControlNet layers, Patchy integration and responsiveness improvements.
+- Track the upstream base in release versions: v<upstream>-mooshie.<number>. Increment the suffix on the same base and restart at 1 after an upstream version change. Existing fork.N releases remain unchanged.
+- Include upstream Krea 2 encoder/LoRA setup and the NovelAI 2x upscale correction.
+
+### Model selection reliability
+- Associate VAE, encoder and main-model warnings with the inspected selection and model location. Ignore late replies, clear unused encoder warnings, and inspect only local model files.
+- Refresh cached kinds after inventory changes, share concurrent header reads, and retry temporary inspection failures. Validate current components before preparing a generation.
+
+### Krea 2 setup fixes
+- Share model-panel and notification downloads, and wait for all transfers before allowing retries after a failure.
+- Preserve the selected model/encoder if it changes while downloading; verify refreshed inventory before activating the mode. Automatic required-component downloads also ignore changes to the model, location or a destroyed panel.
+- Do not label an uncensored encoder as standard when turning the mode off without a stock encoder. Add the automatic LoRA only when the uncensored encoder is actually selected.
+
+### Validation
+- Add model-kind and installation lifecycle regressions to CI; cover old-to-new updater version ordering and installer/manifest naming for mooshie.N releases.
+
+---
+
+## What's New in v2.3.18
+
+### Krea 2
+- **Uncensored mode with the refusal-reduction LoRA**: the uncensored text encoder panel under the Text Encoder picker is now **Uncensored mode**. Besides the abliterated (Heretic) encoder it adds Capitan01R's TextFusion refusal-reduction LoRA (v2.0 full rank, 2.6 GB) at strength 1.0. The encoder changes what Qwen3-VL-4B reads from your prompt; the LoRA retrains the TextFusion layers that pass it to the image model, so requested concepts get toned down less. The LoRA is applied automatically to Krea 2 generations only, never appears in your LoRA list, is skipped if you already have it enabled yourself, and is recorded in image metadata. **Download and turn on** fetches whatever is missing, and **Turn on** / **Turn off** switch the mode.
+- **Upgrade notice**: if you set up the uncensored encoder in v2.3.16, a one-time notification offers **Download and turn on** for the LoRA. Progress shows in the download banner.
+
+### NovelAI
+- **Upscale works again, now 2x**: NovelAI retired the upscaler on its old API host, so upscaling failed with "API error (404): Cannot POST /ai/upscale". Upscale now goes to the image host with the same request NovelAI's own site sends. NovelAI's upscaler is now a V5 model that enlarges by **2x** instead of 4x, so the tab reads **Upscale 2x**. Prices and the 3MP input limit are unchanged.
+
+---
+
 ## What's New in v2.3.9-fork.9
 
 ### Shelf responsiveness

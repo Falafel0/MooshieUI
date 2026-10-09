@@ -1,6 +1,14 @@
 # Fork workspace
 
-The fork uses `Falafel0/MooshieUI` for signed desktop updates, server version checks, release notes and issue reports. Its desktop identifier is `com.falafel0.mooshieui`, and server releases publish to the separate `ghcr.io/falafel0/mooshieui-fork` container package. Upstream configuration and managed runtime paths are not automatically imported. Existing external ComfyUI servers can be connected in Settings.
+The fork uses `Falafel0/MooshieUI` for signed desktop updates, server version checks, release notes and issue reports. Its desktop identifier is `com.falafel0.mooshieui`. Releases publish a signed Windows installer and updater manifest. Upstream configuration and managed runtime paths are not automatically imported. Existing external ComfyUI servers can be connected in Settings.
+
+## Release numbering and upstream
+
+New releases use `v<upstream version>-mooshie.<number>`, beginning with `v2.3.18-mooshie.1`. The base version follows the merged upstream release; increment the numeric suffix for fork releases on that base and reset it to 1 after moving to a newer upstream base. Keep existing `fork.N` tags and releases unchanged. A higher upstream base makes the first `mooshie.N` release newer than the previous `2.3.9-fork.9` for desktop and server update checks.
+
+The current upstream base is Mooshieblob1/MooshieUI v2.3.18 through `fd63cfc57afdc10bffefa1a62c5ad1648de3120c`, including component-kind detection after the release tag.
+
+Component warnings belong to the selected file and active model location. Refreshing the inventory invalidates cached inspection; remote server filenames are never inspected as local files. Krea 2 setup shares one installation between the model panel and notifications, waits for all transfers before retrying, and enables the mode only while the original Krea 2 model and encoder remain selected. Turning the mode off without an installed stock encoder leaves the picker empty so a standard encoder can be selected explicitly.
 
 ## Inpainting
 

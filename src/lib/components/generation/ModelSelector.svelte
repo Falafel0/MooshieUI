@@ -15,7 +15,15 @@
   import { NOVELAI_MODELS } from "../../utils/novelaiModels.js";
   import { novelai } from "../../stores/novelai.svelte.js";
   import { resolveAvailableModel } from "../../utils/modelAvailability.js";
-  import { KREA2_UNCENSORED_ENCODER, isKrea2Encoder, isKrea2UncensoredEncoder, pickKrea2Encoder } from "../../utils/krea2Encoder.js";
+  import {
+    KREA2_REFUSAL_LORA,
+    KREA2_UNCENSORED_ENCODER,
+    installedKrea2RefusalLora,
+    isKrea2Encoder,
+    isKrea2UncensoredEncoder,
+    pickKrea2Encoder,
+  } from "../../utils/krea2Encoder.js";
+  import { installKrea2Uncensored, setKrea2Uncensored } from "../../utils/krea2UncensoredSetup.js";
   import type { ModelFamily } from "../../utils/modelFamily.js";
 
   interface ModelFile {
@@ -672,6 +680,7 @@
   };
 
   let requiredEncoderEnsureRunning = false;
+  let modelSelectorDestroyed = false;
   // Requirements whose auto-download failed this session. Not retried until the
   // app restarts, so an offline machine does not loop on the download.
   const requiredEncoderFailed = new Set<string>();
@@ -686,6 +695,10 @@
     // read as "nothing installed" and trigger a multi-GB download.
     if (requiredEncoderEnsureRunning || !generation.useSplitModel) return;
     if (models.loading || !Object.keys(models.serverModels).length) return;
+    const model = generation.currentModelMetadataKey();
+    const family = generation.modelFamily;
+    const scope = models.cacheScope;
+    const initialVae = generation.vae;
 
     const current = generation.clipModel;
     const existing =
@@ -728,18 +741,28 @@
     dlEntries = seeded;
     dlOrder = order;
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         files.map(async ({ file }) => {
           await downloadModel(file.url, file.category, file.filename);
           await cacheHashAfterDownload(file);
         }),
       );
-      await models.refresh();
-      if (!existing) {
+      const refreshed = await models.refresh();
+      const failure = results.find(result => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+      if (!refreshed) throw new Error(locale.t("generation.model.install_inventory_failed"));
+      if (modelSelectorDestroyed || !generation.useSplitModel || generation.modelFamily !== family ||
+          generation.currentModelMetadataKey() !== model || models.cacheScope !== scope) {
+        downloading = null;
+        dlEntries = {};
+        dlOrder = [];
+        return;
+      }
+      if (!existing && generation.clipModel === current) {
         generation.clipModel = req.encoderFile.filename;
         generation.clipType = req.clipType;
       }
-      if (files.some(({ file }) => file === req.vaeFile) && !req.isVae(generation.vae)) {
+      if (files.some(({ file }) => file === req.vaeFile) && generation.vae === initialVae && !req.isVae(generation.vae)) {
         generation.vae = req.vaeFile.filename;
       }
       generation.saveSettings();
@@ -808,47 +831,54 @@
       !isKrea2Encoder(generation.clipModel)
   );
 
-  // Uncensored (abliterated) Krea 2 text encoder: offered whenever a Krea 2
-  // model is detected, downloaded on request and applied straight away.
+  // Krea 2 uncensored mode: offered whenever a Krea 2 model is detected,
+  // downloaded on request and applied straight away.
   const showKrea2Uncensored = $derived(generation.useSplitModel && generation.modelFamily === "krea2");
   const krea2UncensoredInstalled = $derived(models.textEncoders.find(isKrea2UncensoredEncoder) ?? null);
-  const krea2StandardInstalled = $derived(
-    models.textEncoders.find((f) => isKrea2Encoder(f) && !isKrea2UncensoredEncoder(f)) ?? null,
+  // Uncensored mode = the uncensored encoder plus the refusal-reduction LoRA,
+  // which generation.outgoingLoras() adds to Krea 2 requests while it is on.
+  const krea2UncensoredOn = $derived(
+    generation.krea2UncensoredEncoder && isKrea2UncensoredEncoder(generation.clipModel),
   );
-  const usingKrea2Uncensored = $derived(isKrea2UncensoredEncoder(generation.clipModel));
+  const krea2RefusalLoraInstalled = $derived(installedKrea2RefusalLora(models.loras));
+  const krea2UncensoredMissing = $derived([
+    ...(krea2UncensoredInstalled
+      ? []
+      : [{ file: KREA2_UNCENSORED_ENCODER, label: "generation.model.downloading_uncensored_encoder" }]),
+    ...(krea2RefusalLoraInstalled
+      ? []
+      : [{ file: KREA2_REFUSAL_LORA, label: "generation.model.downloading_refusal_lora" }]),
+  ]);
+  const krea2UncensoredMissingBytes = $derived(
+    krea2UncensoredMissing.reduce((sum, { file }) => sum + file.bytes, 0),
+  );
+  const krea2UncensoredProgress = $derived.by(() => {
+    const entries = krea2UncensoredMissing.map(({ file }) => dlEntries[file.filename]).filter(Boolean);
+    if (!entries.length) return null;
+    const total = entries.reduce((sum, e) => sum + e.total, 0);
+    return total > 0 ? Math.round((entries.reduce((sum, e) => sum + e.downloaded, 0) / total) * 100) : 0;
+  });
 
-  function useKrea2Encoder(filename: string) {
-    generation.krea2UncensoredEncoder = isKrea2UncensoredEncoder(filename);
-    generation.clipModel = filename;
-    generation.clipType = "krea2";
-    generation.saveSettings();
-  }
-
-  async function downloadKrea2UncensoredEncoder() {
-    if (downloading !== null || models.remote) return;
-    const file: ModelFile = KREA2_UNCENSORED_ENCODER;
-    downloading = file.filename;
+  /** Download whatever uncensored mode is missing, then turn it on. */
+  async function downloadKrea2Uncensored() {
+    const missing = krea2UncensoredMissing;
+    if (downloading !== null || models.remote || !missing.length) return;
+    downloading = missing[0].file.filename;
     downloadError = "";
-    dlEntries = {
-      [file.filename]: {
-        filename: file.filename,
-        label: locale.t("generation.model.downloading_uncensored_encoder"),
-        downloaded: 0,
-        total: KREA2_UNCENSORED_ENCODER.bytes,
-        done: false,
-      },
-    };
-    dlOrder = [file.filename];
+    dlEntries = Object.fromEntries(
+      missing.map(({ file, label }) => [
+        file.filename,
+        { filename: file.filename, label: locale.t(label), downloaded: 0, total: file.bytes, done: false },
+      ]),
+    );
+    dlOrder = missing.map(({ file }) => file.filename);
     try {
-      await downloadModel(file.url, file.category, file.filename);
-      await cacheHashAfterDownload(file);
-      await models.refresh();
-      useKrea2Encoder(file.filename);
+      await installKrea2Uncensored((file) => cacheHashAfterDownload(file));
       downloading = null;
       dlEntries = {};
       dlOrder = [];
     } catch (e) {
-      console.error("Failed to download the uncensored Krea 2 text encoder:", e);
+      console.error("Failed to download Krea 2 uncensored mode:", e);
       downloadError = `Download failed: ${e}`;
       setTimeout(() => {
         downloading = null;
@@ -1144,6 +1174,7 @@
   });
 
   onDestroy(() => {
+    modelSelectorDestroyed = true;
     document.removeEventListener("pointerdown", handleDocumentPointerDown);
     document.removeEventListener("keydown", handleDocumentKeydown);
     unlistenDownload?.();
@@ -1692,6 +1723,11 @@
     {#if unavailableSelection.length > 0}
       <p class="mt-2 text-[11px] text-amber-300">{locale.t("generation.model.unavailable_server")}: {unavailableSelection.join(", ")}</p>
     {/if}
+    {#if !generation.isNovelAi && generation.wrongKindMessage("model")}
+      <p role="alert" class="mt-2 rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-[11px] text-red-300">
+        {generation.wrongKindMessage("model")}
+      </p>
+    {/if}
     {#if downloadError}
       <p role="alert" class="mt-2 text-[11px] text-amber-300">{downloadError}</p>
     {/if}
@@ -1989,6 +2025,11 @@
         <option value={vae}>{vae}</option>
       {/each}
     </select>
+    {#if generation.wrongKindMessage("vae")}
+      <p role="alert" class="mt-2 rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-[11px] text-red-300">
+        {generation.wrongKindMessage("vae")}
+      </p>
+    {/if}
   </div>
   {/if}
 
@@ -2014,53 +2055,59 @@
           <option value={encoder}>{encoder}</option>
         {/each}
       </select>
+      {#if generation.wrongKindMessage("clip")}
+        <p role="alert" class="mt-2 rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-[11px] text-red-300">
+          {generation.wrongKindMessage("clip")}
+        </p>
+      {/if}
       {#if showKrea2EncoderWarning}
         <div class="mt-2 rounded-lg border border-amber-600/30 bg-amber-600/10 px-3 py-2 text-[11px] text-amber-300">
           {locale.t('generation.model.krea2_encoder_warning')}
         </div>
       {/if}
       {#if showKrea2Uncensored}
-        {@const uncensoredEntry = dlEntries[KREA2_UNCENSORED_ENCODER.filename]}
+        {@const size = locale.formatBytes(krea2UncensoredMissingBytes)}
         <div class="mt-2 rounded-lg border border-neutral-700 bg-neutral-800/60 px-3 py-2 space-y-1.5">
           <div class="flex items-center justify-between gap-2 text-[11px]">
             <span class="text-neutral-300">
               {locale.t('generation.model.krea2_uncensored_title')}
               <InfoTip text={locale.t('generation.model.krea2_uncensored_tip')} />
             </span>
-            {#if usingKrea2Uncensored}
+            {#if krea2UncensoredOn && !krea2UncensoredMissing.length}
               <span class="text-emerald-400 shrink-0">{locale.t('generation.model.krea2_uncensored_active')}</span>
             {/if}
           </div>
-          {#if usingKrea2Uncensored}
-            {#if krea2StandardInstalled}
-              <button
-                type="button"
-                class="w-full rounded-md border border-neutral-600 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100 transition-colors"
-                onclick={() => useKrea2Encoder(krea2StandardInstalled)}
-              >
-                {locale.t('generation.model.krea2_uncensored_use_standard')}
-              </button>
-            {/if}
-          {:else if krea2UncensoredInstalled}
-            <button
-              type="button"
-              class="w-full rounded-md bg-indigo-600 px-2 py-1 text-[11px] text-white hover:bg-indigo-500 transition-colors"
-              onclick={() => useKrea2Encoder(krea2UncensoredInstalled)}
-            >
-              {locale.t('generation.model.krea2_uncensored_use')}
-            </button>
-          {:else if !models.remote}
+          {#if krea2UncensoredMissing.length && !models.remote}
             <button
               type="button"
               class="w-full rounded-md bg-indigo-600 px-2 py-1 text-[11px] text-white hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               disabled={downloading !== null}
-              onclick={downloadKrea2UncensoredEncoder}
+              onclick={downloadKrea2Uncensored}
             >
-              {#if uncensoredEntry}
-                {locale.t('generation.model.downloading_uncensored_encoder')} ({dlPercent(uncensoredEntry)}%)
+              {#if krea2UncensoredProgress !== null}
+                {locale.t('generation.model.krea2_uncensored_downloading', { percent: krea2UncensoredProgress })}
+              {:else if krea2UncensoredOn}
+                {locale.t('generation.model.krea2_uncensored_finish', { size })}
               {:else}
-                {locale.t('generation.model.krea2_uncensored_download', { size: locale.formatBytes(KREA2_UNCENSORED_ENCODER.bytes) })}
+                {locale.t('generation.model.krea2_uncensored_download', { size })}
               {/if}
+            </button>
+          {:else if !krea2UncensoredOn && krea2UncensoredInstalled && !krea2UncensoredMissing.length}
+            <button
+              type="button"
+              class="w-full rounded-md bg-indigo-600 px-2 py-1 text-[11px] text-white hover:bg-indigo-500 transition-colors"
+              onclick={() => setKrea2Uncensored(true)}
+            >
+              {locale.t('generation.model.krea2_uncensored_use')}
+            </button>
+          {/if}
+          {#if krea2UncensoredOn}
+            <button
+              type="button"
+              class="w-full rounded-md border border-neutral-600 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100 transition-colors"
+              onclick={() => setKrea2Uncensored(false)}
+            >
+              {locale.t('generation.model.krea2_uncensored_use_standard')}
             </button>
           {/if}
         </div>

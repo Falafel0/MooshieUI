@@ -22,6 +22,8 @@
   import { directorTools, directorToolsAvailable } from "./lib/stores/directorTools.svelte.js";
   import { naiImageEnhance, naiImageEnhanceAvailable } from "./lib/stores/naiImageEnhance.svelte.js";
   import { models } from "./lib/stores/models.svelte.js";
+  import { needsKrea2RefusalLora } from "./lib/utils/krea2Encoder.js";
+  import { notifyKrea2RefusalLoraMissing } from "./lib/utils/krea2UncensoredSetup.js";
   import { BETA57_SCHEDULER } from "./lib/utils/samplingRecommendation.js";
   import { uploadImageBytes, getConfig, updateConfig, readImageMetadata, getQueue, recoverPromptOutputs, readTempImage, readTempImageDisplay } from "./lib/utils/api.js";
   import { loadOutputImageForGenerationInput, uploadOutputImageForGenerationInput, sendImageToVideoFrame, addImageToVideoReference, videoReferenceSlotsFree } from "./lib/utils/galleryActions.js";
@@ -176,6 +178,26 @@
       kind: "warning",
     });
   }
+
+  // Re-check what the picked VAE and text encoder files really are whenever a
+  // pick changes, so the model panel can flag e.g. a text encoder chosen as VAE.
+  $effect(() => {
+    void generation.vae;
+    void generation.clipModel;
+    void generation.useSplitModel;
+    void models.remote;
+    void models.cacheScope;
+    void models.inventoryRevision;
+    untrack(() => void generation.checkComponentKinds());
+  });
+
+  // Users who set up Krea 2 uncensored mode before the refusal-reduction LoRA
+  // joined it have the encoder but not the LoRA: tell them once. Waits for a
+  // loaded inventory so an empty list never reads as "LoRA missing".
+  $effect(() => {
+    if (models.remote || models.loading || !Object.keys(models.serverModels).length) return;
+    if (needsKrea2RefusalLora(models.textEncoders, models.loras)) untrack(notifyKrea2RefusalLoraMissing);
+  });
 
   const visionSimClass = $derived(
     accessibility.visionSimulatorMode === "none"
@@ -402,6 +424,7 @@
     // Read eagerly: clearing a manual override must re-trigger detection, and
     // the async body below runs after the tracking window has closed.
     void generation.modelFamilyOverrides;
+    void models.cacheScope;
 
     if (useSplitModel && diffusionModel) {
       void generation.fetchAndApplyModelMetadata(

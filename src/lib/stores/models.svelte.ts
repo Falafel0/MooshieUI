@@ -19,11 +19,13 @@ class ModelsStore {
   remote = $state(false);
   serverUrl = $state("");
   cacheScope = $state("");
+  inventoryRevision = $state(0);
   serverModels = $state<Record<string, string[]>>({});
   localOnly = $state<Record<string, string[]>>({});
   private refreshId = 0;
 
   private clearInventory() {
+    this.inventoryRevision++;
     this.serverModels = {};
     this.localOnly = {};
     this.checkpoints = [];
@@ -46,7 +48,7 @@ class ModelsStore {
     try {
       const config = await getConfig();
       if (refreshId !== this.refreshId) return false;
-      const cacheScope = JSON.stringify([config.server_url, config.comfyui_path, config.extra_model_paths]);
+      const cacheScope = JSON.stringify([config.server_mode, config.server_url, config.comfyui_path, config.extra_model_paths]);
       if (this.cacheScope !== cacheScope) this.clearInventory();
       this.remote = config.server_mode === "remote";
       this.serverUrl = config.server_url;
@@ -113,6 +115,7 @@ class ModelsStore {
       this.modelPatches = inventory.model_patches;
       this.samplers = samplerInfo.samplers;
       this.schedulers = samplerInfo.schedulers;
+      this.inventoryRevision++;
       return true;
     } catch (e) {
       console.error("Failed to refresh models:", e);

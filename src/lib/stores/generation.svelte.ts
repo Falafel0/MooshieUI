@@ -32,11 +32,12 @@ import {
   familyIsSdxlLike,
   toTurboModelVariant,
 } from "../utils/modelFamily.js";
-import { readModelSpec, type ModelSpec } from "../utils/api.js";
+import { detectModelKind, readModelSpec, type ModelKind, type ModelSpec } from "../utils/api.js";
+import { locale } from "./locale.svelte.js";
 import { BETA57_SCHEDULER, GENERIC_SAMPLING, recommendedSamplingFor } from "../utils/samplingRecommendation.js";
 import { H3_TURBO_LORA, h3TurboPreset } from "../utils/h3Models.js";
 import { artistTagPromptBody } from "../utils/artistTag.js";
-import { pickKrea2Encoder } from "../utils/krea2Encoder.js";
+import { KREA2_REFUSAL_LORA_STRENGTH, isKrea2UncensoredEncoder, krea2RefusalLoraToApply, pickKrea2Encoder } from "../utils/krea2Encoder.js";
 import {
   NOVELAI_DEFAULTS,
   findNovelAiModel,
@@ -906,6 +907,21 @@ class GenerationStore {
    * loaders only accept filenames from their own folder listing).
    */
   modelSourceCategory = $state<string | null>(null);
+  /**
+   * Picks holding the wrong kind of file, from the files' own tensor layout:
+   * a text encoder or VAE chosen as the model, or a text encoder / model chosen
+   * as the VAE, and so on. Null when the pick fits or its kind is unknown.
+   * Not persisted: re-derived from the files on every pick.
+   */
+  mainModelWrongKind = $state<ModelKind | null>(null);
+  vaeWrongKind = $state<ModelKind | null>(null);
+  clipWrongKind = $state<ModelKind | null>(null);
+  private mainModelWrongKindKey = "";
+  private mainModelWrongKindScope = "";
+  private modelMetadataScope = "";
+  private componentKindCache = new Map<string, Promise<ModelKind | null>>();
+  private componentKindCacheScope = "";
+  private checkedComponentKinds: { scope: string; vae: string | null; clip: string | null } = { scope: "", vae: null, clip: null };
   clipModel = $state<string | null>(null);
   clipType = $state<string | null>(null);
   stylePreset = $state<StylePresetId>("none");
@@ -1721,6 +1737,7 @@ class GenerationStore {
     this.modelSpec = null;
     this.modelSpecUnavailable = false;
     this.modelSourceCategory = null;
+    this.mainModelWrongKind = null;
     this.applyModelMetadata(UNKNOWN_MODEL_METADATA);
   }
 
@@ -1750,6 +1767,12 @@ class GenerationStore {
    * toParams() keys off modelFamily, so it was silently skipped in that state.
    */
   async fetchAndApplyModelMetadata(category: string, filename: string): Promise<void> {
+    const scope = models.cacheScope;
+    if (this.modelMetadataScope !== scope) {
+      this._loadedModelMetadataKey = "";
+      this.mainModelWrongKind = null;
+      this.modelMetadataScope = scope;
+    }
     // GGUF carries no safetensors header, but the backend still resolves
     // family/turbo/recommended-encoder info from the filename and sidecars.
     const supportsSpec =
@@ -1781,9 +1804,11 @@ class GenerationStore {
 
     const requestId = ++this._latestModelMetadataRequestId;
     this.isModelMetadataLoading = true;
+    this.mainModelWrongKind = null;
     try {
       const spec = await readModelSpec(category, filename);
       if (requestId !== this._latestModelMetadataRequestId) return;
+      if (models.cacheScope !== scope) return;
       if (this.currentModelMetadataKey() !== metadataKey) return;
 
       this.modelSpec = MODEL_SPEC_DISPLAY_FIELDS.some((field) => !!spec?.[field]) ? spec : null;
@@ -1811,6 +1836,7 @@ class GenerationStore {
       if (family === "unknown") this._loadedModelMetadataKey = "";
     } catch {
       if (requestId !== this._latestModelMetadataRequestId) return;
+      if (models.cacheScope !== scope) return;
       if (this.currentModelMetadataKey() !== metadataKey) return;
 
       this._loadedModelMetadataKey = "";
@@ -1839,6 +1865,16 @@ class GenerationStore {
     filename: string,
     modelKind: string | null,
   ): void {
+    // A text encoder or VAE picked as the model cannot load as one; the model
+    // panel and toParams() say so instead of letting ComfyUI fail on it.
+    this.mainModelWrongKind = modelKind === "text_encoder" || modelKind === "vae" ? modelKind : null;
+    this.mainModelWrongKindKey = `${category}::${filename}`;
+    this.mainModelWrongKindScope = models.cacheScope;
+    if (this.mainModelWrongKind) {
+      this.modelSourceCategory = null;
+      return;
+    }
+
     // GGUF stays on the existing error path: UnetLoaderGGUF is a third-party node
     // with no absolute-path input, so a misplaced .gguf can't be loaded anyway.
     if (!modelKind || filename.toLowerCase().endsWith(".gguf")) {
@@ -3666,11 +3702,125 @@ class GenerationStore {
     this.pausedEditArmed = false;
   }
 
+  /**
+   * LoRAs sent with a generation: the enabled list, plus Krea 2's
+   * refusal-reduction LoRA while uncensored mode is on. Added here rather than
+   * to `loras` so it follows the model family instead of lingering in the list
+   * after a switch to another architecture.
+   */
+  private outgoingLoras(): { name: string; strength_model: number; strength_clip: number }[] {
+    const loras = this.loras
+      .filter((l) => l.enabled && l.name)
+      .map(({ name, strength_model, strength_clip }) => ({ name, strength_model, strength_clip }));
+    const refusalLora = krea2RefusalLoraToApply(
+      this.modelFamily,
+      this.krea2UncensoredEncoder && isKrea2UncensoredEncoder(this.clipModel),
+      models.loras,
+      loras.map((l) => l.name),
+    );
+    return refusalLora
+      ? [
+          ...loras,
+          {
+            name: refusalLora,
+            strength_model: KREA2_REFUSAL_LORA_STRENGTH,
+            strength_clip: KREA2_REFUSAL_LORA_STRENGTH,
+          },
+        ]
+      : loras;
+  }
+
+  /**
+   * Re-check what the selected VAE and text encoder files really are. Run from
+   * an App-level effect on every pick; results are cached per file, and a
+   * result that lands after the pick changed again is dropped.
+   */
+  private componentInspectionScope(): string {
+    return JSON.stringify([models.remote, models.cacheScope, models.inventoryRevision]);
+  }
+
+  async checkComponentKinds(): Promise<void> {
+    const scope = this.componentInspectionScope();
+    const vae = this.vae || null;
+    const clip = this.useSplitModel ? this.clipModel || null : null;
+    this.vaeWrongKind = null;
+    this.clipWrongKind = null;
+    this.checkedComponentKinds = { scope, vae, clip };
+    // Remote filenames belong to the server, not to a same-named local file.
+    if (models.remote) return;
+    const [vaeKind, clipKind] = await Promise.all([
+      vae ? this.cachedModelKind("vae", vae) : null,
+      clip ? this.cachedModelKind("text_encoders", clip) : null,
+    ]);
+    if (scope !== this.componentInspectionScope()) return;
+    if ((this.vae || null) === vae) {
+      this.vaeWrongKind = vaeKind && vaeKind !== "vae" ? vaeKind : null;
+    }
+    if ((this.useSplitModel ? this.clipModel || null : null) === clip) {
+      this.clipWrongKind = clipKind && clipKind !== "text_encoder" ? clipKind : null;
+    }
+  }
+
+  private async cachedModelKind(category: string, filename: string): Promise<ModelKind | null> {
+    const scope = this.componentInspectionScope();
+    if (scope !== this.componentKindCacheScope) {
+      this.componentKindCache.clear();
+      this.componentKindCacheScope = scope;
+    }
+    const key = `${category}::${filename}`;
+    const cached = this.componentKindCache.get(key);
+    if (cached) return cached;
+    const pending = detectModelKind(category, filename).catch(() => {
+      // Do not make a temporary IPC failure a permanent "unknown" result.
+      if (this.componentKindCache.get(key) === pending) this.componentKindCache.delete(key);
+      return null;
+    });
+    this.componentKindCache.set(key, pending);
+    return pending;
+  }
+
+  /** What is wrong with a pick of the wrong kind of file, or null when it fits. */
+  wrongKindMessage(slot: "model" | "vae" | "clip"): string | null {
+    if (models.remote || (slot === "clip" && !this.useSplitModel)) return null;
+    const file =
+      slot === "vae"
+        ? this.vae
+        : slot === "clip"
+          ? this.clipModel
+          : this.useSplitModel
+            ? this.diffusionModel
+            : this.checkpoint;
+    const kind =
+      slot === "vae" ? this.vaeWrongKind : slot === "clip" ? this.clipWrongKind : this.mainModelWrongKind;
+    if (!kind || !file) return null;
+    if (slot === "model") {
+      if (this.mainModelWrongKindKey !== this.currentModelMetadataKey() || this.mainModelWrongKindScope !== models.cacheScope) return null;
+    } else if (this.checkedComponentKinds.scope !== this.componentInspectionScope() || this.checkedComponentKinds[slot] !== file) {
+      return null;
+    }
+    const isModel = kind === "checkpoint" || kind === "diffusion_model";
+    const key =
+      slot === "model"
+        ? `generation.model.wrong_kind.model_is_${kind}`
+        : `generation.model.wrong_kind.${slot}_is_${isModel ? "model" : kind}`;
+    return locale.t(key, { file });
+  }
+
   toParams(options: GenerationToParamsOptions = {}) {
     // Video mode loads its own UNet/CLIP/VAE trio from the `video_*` fields and
     // never touches `checkpoint`, so the image-pipeline model guards below would
     // block generation over state video does not use.
     const isVideo = this._mode === "video";
+
+    // A text encoder, VAE or model in the wrong picker fails deep in ComfyUI
+    // with an error that names neither file; say which pick is wrong instead.
+    // NovelAI renders remotely and ignores these pickers entirely.
+    if (!isVideo && !this.isNovelAi) {
+      for (const slot of ["model", "vae", "clip"] as const) {
+        const message = this.wrongKindMessage(slot);
+        if (message) throw new Error(message);
+      }
+    }
 
     if (!isVideo && this.useSplitModel) {
       this.ensureRecommendedSplitClip(models.textEncoders);
@@ -3996,13 +4146,7 @@ class GenerationStore {
       positive_regions: builtRegions,
       checkpoint: this.checkpoint,
       vae: this.vae || null,
-      loras: this.loras
-        .filter((l) => l.enabled && l.name)
-        .map(({ name, strength_model, strength_clip }) => ({
-          name,
-          strength_model,
-          strength_clip,
-        })),
+      loras: this.outgoingLoras(),
       sampler_name: this.samplerName,
       scheduler: this.scheduler,
       steps: this.steps,
