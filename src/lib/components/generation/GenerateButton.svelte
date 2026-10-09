@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { yieldToUi } from '../../utils/yieldToUi.js';
   import { generationModelContextKey } from "../../utils/controlnetState.js";
   import { effectiveLayerVisibility } from "../../utils/layerRelations.js";
   import { generation } from "../../stores/generation.svelte.js";
@@ -184,8 +185,9 @@
 
     try {
       preparation.phase("inputs");
-      // Commit the busy label before starting synchronous canvas/prompt work.
+      // Commit and paint the busy label before synchronous canvas/prompt work.
       await tick();
+      await yieldToUi();
       preparation.assertActive();
       if (generation.mode !== "video" && !generation.checkpoint) {
         errorMsg = locale.t('generation.error_no_checkpoint');

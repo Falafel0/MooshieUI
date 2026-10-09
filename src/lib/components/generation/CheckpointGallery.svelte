@@ -157,6 +157,7 @@
     loading = { ...loading, [filename]: true };
     try {
       const info = await getCheckpointCivitaiInfo(filename);
+      if (destroyed) return;
       civitaiCache = { ...civitaiCache, [filename]: { data: info, fetchedAt: Date.now() } };
       // Only persist to localStorage when CivitAI data was retrieved.
       // Empty results (failed auth, pre-fix) stay in-memory only so they
@@ -167,7 +168,7 @@
     } catch {
       // Silent fail — card falls back to placeholder SVG
     } finally {
-      loading = { ...loading, [filename]: false };
+      if (!destroyed) loading = { ...loading, [filename]: false };
     }
   }
 

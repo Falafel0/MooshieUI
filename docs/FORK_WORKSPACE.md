@@ -49,8 +49,8 @@ The Windows library test harness can lack the common-controls v6 activation mani
 
 ## Preparation and responsiveness
 
-Generate immediately shows preparation status before a task ID is available. Cancel during preparation prevents submission; if ComfyUI accepts the job late, cancellation targets that job. Accepted tasks already in the queue remain intact. Preparation timings are recorded in diagnostic logs separately from sampling time.
+Generate immediately shows preparation status before a task ID is available. Cancel during preparation prevents submission; if ComfyUI accepts the job late, cancellation targets that job. Accepted tasks already in the queue remain intact. The status is painted before synchronous input preparation; minimized windows use a bounded fallback. Preparation timings are recorded in diagnostic logs separately from sampling time.
 
-Long prompt editors keep the complete native editable text while measuring interactive tags and spelling marks near the visible lines. The Shelf initially renders a batch of LoRAs, models or images and loads more when scrolling or pressing Show more. Search covers the entire library, including cards not yet rendered.
+Long prompt editors keep the complete native editable text while measuring interactive tags and spelling marks near the visible lines. The Shelf initially renders a batch of LoRAs, models or images and loads more when scrolling or pressing Show more. Search covers the entire library, including cards not yet rendered. LoRA thumbnail requests follow visible cards with at most three in flight. Changing panels or filtering removes waiting requests; inlined thumbnails need no backend read. A failed preview uses a placeholder rather than a permanent loading indicator.
 
 Use the project dimensions or C over the canvas to open Resize canvas. Choose Canvas bounds to pad/crop around an anchor without scaling, or Scale document to resize artwork and spatial layers together. Undo restores the previous document size and content.

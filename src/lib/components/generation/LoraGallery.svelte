@@ -33,6 +33,7 @@
     type ModelGallerySort,
   } from "../../utils/modelGallerySort.js";
   import ModelPreviewActions from "./ModelPreviewActions.svelte";
+  import { createVisibleResourceQueue } from '../../utils/visibleResourceQueue.js';
 
   interface Props {
     cardSize?: number;
@@ -131,7 +132,7 @@
   $effect(() => { void searchQuery; void sortMode; visibleCount = 64; });
   function showMore() { visibleCount += 64; }
   let destroyed = false;
-  onDestroy(() => { destroyed = true; fetchQueue = []; });
+  onDestroy(() => { destroyed = true; fetchQueue = []; previewQueue.dispose(); });
 
   const filteredLoras = $derived.by(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -295,6 +296,7 @@
     errors = { ...errors, [filename]: "" };
     try {
       const info = await getLoraCivitaiInfo(filename);
+      if (destroyed) return;
       cache = { ...cache, [filename]: { data: info, fetchedAt: Date.now() } };
       // Only persist to localStorage when CivitAI data was retrieved.
       // Empty results (failed auth, pre-fix) stay in-memory only so they
@@ -303,6 +305,7 @@
         saveCache();
       }
     } catch (e) {
+      if (destroyed) return;
       const message = e instanceof Error ? e.message : String(e);
       errors = { ...errors, [filename]: message };
       if (isAccessDeniedError(message)) {
@@ -310,12 +313,17 @@
         fetchQueue = [];
       }
     } finally {
-      loading = { ...loading, [filename]: false };
+      if (!destroyed) loading = { ...loading, [filename]: false };
     }
   }
 
   function refetchLora(filename: string) {
     loraInfoAccessBlocked = null;
+    const url = currentImageUrl(filename);
+    if (url) {
+      delete failedImages[url];
+      previewQueue.retry(url);
+    }
     delete cache[filename];
     cache = { ...cache };
     saveCache();
@@ -326,16 +334,20 @@
   function lazyFetch(node: HTMLElement, filename: string) {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
-          enqueueFetch(filename);
-          observer.disconnect();
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            if (!visibleLoras.includes(filename)) visibleLoras = [...visibleLoras, filename];
+            enqueueFetch(filename);
+          } else {
+            visibleLoras = visibleLoras.filter(name => name !== filename);
+          }
         }
       },
       { threshold: 0.1 }
     );
     observer.observe(node);
     return {
-      destroy() { observer.disconnect(); }
+      destroy() { observer.disconnect(); visibleLoras = visibleLoras.filter(name => name !== filename); }
     };
   }
 
@@ -376,8 +388,6 @@
     const current = imageIndex[filename] ?? 0;
     const next = (current + 1) % images.length;
     imageIndex = { ...imageIndex, [filename]: next };
-    const nextUrl = images[next];
-    if (nextUrl && !nextUrl.startsWith("data:")) resolveImage(nextUrl);
   }
 
   function prevImage(filename: string) {
@@ -386,8 +396,6 @@
     const current = imageIndex[filename] ?? 0;
     const prev = current === 0 ? images.length - 1 : current - 1;
     imageIndex = { ...imageIndex, [filename]: prev };
-    const prevUrl = images[prev];
-    if (prevUrl && !prevUrl.startsWith("data:")) resolveImage(prevUrl);
   }
 
   async function invalidateLoraCache(filename: string) {
@@ -501,31 +509,22 @@
   // Resolved data-URL cache: civitai url → "data:image/...;base64,..."
   // Populated lazily when an image tile becomes visible.
   let resolvedImages = $state<Record<string, string>>({});
-  let resolvingImages = new Set<string>();
+  let failedImages = $state<Record<string, boolean>>({});
+  let visibleLoras = $state<string[]>([]);
+  const previewQueue = createVisibleResourceQueue({
+    load: fetchCachedImage,
+    loaded: (url, dataUrl) => { resolvedImages = { ...resolvedImages, [url]: dataUrl }; },
+    failed: (url, error) => {
+      failedImages = { ...failedImages, [url]: true };
+      console.warn(`LoraGallery: failed to load preview ${url}`, error);
+    },
+  });
 
-  async function resolveImage(url: string): Promise<void> {
-    if (resolvedImages[url] || resolvingImages.has(url)) return;
-    resolvingImages.add(url);
-    try {
-      const dataUrl = await fetchCachedImage(url);
-      resolvedImages = { ...resolvedImages, [url]: dataUrl };
-    } catch (e) {
-      // Leave unresolved — the fallback placeholder will show. Log so a broken
-      // preview fetch is diagnosable instead of silently blank.
-      console.warn(`LoraGallery: failed to load preview ${url}`, e);
-    } finally {
-      resolvingImages.delete(url);
-    }
-  }
-
-  // Resolve the currently-visible image for a LoRA whenever it changes.
+  // Demand follows actual card visibility, including folder and search changes.
+  // Already-inlined sidecar thumbnails need no backend request.
   $effect(() => {
-    for (const loraName of Object.keys(cache)) {
-      const url = currentImageUrl(loraName);
-      if (url && !resolvedImages[url]) {
-        resolveImage(url);
-      }
-    }
+    previewQueue.setVisible(visibleLoras.map(currentImageUrl).filter((url): url is string =>
+      !!url && !url.startsWith('data:') && !resolvedImages[url]));
   });
   let cardViewportHeight = $state(160);
   let managementOpen = $state(false);
@@ -802,7 +801,7 @@
                 {locale.t('lora.on')}
               </div>
             {/if}
-            {#if isLoading || (imgUrl && !resolvedUrl)}
+            {#if isLoading || (imgUrl && !resolvedUrl && !failedImages[imgUrl])}
               <div class="absolute inset-0 flex items-center justify-center">
                 <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
               </div>

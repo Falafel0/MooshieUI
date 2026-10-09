@@ -1,5 +1,21 @@
 # Changelog
 
+## What's New in v2.3.9-fork.9
+
+### Shelf responsiveness
+- Load LoRA previews only for visible cards, with at most three requests in flight. Opening a large cached library no longer requests every stored thumbnail.
+- Drop waiting previews when scrolling, filtering, closing a folder or switching panels. Inlined sidecar thumbnails display directly without a backend request.
+- Show a fallback when a preview fails instead of leaving a permanent spinner. Explicit refresh can retry the preview; reactive updates do not continuously retry failures.
+
+### Generation feedback
+- Give the browser a paint after displaying preparation status, before synchronous prompt and canvas work starts. A bounded timer fallback keeps submission working when a window is minimized.
+- Retain duplicate-click protection and targeted cancellation of late accepted jobs.
+
+### Regression coverage
+- Cover visible-preview concurrency, scrolling and filtering, shared URLs, retry and panel disposal, plus preparation paint scheduling and background fallback in CI.
+
+---
+
 ## What's New in v2.3.9-fork.8
 
 ### Responsive prompt and resource panels
