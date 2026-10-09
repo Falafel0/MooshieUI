@@ -2126,6 +2126,7 @@ const ja: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} はテキストエンコーダーではなくモデルです。モデルとして選択し、ここではテキストエンコーダーを選んでください。",
   "generation.model.install_inventory_failed": "インストール済みモデル一覧を更新できませんでした。このモードを有効にする前に再試行してください。",
   "generation.model.install_incomplete": "現在のモデル一覧に必要な Krea 2 ファイルがまだありません。",
+  "generation.model.krea2_standard_required": "このモードを無効にするには、標準の Krea 2 テキストエンコーダーをインストールしてください。",
   "generation.model.krea2_uncensored_title": "無検閲モード",
   "generation.model.krea2_uncensored_tip": "Krea 2 はプロンプトを Qwen3-VL-4B で読み取ります。これは一部の要求を拒否するよう訓練されたチャットモデルで、さらに TextFusion 層がそうした概念を弱めるよう学習しているため、画像内の要素が弱まったり欠けたりすることがあります（NSFW に限りません）。無検閲モードでは同じエンコーダーの abliterated（Heretic）版を使い、Capitan01R の TextFusion 拒否軽減 LoRA を強度 1.0 で追加します。LoRA は Krea 2 の生成にのみ自動で適用され、LoRA リストには表示されません。画像モデルが学習していない概念は追加できません。",
   "generation.model.krea2_uncensored_download": "ダウンロードしてオンにする（{size}）",

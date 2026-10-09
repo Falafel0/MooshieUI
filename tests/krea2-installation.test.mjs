@@ -51,10 +51,15 @@ test('an empty picker filled by inventory refresh can activate the downloaded mo
   f.models.refresh = async () => { f.generation.clipModel = encoders.KREA2_UNCENSORED_ENCODER.filename; return true; };
   await f.installKrea2Uncensored(); assert.equal(f.generation.krea2UncensoredEncoder, true);
 });
-test('turning off with no stock encoder clears the uncensored selection', () => {
+test('turning off without a stock encoder preserves the active mode and selection', () => {
   const f = fixture(undefined, { textEncoders: [encoders.KREA2_UNCENSORED_ENCODER.filename] });
   f.generation.krea2UncensoredEncoder = true; f.generation.clipModel = encoders.KREA2_UNCENSORED_ENCODER.filename;
-  f.setKrea2Uncensored(false); assert.equal(f.generation.clipModel, null); assert.equal(f.generation.krea2UncensoredEncoder, false);
+  f.setKrea2Uncensored(false); assert.equal(f.generation.clipModel, encoders.KREA2_UNCENSORED_ENCODER.filename); assert.equal(f.generation.krea2UncensoredEncoder, true); assert.equal(f.generation.saves, 0);
+});
+test('turning off with a stock encoder selects it and saves the disabled mode', () => {
+  const f = fixture(); const stock = f.generation.clipModel;
+  f.generation.krea2UncensoredEncoder = true; f.generation.clipModel = encoders.KREA2_UNCENSORED_ENCODER.filename;
+  f.setKrea2Uncensored(false); assert.equal(f.generation.clipModel, stock); assert.equal(f.generation.krea2UncensoredEncoder, false); assert.equal(f.generation.saves, 1);
 });
 test('an incomplete install cannot enable the mode', () => {
   const f = fixture(); f.setKrea2Uncensored(true);

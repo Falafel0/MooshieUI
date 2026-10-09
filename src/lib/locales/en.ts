@@ -2248,6 +2248,7 @@ const en: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} is a model, not a text encoder. Pick it as the model instead, and choose a text encoder here.",
   "generation.model.install_inventory_failed": "Could not refresh the installed model inventory. Retry before enabling this mode.",
   "generation.model.install_incomplete": "The required Krea 2 files are still missing from the active model inventory.",
+  "generation.model.krea2_standard_required": "Install a standard Krea 2 text encoder to turn this mode off.",
   "generation.model.krea2_uncensored_title": "Uncensored mode",
   "generation.model.krea2_uncensored_tip": "Krea 2 reads prompts through Qwen3-VL-4B, a chat model trained to refuse some requests, and its TextFusion layers learned to tone those concepts down, so things can be weakened or dropped from the image (not only NSFW). Uncensored mode swaps in an abliterated (Heretic) copy of the same encoder and adds Capitan01R's TextFusion refusal-reduction LoRA at strength 1.0. The LoRA is applied automatically to Krea 2 generations only and does not appear in your LoRA list. It cannot add concepts the image model never learned.",
   "generation.model.krea2_uncensored_download": "Download and turn on ({size})",

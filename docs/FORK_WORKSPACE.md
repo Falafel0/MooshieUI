@@ -8,7 +8,7 @@ New releases use `v<upstream version>-mooshie.<number>`, beginning with `v2.3.18
 
 The current upstream base is Mooshieblob1/MooshieUI v2.3.18 through `fd63cfc57afdc10bffefa1a62c5ad1648de3120c`, including component-kind detection after the release tag.
 
-Component warnings belong to the selected file and active model location. Refreshing the inventory invalidates cached inspection; remote server filenames are never inspected as local files. Krea 2 setup shares one installation between the model panel and notifications, waits for all transfers before retrying, and enables the mode only while the original Krea 2 model and encoder remain selected. Turning the mode off without an installed stock encoder leaves the picker empty so a standard encoder can be selected explicitly.
+Component warnings belong to the selected file and active model location. Refreshing the inventory invalidates cached inspection; remote server filenames are never inspected as local files. Krea 2 setup shares one installation between the model panel and notifications, waits for all transfers before retrying, and enables the mode only while the original Krea 2 model and encoder remain selected. Turning the mode off selects an installed stock encoder. When none is available, the action stays disabled with an explanation; the active mode and encoder remain consistent.
 
 ## Inpainting
 

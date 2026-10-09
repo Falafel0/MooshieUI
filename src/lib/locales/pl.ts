@@ -2230,6 +2230,7 @@ const pl: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} to model, a nie enkoder tekstu. Wybierz go jako model, a tutaj wybierz enkoder tekstu.",
   "generation.model.install_inventory_failed": "Nie udało się odświeżyć listy zainstalowanych modeli. Spróbuj ponownie przed włączeniem tego trybu.",
   "generation.model.install_incomplete": "Na aktywnej liście modeli nadal brakuje wymaganych plików Krea 2.",
+  "generation.model.krea2_standard_required": "Zainstaluj standardowy enkoder tekstu Krea 2, aby wyłączyć ten tryb.",
   "generation.model.krea2_uncensored_title": "Tryb bez cenzury",
   "generation.model.krea2_uncensored_tip": "Krea 2 odczytuje prompty przez Qwen3-VL-4B, model czatu wytrenowany do odmawiania niektórych próśb, a jego warstwy TextFusion nauczyły się osłabiać takie pojęcia, więc mogą one być słabsze lub pominięte na obrazie (nie tylko NSFW). Tryb bez cenzury używa abliterowanej (Heretic) kopii tego samego enkodera i dodaje LoRA redukcji odmów TextFusion autorstwa Capitan01R z siłą 1.0. LoRA jest stosowana automatycznie tylko przy generowaniu w Krea 2 i nie pojawia się na Twojej liście LoRA. Nie doda pojęć, których model obrazu nigdy się nie nauczył.",
   "generation.model.krea2_uncensored_download": "Pobierz i włącz ({size})",

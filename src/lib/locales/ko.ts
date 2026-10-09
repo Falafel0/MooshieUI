@@ -2112,6 +2112,7 @@ const ko: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file}은(는) 텍스트 인코더가 아니라 모델입니다. 모델로 선택하고, 여기에서는 텍스트 인코더를 고르세요.",
   "generation.model.install_inventory_failed": "설치된 모델 목록을 새로 고칠 수 없습니다. 이 모드를 켜기 전에 다시 시도하세요.",
   "generation.model.install_incomplete": "현재 모델 목록에 필요한 Krea 2 파일이 아직 없습니다.",
+  "generation.model.krea2_standard_required": "이 모드를 끄려면 표준 Krea 2 텍스트 인코더를 설치하세요.",
   "generation.model.krea2_uncensored_title": "검열 해제 모드",
   "generation.model.krea2_uncensored_tip": "Krea 2는 일부 요청을 거부하도록 학습된 채팅 모델인 Qwen3-VL-4B로 프롬프트를 읽고, TextFusion 레이어도 그런 개념을 약하게 처리하도록 학습되어 이미지에서 요소가 약해지거나 빠질 수 있습니다(NSFW에 국한되지 않음). 검열 해제 모드는 같은 인코더의 abliterated(Heretic) 버전을 사용하고 Capitan01R의 TextFusion 거부 감소 LoRA를 강도 1.0으로 추가합니다. LoRA는 Krea 2 생성에만 자동으로 적용되며 LoRA 목록에는 표시되지 않습니다. 이미지 모델이 학습하지 않은 개념은 추가할 수 없습니다.",
   "generation.model.krea2_uncensored_download": "다운로드 후 켜기 ({size})",

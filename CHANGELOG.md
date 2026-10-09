@@ -1,5 +1,14 @@
 # Changelog
 
+## What's New in v2.3.18-mooshie.2
+
+### Krea 2 mode consistency
+- Fix the remaining interaction between Turn off and automatic encoder selection: require an installed standard encoder before switching off, and keep the active mode and encoder consistent when none exists.
+- Explain the missing standard encoder directly in the model panel. Once it is installed, Turn off selects it and removes the automatic refusal-reduction LoRA.
+- Retain the upstream v2.3.18 merge, model inspection and installation lifecycle fixes from mooshie.1. Cover both missing and available standard encoders in runtime tests and the actual model-panel UI.
+
+---
+
 ## What's New in v2.3.18-mooshie.1
 
 ### Upstream and version numbering

@@ -835,6 +835,7 @@
   // downloaded on request and applied straight away.
   const showKrea2Uncensored = $derived(generation.useSplitModel && generation.modelFamily === "krea2");
   const krea2UncensoredInstalled = $derived(models.textEncoders.find(isKrea2UncensoredEncoder) ?? null);
+  const krea2StandardInstalled = $derived(models.textEncoders.find(f => isKrea2Encoder(f) && !isKrea2UncensoredEncoder(f)) ?? null);
   // Uncensored mode = the uncensored encoder plus the refusal-reduction LoRA,
   // which generation.outgoingLoras() adds to Krea 2 requests while it is on.
   const krea2UncensoredOn = $derived(
@@ -2104,11 +2105,15 @@
           {#if krea2UncensoredOn}
             <button
               type="button"
-              class="w-full rounded-md border border-neutral-600 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100 transition-colors"
+              class="w-full rounded-md border border-neutral-600 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={!krea2StandardInstalled}
               onclick={() => setKrea2Uncensored(false)}
             >
               {locale.t('generation.model.krea2_uncensored_use_standard')}
             </button>
+            {#if !krea2StandardInstalled}
+              <p class="text-[11px] text-amber-300">{locale.t('generation.model.krea2_standard_required')}</p>
+            {/if}
           {/if}
         </div>
       {/if}

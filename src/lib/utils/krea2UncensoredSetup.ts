@@ -31,11 +31,10 @@ export function missingKrea2UncensoredFiles(): Krea2UncensoredFile[] {
 export function setKrea2Uncensored(on: boolean): void {
   if (!generation.useSplitModel || generation.modelFamily !== "krea2") return;
   const encoder = models.textEncoders.find((f) => isKrea2Encoder(f) && isKrea2UncensoredEncoder(f) === on);
-  if (on && (!encoder || !installedKrea2RefusalLora(models.loras))) return;
+  if (!encoder || (on && !installedKrea2RefusalLora(models.loras))) return;
   generation.krea2UncensoredEncoder = on;
-  // Turning off without an installed stock encoder must not leave the
-  // uncensored encoder selected under a "standard" label.
-  generation.clipModel = encoder ?? null;
+  // The mode only changes when its matching encoder can be selected.
+  generation.clipModel = encoder;
   generation.clipType = "krea2";
   generation.saveSettings();
 }

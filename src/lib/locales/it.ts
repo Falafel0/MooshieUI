@@ -2112,6 +2112,7 @@ const it: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} è un modello, non un encoder di testo. Selezionalo invece come modello e scegli qui un encoder di testo.",
   "generation.model.install_inventory_failed": "Impossibile aggiornare l’elenco dei modelli installati. Riprova prima di attivare questa modalità.",
   "generation.model.install_incomplete": "I file Krea 2 necessari mancano ancora nell’elenco dei modelli attivo.",
+  "generation.model.krea2_standard_required": "Installa un encoder di testo standard Krea 2 per disattivare questa modalità.",
   "generation.model.krea2_uncensored_title": "Modalità senza censura",
   "generation.model.krea2_uncensored_tip": "Krea 2 legge i prompt tramite Qwen3-VL-4B, un modello di chat addestrato a rifiutare alcune richieste, e i suoi livelli TextFusion hanno imparato ad attenuare questi concetti, che possono quindi risultare indeboliti o assenti nell'immagine (non solo NSFW). La modalità senza censura usa una copia abliterata (Heretic) dello stesso encoder e aggiunge la LoRA di riduzione dei rifiuti TextFusion di Capitan01R con intensità 1.0. La LoRA viene applicata automaticamente solo alle generazioni Krea 2 e non compare nella tua lista di LoRA. Non può aggiungere concetti che il modello di immagine non ha mai imparato.",
   "generation.model.krea2_uncensored_download": "Scarica e attiva ({size})",

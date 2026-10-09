@@ -2112,6 +2112,7 @@ const zh: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} 是模型，而不是文本编码器。请把它作为模型选择，并在这里选择文本编码器。",
   "generation.model.install_inventory_failed": "无法刷新已安装模型列表。启用此模式前请重试。",
   "generation.model.install_incomplete": "当前模型列表中仍缺少所需的 Krea 2 文件。",
+  "generation.model.krea2_standard_required": "请安装标准 Krea 2 文本编码器以关闭此模式。",
   "generation.model.krea2_uncensored_title": "无审查模式",
   "generation.model.krea2_uncensored_tip": "Krea 2 通过 Qwen3-VL-4B 读取提示词，这是一个经过训练会拒绝部分请求的对话模型，而它的 TextFusion 层也学会了弱化这类概念，因此图像中的内容可能被削弱或遗漏（不仅限于 NSFW）。无审查模式改用同一编码器的 abliterated（Heretic）版本，并以强度 1.0 加入 Capitan01R 的 TextFusion 拒绝削减 LoRA。该 LoRA 仅在 Krea 2 生成时自动应用，不会出现在你的 LoRA 列表中。它无法添加图像模型从未学过的概念。",
   "generation.model.krea2_uncensored_download": "下载并开启（{size}）",

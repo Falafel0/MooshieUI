@@ -2133,6 +2133,7 @@ const de: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} ist ein Modell, kein Text-Encoder. Wähle die Datei stattdessen als Modell aus und hier einen Text-Encoder.",
   "generation.model.install_inventory_failed": "Die Liste installierter Modelle konnte nicht aktualisiert werden. Versuche es erneut, bevor du diesen Modus aktivierst.",
   "generation.model.install_incomplete": "Die erforderlichen Krea-2-Dateien fehlen noch in der aktiven Modellliste.",
+  "generation.model.krea2_standard_required": "Installiere einen Standard-Textencoder für Krea 2, um diesen Modus auszuschalten.",
   "generation.model.krea2_uncensored_title": "Unzensierter Modus",
   "generation.model.krea2_uncensored_tip": "Krea 2 liest Prompts über Qwen3-VL-4B, ein Chat-Modell, das darauf trainiert ist, manche Anfragen abzulehnen, und seine TextFusion-Schichten haben gelernt, solche Konzepte abzuschwächen. Dadurch können Dinge im Bild schwächer ausfallen oder fehlen (nicht nur NSFW). Der unzensierte Modus verwendet eine abliterierte (Heretic) Kopie desselben Encoders und fügt die TextFusion-LoRA zur Ablehnungsreduktion von Capitan01R mit Stärke 1.0 hinzu. Die LoRA wird automatisch nur bei Krea-2-Generierungen angewendet und erscheint nicht in deiner LoRA-Liste. Konzepte, die das Bildmodell nie gelernt hat, kann sie nicht hinzufügen.",
   "generation.model.krea2_uncensored_download": "Herunterladen und einschalten ({size})",

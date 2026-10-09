@@ -2112,6 +2112,7 @@ const ru: Record<string, string> = {
   "generation.model.wrong_kind.clip_is_model": "{file} — это модель, а не текстовый энкодер. Выберите её как модель, а здесь выберите текстовый энкодер.",
   "generation.model.install_inventory_failed": "Не удалось обновить список установленных моделей. Повторите попытку перед включением режима.",
   "generation.model.install_incomplete": "В списке моделей текущего сервера всё ещё отсутствуют необходимые файлы Krea 2.",
+  "generation.model.krea2_standard_required": "Для отключения этого режима установите стандартный текстовый энкодер Krea 2.",
   "generation.model.krea2_uncensored_title": "Режим без цензуры",
   "generation.model.krea2_uncensored_tip": "Krea 2 читает промпты через Qwen3-VL-4B, чат-модель, обученную отказывать в некоторых запросах, а её слои TextFusion научились ослаблять такие понятия, поэтому они могут ослабляться или пропадать на изображении (не только NSFW). Режим без цензуры использует abliterated-копию (Heretic) того же энкодера и добавляет LoRA снижения отказов TextFusion от Capitan01R с силой 1.0. LoRA применяется автоматически только к генерациям Krea 2 и не отображается в вашем списке LoRA. Она не может добавить понятия, которым модель изображений не обучалась.",
   "generation.model.krea2_uncensored_download": "Скачать и включить ({size})",
